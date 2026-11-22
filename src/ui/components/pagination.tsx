@@ -1,0 +1,199 @@
+"use client"
+
+import {
+  CaretDoubleLeftIcon,
+  CaretDoubleRightIcon,
+  CaretLeftIcon,
+  CaretRightIcon,
+  DotsThreeIcon,
+} from "@phosphor-icons/react"
+import type { VariantProps } from "class-variance-authority"
+import type * as React from "react"
+import { buttonVariants } from "@ui/components/button"
+import { cn } from "@ui/lib/utils"
+
+function Pagination({ className, ...props }: React.ComponentProps<"nav">) {
+  return (
+    <nav
+      aria-label="pagination"
+      data-slot="pagination"
+      className={cn(
+        "items-center gap-3 mx-auto flex w-full justify-center",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+function PaginationContent({
+  className,
+  ...props
+}: React.ComponentProps<"ul">) {
+  return (
+    <ul
+      data-slot="pagination-content"
+      className={cn("gap-1 flex items-center", className)}
+      {...props}
+    />
+  )
+}
+
+function PaginationItem({ ...props }: React.ComponentProps<"li">) {
+  return <li data-slot="pagination-item" {...props} />
+}
+
+type PaginationLinkProps = {
+  isActive?: boolean
+} & Pick<VariantProps<typeof buttonVariants>, "size"> &
+  React.ComponentProps<"a">
+
+function PaginationLink({
+  className,
+  isActive,
+  size = "icon-sm",
+  ...props
+}: PaginationLinkProps) {
+  return (
+    <a
+      aria-current={isActive ? "page" : undefined}
+      data-slot="pagination-link"
+      data-active={isActive ? "" : undefined}
+      className={cn(
+        buttonVariants({ variant: isActive ? "secondary" : "ghost", size }),
+        "text-sm tabular-nums aria-disabled:pointer-events-none data-active:font-semibold aria-disabled:opacity-50",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+function PaginationPrevious({
+  className,
+  text = "Previous",
+  ...props
+}: React.ComponentProps<typeof PaginationLink> & { text?: string }) {
+  return (
+    <PaginationLink
+      aria-label={text && text !== "Previous" ? text : "Go to previous page"}
+      size={text ? "sm" : "icon-sm"}
+      className={cn(text && "ps-2!", className)}
+      {...props}
+    >
+      <CaretLeftIcon data-icon="inline-start" className="rtl:rotate-180" />
+      {text && <span className="hidden sm:block">{text}</span>}
+    </PaginationLink>
+  )
+}
+
+function PaginationNext({
+  className,
+  text = "Next",
+  ...props
+}: React.ComponentProps<typeof PaginationLink> & { text?: string }) {
+  return (
+    <PaginationLink
+      aria-label={text && text !== "Next" ? text : "Go to next page"}
+      size={text ? "sm" : "icon-sm"}
+      className={cn(text && "pe-2!", className)}
+      {...props}
+    >
+      {text && <span className="hidden sm:block">{text}</span>}
+      <CaretRightIcon data-icon="inline-end" className="rtl:rotate-180" />
+    </PaginationLink>
+  )
+}
+
+function PaginationFirst({
+  ...props
+}: React.ComponentProps<typeof PaginationLink>) {
+  return (
+    <PaginationLink aria-label="Go to first page" {...props}>
+      <CaretDoubleLeftIcon className="rtl:rotate-180" />
+    </PaginationLink>
+  )
+}
+
+function PaginationLast({
+  ...props
+}: React.ComponentProps<typeof PaginationLink>) {
+  return (
+    <PaginationLink aria-label="Go to last page" {...props}>
+      <CaretDoubleRightIcon className="rtl:rotate-180" />
+    </PaginationLink>
+  )
+}
+
+function PaginationEllipsis({
+  className,
+  ...props
+}: React.ComponentProps<"span">) {
+  return (
+    <span
+      data-slot="pagination-ellipsis"
+      className={cn(
+        "size-8 text-muted-foreground flex items-center justify-center [&_svg:not([class*='size-'])]:size-4",
+        className
+      )}
+      {...props}
+    >
+      <DotsThreeIcon aria-hidden />
+      <span className="sr-only">More pages</span>
+    </span>
+  )
+}
+
+function PaginationSummary({ className, ...props }: React.ComponentProps<"p">) {
+  return (
+    <p
+      data-slot="pagination-summary"
+      className={cn("text-sm whitespace-nowrap text-muted-foreground tabular-nums", className)}
+      {...props}
+    />
+  )
+}
+
+function PaginationGroup({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      role="group"
+      data-slot="pagination-group"
+      className={cn(
+        "flex items-center gap-px overflow-hidden rounded-lg *:w-10 *:rounded-none *:border-0 *:bg-secondary *:hover:bg-secondary/80 *:focus-visible:ring-inset *:focus-visible:relative *:focus-visible:z-10",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+function PaginationInput({
+  className,
+  ...props
+}: React.ComponentProps<"input">) {
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      data-slot="pagination-input"
+      className={cn("h-8 w-12 rounded-md bg-secondary text-center text-sm font-semibold text-secondary-foreground tabular-nums caret-primary outline-none focus-visible:ring-3 focus-visible:ring-ring/50", className)}
+      {...props}
+    />
+  )
+}
+
+export {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationFirst,
+  PaginationGroup,
+  PaginationInput,
+  PaginationItem,
+  PaginationLast,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+  PaginationSummary,
+}

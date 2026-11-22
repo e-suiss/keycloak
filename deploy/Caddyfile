@@ -1,0 +1,45 @@
+# https://www.keycloak.org/server/reverseproxy, "Exposed path recommendations".
+# Public: /realms/ (not /realms/master/), /resources/, /.well-known/. Nothing else.
+# Admin hostname: /admin/, /realms/master/ and /resources/; in production reachable only from
+# the internal network or a VPN, never the internet.
+
+{
+	auto_https off
+}
+
+(to_keycloak) {
+	reverse_proxy https://keycloak:8443 {
+		header_up X-Forwarded-Proto https
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-Port 443
+		transport http {
+			tls_trusted_ca_certs /etc/caddy/tls/ca.crt
+			tls_server_name keycloak
+		}
+	}
+}
+
+{$KC_PUBLIC_HOST}:443 {
+	tls /etc/caddy/tls/proxy.crt /etc/caddy/tls/proxy.key
+	route {
+		@master path /realms/master /realms/master/*
+		respond @master 404
+		@public path /realms/* /resources/* /.well-known/*
+		handle @public {
+			import to_keycloak
+		}
+		respond 404
+	}
+}
+
+{$KC_ADMIN_HOST}:443 {
+	tls /etc/caddy/tls/proxy.crt /etc/caddy/tls/proxy.key
+	route {
+		@admin path /admin /admin/* /realms/master/* /resources/*
+		handle @admin {
+			import to_keycloak
+		}
+		redir / /admin/ 302
+		respond 404
+	}
+}

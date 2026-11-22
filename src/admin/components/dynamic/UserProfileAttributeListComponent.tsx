@@ -1,0 +1,79 @@
+/**
+ * WARNING: Before modifying this file, run the following command:
+ *
+ * $ npx keycloakify own --path "admin/components/dynamic/UserProfileAttributeListComponent.tsx"
+ *
+ * This file is provided by @keycloakify/keycloak-admin-ui version 260601.0.1.
+ * It was copied into your repository by the postinstall script: `keycloakify sync-extensions`.
+ */
+
+/* eslint-disable */
+
+// @ts-nocheck
+
+import type { UserProfileConfig } from "@keycloak/keycloak-admin-client/lib/defs/userProfileMetadata";
+import { Label } from "@ui/components/label";
+import { useState } from "react";
+import { useFormContext } from "react-hook-form";
+import { useTranslation } from "react-i18next";
+import { FormErrorText, HelpItem, useFetch } from "../../../shared/keycloak-ui-shared";
+import { useAdminClient } from "../../admin-client";
+import { KeySelect } from "../../realm-settings/user-profile/attribute/KeySelect";
+import type { ComponentProps } from "./components";
+
+export const UserProfileAttributeListComponent = ({
+    name,
+    label,
+    helpText,
+    required = false,
+    convertToName
+}: ComponentProps) => {
+    const { adminClient } = useAdminClient();
+
+    const { t } = useTranslation();
+    const {
+        formState: { errors }
+    } = useFormContext();
+
+    const [config, setConfig] = useState<UserProfileConfig>();
+    const convertedName = convertToName(name!);
+
+    useFetch(
+        () => adminClient.users.getProfile(),
+        cfg => setConfig(cfg),
+        []
+    );
+
+    const convert = (config?: UserProfileConfig) => {
+        if (!config?.attributes) return [];
+
+        return config.attributes.map(option => ({
+            key: option.name!,
+            value: option.name!
+        }));
+    };
+
+    if (!config) return null;
+
+    const getError = () => {
+        return convertedName
+            .split(".")
+            .reduce((record: any, key) => record?.[key], errors);
+    };
+
+    return (
+        <div className="space-y-1.5">
+            <Label htmlFor={convertedName!}>
+                {t(label!)}
+                {required && <span className="text-destructive">*</span>}
+                <HelpItem helpText={t(helpText!)} fieldLabelId={label!} />
+            </Label>
+            <KeySelect
+                name={convertedName}
+                rules={required ? { required: true } : {}}
+                selectItems={convert(config)}
+            />
+            {getError() && <FormErrorText message={t("required")} />}
+        </div>
+    );
+};

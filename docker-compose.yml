@@ -1,0 +1,124 @@
+name: esuiss
+
+# https://www.keycloak.org/server/configuration-production, reverseproxy, hostname,
+# management-interface, containers. Only the proxy is published; Keycloak, its management
+# port (9000) and PostgreSQL stay on the internal network.
+
+networks:
+  edge:
+  internal:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.10.0/24
+
+services:
+  postgres-keycloak:
+    image: postgres:18.6-alpine
+    environment:
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KC_DB_PASSWORD:?set KC_DB_PASSWORD in .env}
+      POSTGRES_DB: keycloak
+    volumes:
+      - pgdata:/var/lib/postgresql
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  keycloak:
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: esuiss-keycloak:local
+    command: ["start", "--optimized"]
+    depends_on:
+      postgres-keycloak:
+        condition: service_healthy
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:?set in .env}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?set in .env}
+
+      KC_DB_URL: jdbc:postgresql://postgres-keycloak:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD}
+
+      # hostname guide: public frontend and, as a best practice, the admin console on its own hostname
+      KC_HOSTNAME: https://${KC_PUBLIC_HOST:-auth.localhost}
+      KC_HOSTNAME_ADMIN: https://${KC_ADMIN_HOST:-admin.auth.localhost}
+
+      # reverseproxy guide: re-encrypt TLS, forwarded headers only from the proxy's network
+      KC_HTTPS_CERTIFICATE_FILE: /opt/keycloak/conf/tls/keycloak.crt
+      KC_HTTPS_CERTIFICATE_KEY_FILE: /opt/keycloak/conf/tls/keycloak.key
+      KC_PROXY_HEADERS: xforwarded
+      KC_PROXY_TRUSTED_ADDRESSES: 172.30.10.0/24
+
+      # management interface stays on 9000, unproxied and unpublished; plain HTTP so the
+      # container health check (no curl in the image) can reach it
+      KC_HTTP_MANAGEMENT_SCHEME: http
+
+      # configuration-production: bound the request queue
+      KC_HTTP_MAX_QUEUED_REQUESTS: "1000"
+      KC_LOG: console
+      KC_LOG_CONSOLE_OUTPUT: json
+    volumes:
+      - ./deploy/tls:/opt/keycloak/conf/tls:ro
+    networks: [internal]
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          grep -q '"status": "UP"' <&3
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  proxy:
+    image: caddy:2.10.2-alpine
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    environment:
+      KC_PUBLIC_HOST: ${KC_PUBLIC_HOST:-auth.localhost}
+      KC_ADMIN_HOST: ${KC_ADMIN_HOST:-admin.auth.localhost}
+    ports:
+      - "${KC_PROXY_PORT:-443}:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/tls:/etc/caddy/tls:ro
+    networks:
+      edge:
+      internal:
+        ipv4_address: 172.30.10.10
+
+  # One-time realm import (containers guide: importing at every start is for dev only).
+  # Run with `make import` before the first start; an existing realm is left as it is.
+  realm-import:
+    image: esuiss-keycloak:local
+    profiles: [import]
+    command: ["import", "--optimized", "--dir", "/opt/keycloak/data/import", "--override", "false"]
+    depends_on:
+      postgres-keycloak:
+        condition: service_healthy
+    environment:
+      # the import initialises the master realm, so the first admin is made here
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:?set in .env}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?set in .env}
+      KC_DB_URL: jdbc:postgresql://postgres-keycloak:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD}
+    volumes:
+      - ./realms:/opt/keycloak/data/import:ro
+    networks: [internal]
+
+volumes:
+  pgdata:

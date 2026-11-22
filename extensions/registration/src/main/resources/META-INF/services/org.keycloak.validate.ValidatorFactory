@@ -1,0 +1,2 @@
+com.esuiss.keycloak.registration.validation.TcKimlikValidator
+com.esuiss.keycloak.registration.validation.MinAgeValidator

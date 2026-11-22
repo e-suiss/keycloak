@@ -1,0 +1,6 @@
+com.esuiss.keycloak.login.image.SecurityImageAuthenticatorFactory
+com.esuiss.keycloak.login.otp.PhoneOtpAuthenticatorFactory
+com.esuiss.keycloak.login.form.PhoneUsernameFormFactory
+com.esuiss.keycloak.login.form.PhonePasswordFormFactory
+com.esuiss.keycloak.login.reset.ResetPhoneChooseUserAuthenticatorFactory
+com.esuiss.keycloak.login.reset.ResetPhoneOtpAuthenticatorFactory
