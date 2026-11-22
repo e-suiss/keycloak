@@ -7,7 +7,6 @@ Login akışının kuralları Java SPI olarak burada yaşar; tema yalnızca rend
 ```
 extensions/
 ├─ pom.xml                    com.esuiss.keycloak — Keycloak sürümünün tek kaynağı
-├─ common/                    paylaşılan yardımcılar, her modül buna bağlı
 ├─ login/                     giriş akışı authenticator'ları
 ├─ registration/              kademeli kayıt, doğrulayıcılar, şifre politikası
 ├─ multi-terms/               sürümlü sözleşme onayı
@@ -22,7 +21,6 @@ Kurallar:
 | Keycloak sürümü | Yalnız üst POM'daki `<keycloak.version>`. Çocuk POM'lar sürüm yazmaz — `keycloak-server-spi-private` minor sürümler arası kararsızdır ve sapma çalışma anında `NoSuchMethodError` olarak patlar |
 | SPI kaydı | `src/main/resources/META-INF/services/<SPI arayüzü>` |
 | Jar adı | Sürümlü (`keycloak-login-1.0.0.jar`). `<finalName>` ile sürüm silinmez — backend.md Böl. 19 jar'ların versiyonlu olmasını şart koşar |
-| `common` bağımlılığı | `provided` kapsamda; ayrı jar olarak `providers/` altına kopyalanır, Keycloak hepsini tek classloader'a alır |
 | Yorum | Kod içinde yorum satırı yok; gerekçe `backend.md`'de yaşar |
 | Test | Saf mantık (`Phone`, `PinRules`, `TcKimlikValidator`, `MinAgeValidator`, `OtpCodes`) birim testli. Keycloak bağımlılığı olan sınıflar Mockito ile izole edilir |
 | Yapı ortamı | Enforcer JDK'yı `[21,22)` aralığına kilitler ve bağımlılık yakınsamasını zorunlu kılar; yanlış JDK'da derleme sessizce geçmez |

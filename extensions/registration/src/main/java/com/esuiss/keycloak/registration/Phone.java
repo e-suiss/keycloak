@@ -1,4 +1,4 @@
-package com.esuiss.keycloak.common;
+package com.esuiss.keycloak.registration;
 
 import java.util.regex.Pattern;
 

@@ -20,7 +20,7 @@ import org.keycloak.userprofile.UserProfileContext;
 import org.keycloak.userprofile.UserProfileProvider;
 import org.keycloak.userprofile.ValidationException;
 
-import com.esuiss.keycloak.common.Phone;
+import com.esuiss.keycloak.registration.Phone;
 import com.esuiss.keycloak.registration.action.CompleteRegistrationAction;
 
 import java.util.ArrayList;

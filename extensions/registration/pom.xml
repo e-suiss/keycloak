@@ -19,10 +19,6 @@
     <dependencies>
         <dependency>
             <groupId>com.esuiss.keycloak</groupId>
-            <artifactId>keycloak-common</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.esuiss.keycloak</groupId>
             <artifactId>keycloak-multi-terms</artifactId>
         </dependency>
         <dependency>

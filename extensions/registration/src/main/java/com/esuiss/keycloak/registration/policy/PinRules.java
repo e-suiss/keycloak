@@ -2,12 +2,11 @@ package com.esuiss.keycloak.registration.policy;
 
 import org.keycloak.models.UserModel;
 
-import com.esuiss.keycloak.common.UserAttributes;
-
 public final class PinRules {
 
     public static final String ERROR = "crPinWeak";
 
+    private static final String ATTR_PHONE = "phoneNumber";
     private static final String ATTR_TC = "tc";
     private static final String ATTR_BIRTHDATE = "birthDate";
 
@@ -48,7 +47,7 @@ public final class PinRules {
         if (tc != null && tc.contains(pin)) {
             return true;
         }
-        String phone = user.getFirstAttribute(UserAttributes.PHONE);
+        String phone = user.getFirstAttribute(ATTR_PHONE);
         return phone != null && phone.contains(pin);
     }
 }

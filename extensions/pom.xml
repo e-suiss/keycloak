@@ -21,7 +21,6 @@
     </properties>
 
     <modules>
-        <module>common</module>
         <module>login</module>
         <module>registration</module>
         <module>multi-terms</module>
@@ -42,12 +41,6 @@
                 <artifactId>mockito-core</artifactId>
                 <version>${mockito.version}</version>
                 <scope>test</scope>
-            </dependency>
-            <dependency>
-                <groupId>com.esuiss.keycloak</groupId>
-                <artifactId>keycloak-common</artifactId>
-                <version>${project.version}</version>
-                <scope>provided</scope>
             </dependency>
             <dependency>
                 <groupId>com.esuiss.keycloak</groupId>

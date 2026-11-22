@@ -1,6 +1,6 @@
 package com.esuiss.keycloak.login.reset;
 
-import com.esuiss.keycloak.common.Phone;
+import com.esuiss.keycloak.login.Phone;
 
 import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
