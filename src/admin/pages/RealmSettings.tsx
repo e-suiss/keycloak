@@ -1,30 +1,43 @@
 // @ts-nocheck
 
-import { XIcon } from "@phosphor-icons/react";
+import { DotsThreeIcon, DownloadSimpleIcon, UploadSimpleIcon } from "@phosphor-icons/react";
 import { Button } from "@ui/components/button";
-import { Field, FieldDescription, FieldLabel } from "@ui/components/field";
-import { Input } from "@ui/components/input";
-import { NativeSelect, NativeSelectOption } from "@ui/components/native-select";
-import { Switch } from "@ui/components/switch";
-import { Textarea } from "@ui/components/textarea";
-import { Children, Fragment, isValidElement, useEffect, useId, useRef, useState } from "react";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger
+} from "@ui/components/dropdown-menu";
+import { useEffect, useRef, useState } from "react";
 import { AlertVariant, useAlerts } from "../../shared/keycloak-ui-shared";
 import { useAdminClient } from "../admin-client";
 import { useT } from "../ui/i18n";
-import {
-    AdminPage,
-    Chip,
-    GROUP,
-    Group,
-    ListSkeleton,
-    Notice,
-    Row,
-    SEPARATOR,
-    Section,
-    SegmentTabs
-} from "../ui/kit";
+import { AdminPage, Chip, Group, ListSkeleton, Notice, Section, SegmentTabs } from "../ui/kit";
 import { useRealm } from "../ui/realm";
 import { adminFetch } from "../ui/util";
+import ClientPoliciesEditor from "./realm-settings/ClientPoliciesEditor";
+import { SmtpTestConnection } from "./realm-settings/EmailTest";
+import {
+    ActionRow,
+    Card,
+    ChipMulti,
+    ChoiceField,
+    ConfirmDialog,
+    FieldItem,
+    Footnote,
+    InfoRow,
+    NumField,
+    SaveBar,
+    TextField,
+    ThemeField,
+    ToggleRow
+} from "./realm-settings/fields";
+import { AcrLoaMapping, DeleteRealmSection } from "./realm-settings/GeneralExtras";
+import { PartialExportModal, PartialImportModal } from "./realm-settings/ImportExport";
+import { KeyProviders } from "./realm-settings/KeyProviders";
+import { EffectiveMessageBundles, RealmOverrides } from "./realm-settings/Localization";
+import UserProfileEditor from "./realm-settings/UserProfileEditor";
+import { UserRegistration } from "./realm-settings/UserRegistration";
 
 const TABS = [
     { key: "general", label: "sxRealmSettingsTabGeneral" },
@@ -38,10 +51,17 @@ const TABS = [
     { key: "keys", label: "sxRealmSettingsTabKeys" },
     { key: "events-config", label: "sxRealmSettingsTabEventsConfig" },
     { key: "user-profile", label: "sxRealmSettingsTabUserProfile" },
+    { key: "user-registration", label: "sxRealmSettingsUserRegistration" },
     { key: "client-policies", label: "sxRealmSettingsTabClientPolicies" }
 ];
 
-const PER_TAB_SAVE = ["keys", "events-config", "user-profile", "client-policies"];
+const PER_TAB_SAVE = ["keys", "events-config", "user-profile", "user-registration", "client-policies"];
+
+const LOCALIZATION_TABS = [
+    { key: "locales", label: "sxRealmSettingsLocales" },
+    { key: "overrides", label: "sxRealmSettingsRealmOverrides" },
+    { key: "bundles", label: "sxRealmSettingsEffectiveBundles" }
+];
 
 const SSL_OPTIONS = [
     { value: "none", label: "sxRealmSettingsSslNone" },
@@ -64,6 +84,9 @@ const SIG_ALGS = [
     "HS512"
 ];
 
+const DANGER_OUTLINE =
+    "border-[#d70015]/40 text-[#d70015] hover:bg-[#d70015]/5 dark:border-[#ff453a]/40 dark:text-[#ff453a] dark:hover:bg-[#ff453a]/10";
+
 export default function RealmSettings() {
     const t = useT();
     const { adminClient } = useAdminClient();
@@ -73,43 +96,36 @@ export default function RealmSettings() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [e, setE] = useState<any>(null);
+    const [loadCount, setLoadCount] = useState(0);
     const [tab, setTab] = useState("general");
+    const [locTab, setLocTab] = useState("locales");
     const [themes, setThemes] = useState<any>({
         login: [],
         account: [],
         admin: [],
         email: []
     });
+    const [themeInfo, setThemeInfo] = useState<any>({});
+    const [keyTypes, setKeyTypes] = useState<any[]>([]);
+    const [importOpen, setImportOpen] = useState(false);
+    const [exportOpen, setExportOpen] = useState(false);
+    const [confirmOpts, setConfirmOpts] = useState<any>(null);
 
     const realmRef = useRef(realm);
     realmRef.current = realm;
+    const loadedRef = useRef<any>(null);
     const inFlight = useRef(new Set<string>());
 
     const [keys, setKeys] = useState<any>(null);
     const [keysFailed, setKeysFailed] = useState(false);
-    const [keyProviders, setKeyProviders] = useState<any[] | null>(null);
-    const [keyProvidersFailed, setKeyProvidersFailed] = useState(false);
 
     const [eventsCfg, setEventsCfg] = useState<any>(null);
     const [eventsFailed, setEventsFailed] = useState(false);
     const [eventTypes, setEventTypes] = useState<string[]>([]);
     const [eventListeners, setEventListeners] = useState<string[]>([]);
     const [savingEvents, setSavingEvents] = useState(false);
-
-    const [profile, setProfile] = useState<any>(null);
-    const [profileJson, setProfileJson] = useState("");
-    const [profileErr, setProfileErr] = useState("");
-    const [profileFailed, setProfileFailed] = useState(false);
-    const [savingProfile, setSavingProfile] = useState(false);
-
-    const [profilesDoc, setProfilesDoc] = useState<any>(null);
-    const [policiesDoc, setPoliciesDoc] = useState<any>(null);
-    const [cpFailed, setCpFailed] = useState(false);
-    const [profilesJson, setProfilesJson] = useState("");
-    const [policiesJson, setPoliciesJson] = useState("");
-    const [cpErr, setCpErr] = useState("");
-    const [savingProfiles, setSavingProfiles] = useState(false);
-    const [savingPolicies, setSavingPolicies] = useState(false);
+    const [adminExp, setAdminExp] = useState<any>(undefined);
+    const [clearing, setClearing] = useState<string | null>(null);
 
     const load = async (initial = false) => {
         const target = realm;
@@ -120,7 +136,9 @@ export default function RealmSettings() {
                 adminClient.serverInfo.find().catch(() => null)
             ]);
             if (realmRef.current !== target) return;
+            loadedRef.current = rep || null;
             setE(rep || null);
+            setLoadCount(n => n + 1);
             if (info?.themes) {
                 const pick = (k: string) =>
                     (info.themes[k] || []).map((x: any) => x.name).filter(Boolean);
@@ -130,7 +148,9 @@ export default function RealmSettings() {
                     admin: pick("admin"),
                     email: pick("email")
                 });
+                setThemeInfo(info.themes);
             }
+            setKeyTypes(info?.componentTypes?.["org.keycloak.keys.KeyProvider"] || []);
         } catch (err) {
             if (realmRef.current !== target) return;
             if (!initial) addError(t("sxRealmSettingsLoadError"), err);
@@ -167,22 +187,13 @@ export default function RealmSettings() {
     useEffect(() => {
         setKeys(null);
         setKeysFailed(false);
-        setKeyProviders(null);
-        setKeyProvidersFailed(false);
         setEventsCfg(null);
         setEventsFailed(false);
-        setProfile(null);
-        setProfileFailed(false);
-        setProfilesDoc(null);
-        setPoliciesDoc(null);
-        setCpFailed(false);
+        setLocTab("locales");
     }, [realm]);
 
     const needKeys = keys === null && !keysFailed;
-    const needKeyProviders = keyProviders === null && !keyProvidersFailed;
     const needEvents = eventsCfg === null && !eventsFailed;
-    const needProfile = profile === null && !profileFailed;
-    const needPolicies = profilesDoc === null && !cpFailed;
 
     useEffect(() => {
         if (loading) return;
@@ -202,14 +213,6 @@ export default function RealmSettings() {
                     .catch(() => current() && setKeysFailed(true))
             );
         }
-        if (tab === "keys" && needKeyProviders) {
-            run("key-providers", () =>
-                adminClient.components
-                    .find({ realm: target, type: "org.keycloak.keys.KeyProvider" })
-                    .then((comps: any) => current() && setKeyProviders(comps || []))
-                    .catch(() => current() && setKeyProvidersFailed(true))
-            );
-        }
         if (tab === "events-config" && needEvents) {
             run("events", () =>
                 Promise.all([
@@ -222,6 +225,7 @@ export default function RealmSettings() {
                     .then(([cfg, info, listeners]) => {
                         if (!current()) return;
                         setEventsCfg(cfg || {});
+                        setAdminExp(loadedRef.current?.attributes?.adminEventsExpiration);
                         setEventTypes((info?.enums?.eventType as string[]) || []);
                         const ids = Array.isArray(listeners)
                             ? listeners.map((x: any) => x.id || x).filter(Boolean)
@@ -231,59 +235,15 @@ export default function RealmSettings() {
                     .catch(() => current() && setEventsFailed(true))
             );
         }
-        if (tab === "user-profile" && needProfile) {
-            run("profile", () =>
-                adminClient.users
-                    .getProfile({ realm: target })
-                    .then((p: any) => {
-                        if (!current()) return;
-                        setProfile(p || {});
-                        setProfileJson(JSON.stringify(p || {}, null, 2));
-                    })
-                    .catch(() => current() && setProfileFailed(true))
-            );
-        }
-        if (tab === "client-policies" && needPolicies) {
-            run("client-policies", () =>
-                Promise.all([
-                    adminClient.clientPolicies.listProfiles({
-                        realm: target,
-                        includeGlobalProfiles: true
-                    }),
-                    adminClient.clientPolicies.listPolicies({ realm: target })
-                ])
-                    .then(([prof, pol]) => {
-                        if (!current()) return;
-                        setProfilesDoc(prof || {});
-                        setPoliciesDoc(pol || {});
-                        setProfilesJson(JSON.stringify(prof || {}, null, 2));
-                        setPoliciesJson(JSON.stringify(pol || {}, null, 2));
-                    })
-                    .catch(() => current() && setCpFailed(true))
-            );
-        }
-    }, [tab, loading, realm, needKeys, needKeyProviders, needEvents, needProfile, needPolicies]);
+    }, [tab, loading, realm, needKeys, needEvents]);
 
     const retryKeys = () => {
         setKeys(null);
         setKeysFailed(false);
     };
-    const retryKeyProviders = () => {
-        setKeyProviders(null);
-        setKeyProvidersFailed(false);
-    };
     const retryEvents = () => {
         setEventsCfg(null);
         setEventsFailed(false);
-    };
-    const retryProfile = () => {
-        setProfile(null);
-        setProfileFailed(false);
-    };
-    const retryPolicies = () => {
-        setProfilesDoc(null);
-        setPoliciesDoc(null);
-        setCpFailed(false);
     };
 
     const setEvt = (k: string, v: any) =>
@@ -292,6 +252,20 @@ export default function RealmSettings() {
     const saveEvents = async () => {
         setSavingEvents(true);
         try {
+            const base = loadedRef.current;
+            const prevExp = base?.attributes?.adminEventsExpiration;
+            const nextExp = adminExp === "" || adminExp == null ? undefined : String(adminExp);
+            if (base && (prevExp ?? undefined) !== nextExp) {
+                const attributes = { ...(base.attributes || {}) };
+                if (nextExp === undefined) attributes.adminEventsExpiration = "";
+                else attributes.adminEventsExpiration = nextExp;
+                await adminClient.realms.update({ realm }, { ...base, attributes });
+                loadedRef.current = { ...base, attributes };
+                setE((p: any) => ({
+                    ...p,
+                    attributes: { ...(p?.attributes || {}), adminEventsExpiration: attributes.adminEventsExpiration }
+                }));
+            }
             await adminClient.realms.updateConfigEvents({ realm }, eventsCfg);
             addAlert(t("sxRealmSettingsEventsSaved"), AlertVariant.success);
         } catch (err) {
@@ -301,69 +275,32 @@ export default function RealmSettings() {
         }
     };
 
-    const saveProfile = async () => {
-        let parsed: any;
-        try {
-            parsed = JSON.parse(profileJson);
-            setProfileErr("");
-        } catch (err: any) {
-            setProfileErr(t("sxRealmSettingsInvalidJson", { message: err.message }));
-            return;
-        }
-        setSavingProfile(true);
-        try {
-            const updated = await adminClient.users.updateProfile({ ...parsed, realm });
-            setProfile(updated || parsed);
-            setProfileJson(JSON.stringify(updated || parsed, null, 2));
-            addAlert(t("sxRealmSettingsUserProfileSaved"), AlertVariant.success);
-        } catch (err) {
-            addError(t("sxRealmSettingsSaveError"), err);
-        } finally {
-            setSavingProfile(false);
-        }
-    };
+    const clearEvents = (kind: "user" | "admin") =>
+        setConfirmOpts({
+            title: kind === "user" ? t("sxRealmSettingsClearUserEventsTitle") : t("sxRealmSettingsClearAdminEventsTitle"),
+            message:
+                kind === "user" ? t("sxRealmSettingsClearUserEventsMessage") : t("sxRealmSettingsClearAdminEventsMessage"),
+            confirmLabel: t("sxRealmSettingsClear"),
+            danger: true,
+            onConfirm: async () => {
+                setClearing(kind);
+                try {
+                    if (kind === "user") await adminClient.realms.clearEvents({ realm });
+                    else await adminClient.realms.clearAdminEvents({ realm });
+                    addAlert(
+                        kind === "user" ? t("sxRealmSettingsUserEventsCleared") : t("sxRealmSettingsAdminEventsCleared"),
+                        AlertVariant.success
+                    );
+                } catch (err) {
+                    addError(t("sxRealmSettingsClearEventsError"), err);
+                } finally {
+                    setClearing(null);
+                }
+            }
+        });
 
-    const saveProfiles = async () => {
-        let parsed: any;
-        try {
-            parsed = JSON.parse(profilesJson);
-            setCpErr("");
-        } catch (err: any) {
-            setCpErr(t("sxRealmSettingsProfilesInvalidJson", { message: err.message }));
-            return;
-        }
-        setSavingProfiles(true);
-        try {
-            await adminClient.clientPolicies.createProfiles({ ...parsed, realm });
-            addAlert(t("sxRealmSettingsClientProfilesSaved"), AlertVariant.success);
-        } catch (err) {
-            addError(t("sxRealmSettingsSaveError"), err);
-        } finally {
-            setSavingProfiles(false);
-        }
-    };
-
-    const savePolicies = async () => {
-        let parsed: any;
-        try {
-            parsed = JSON.parse(policiesJson);
-            setCpErr("");
-        } catch (err: any) {
-            setCpErr(t("sxRealmSettingsPoliciesInvalidJson", { message: err.message }));
-            return;
-        }
-        setSavingPolicies(true);
-        try {
-            await adminClient.clientPolicies.updatePolicy({ ...parsed, realm });
-            addAlert(t("sxRealmSettingsClientPoliciesSaved"), AlertVariant.success);
-        } catch (err) {
-            addError(t("sxRealmSettingsSaveError"), err);
-        } finally {
-            setSavingPolicies(false);
-        }
-    };
-
-    const isGlobalTab = !PER_TAB_SAVE.includes(tab);
+    const isGlobalTab =
+        !PER_TAB_SAVE.includes(tab) && !(tab === "localization" && locTab !== "locales");
 
     const page = (actions: any, children: any) => (
         <AdminPage
@@ -394,17 +331,47 @@ export default function RealmSettings() {
     const smtp = e.smtpServer || {};
     const hdr = e.browserSecurityHeaders || {};
     const locales = e.supportedLocales || [];
+    const smtpAuth = smtp.auth === "true" || smtp.auth === true;
+    const authType = smtp.authType || "basic";
 
     const loadError = (title: string, onRetry: () => void) => (
         <Notice title={title} description={t("sxLoadErrorDescription")} onRetry={onRetry} />
     );
 
+    const headerActions = (
+        <>
+            {isGlobalTab && (
+                <Button type="button" onClick={save} disabled={saving || loading}>
+                    {saving ? t("sxRealmSettingsSaving") : t("sxRealmSettingsSave")}
+                </Button>
+            )}
+            <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                    <Button
+                        variant="secondary"
+                        size="icon"
+                        aria-label={t("sxCommonActions")}
+                        title={t("sxCommonActions")}
+                    >
+                        <DotsThreeIcon weight="bold" />
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-60">
+                    <DropdownMenuItem onClick={() => setImportOpen(true)}>
+                        <UploadSimpleIcon />
+                        {t("sxRealmSettingsPartialImport")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setExportOpen(true)}>
+                        <DownloadSimpleIcon />
+                        {t("sxRealmSettingsPartialExport")}
+                    </DropdownMenuItem>
+                </DropdownMenuContent>
+            </DropdownMenu>
+        </>
+    );
+
     return page(
-        isGlobalTab ? (
-            <Button type="button" onClick={save} disabled={saving || loading}>
-                {saving ? t("sxRealmSettingsSaving") : t("sxRealmSettingsSave")}
-            </Button>
-        ) : undefined,
+        headerActions,
         <>
             <SegmentTabs
                 value={tab}
@@ -448,6 +415,11 @@ export default function RealmSettings() {
                             />
                         </Card>
                     </Section>
+                    <AcrLoaMapping
+                        key={`${realm}:${loadCount}`}
+                        value={e.attributes?.["acr.loa.map"]}
+                        onChange={(v: string) => setAttr("acr.loa.map", v)}
+                    />
                     <Section label={t("sxRealmSettingsFeatures")}>
                         <Card>
                             <ToggleRow
@@ -527,6 +499,45 @@ export default function RealmSettings() {
 
             {tab === "email" && (
                 <>
+                    <Section label={t("sxRealmSettingsSender")}>
+                        <Card>
+                            <TextField
+                                label={t("sxRealmSettingsFrom")}
+                                type="email"
+                                value={smtp.from}
+                                onChange={(v: string) => setNested("smtpServer", "from", v)}
+                                placeholder="noreply@example.com"
+                            />
+                            <TextField
+                                label={t("sxRealmSettingsFromDisplayName")}
+                                value={smtp.fromDisplayName}
+                                onChange={(v: string) =>
+                                    setNested("smtpServer", "fromDisplayName", v)
+                                }
+                            />
+                            <TextField
+                                label={t("sxRealmSettingsReplyTo")}
+                                type="email"
+                                value={smtp.replyTo}
+                                onChange={(v: string) => setNested("smtpServer", "replyTo", v)}
+                            />
+                            <TextField
+                                label={t("sxRealmSettingsReplyToDisplayName")}
+                                value={smtp.replyToDisplayName}
+                                onChange={(v: string) =>
+                                    setNested("smtpServer", "replyToDisplayName", v)
+                                }
+                            />
+                            <TextField
+                                wide
+                                label={t("sxRealmSettingsEnvelopeFrom")}
+                                hint={t("sxRealmSettingsEnvelopeFromHint")}
+                                type="email"
+                                value={smtp.envelopeFrom}
+                                onChange={(v: string) => setNested("smtpServer", "envelopeFrom", v)}
+                            />
+                        </Card>
+                    </Section>
                     <Section label={t("sxRealmSettingsSmtpServer")}>
                         <Card>
                             <TextField
@@ -553,50 +564,111 @@ export default function RealmSettings() {
                                     setNested("smtpServer", "starttls", String(v))
                                 }
                             />
-                        </Card>
-                    </Section>
-                    <Section label={t("sxRealmSettingsSender")}>
-                        <Card>
-                            <TextField
-                                label={t("sxRealmSettingsFrom")}
-                                value={smtp.from}
-                                onChange={(v: string) => setNested("smtpServer", "from", v)}
-                                placeholder="noreply@example.com"
-                            />
-                            <TextField
-                                label={t("sxRealmSettingsFromDisplayName")}
-                                value={smtp.fromDisplayName}
-                                onChange={(v: string) =>
-                                    setNested("smtpServer", "fromDisplayName", v)
+                            <ToggleRow
+                                label={t("sxRealmSettingsAllowUtf8")}
+                                hint={t("sxRealmSettingsAllowUtf8Hint")}
+                                checked={smtp.allowutf8 === "true" || smtp.allowutf8 === true}
+                                onChange={(v: boolean) =>
+                                    setNested("smtpServer", "allowutf8", String(v))
                                 }
                             />
-                            <TextField
-                                label={t("sxRealmSettingsReplyTo")}
-                                value={smtp.replyTo}
-                                onChange={(v: string) => setNested("smtpServer", "replyTo", v)}
+                            <NumField
+                                label={t("sxRealmSettingsSmtpConnectionTimeout")}
+                                v={smtp.connectionTimeout}
+                                on={(x: any) => setNested("smtpServer", "connectionTimeout", x)}
+                                unit="ms"
+                            />
+                            <NumField
+                                label={t("sxRealmSettingsSmtpReadTimeout")}
+                                v={smtp.timeout}
+                                on={(x: any) => setNested("smtpServer", "timeout", x)}
+                                unit="ms"
+                            />
+                            <NumField
+                                label={t("sxRealmSettingsSmtpWriteTimeout")}
+                                v={smtp.writeTimeout}
+                                on={(x: any) => setNested("smtpServer", "writeTimeout", x)}
+                                unit="ms"
+                            />
+                            <ToggleRow
+                                label={t("sxRealmSettingsSmtpDebug")}
+                                hint={t("sxRealmSettingsSmtpDebugHint")}
+                                checked={smtp.debug === "true" || smtp.debug === true}
+                                onChange={(v: boolean) => setNested("smtpServer", "debug", String(v))}
                             />
                         </Card>
+                        <Footnote>{t("sxRealmSettingsSmtpTimeoutsHint")}</Footnote>
                     </Section>
                     <Section label={t("sxRealmSettingsSmtpAuthentication")}>
                         <Card>
                             <ToggleRow
                                 label={t("sxRealmSettingsSmtpAuthRequired")}
-                                checked={smtp.auth === "true" || smtp.auth === true}
+                                checked={smtpAuth}
                                 onChange={(v: boolean) => setNested("smtpServer", "auth", String(v))}
                             />
-                            <TextField
-                                label={t("sxRealmSettingsSmtpUsername")}
-                                value={smtp.user}
-                                onChange={(v: string) => setNested("smtpServer", "user", v)}
-                            />
-                            <TextField
-                                label={t("sxRealmSettingsSmtpPassword")}
-                                type="password"
-                                value={smtp.password}
-                                onChange={(v: string) => setNested("smtpServer", "password", v)}
-                            />
+                            {smtpAuth && (
+                                <TextField
+                                    label={t("sxRealmSettingsSmtpUsername")}
+                                    value={smtp.user}
+                                    onChange={(v: string) => setNested("smtpServer", "user", v)}
+                                />
+                            )}
+                            {smtpAuth && (
+                                <ChoiceField
+                                    label={t("sxRealmSettingsSmtpAuthType")}
+                                    value={authType}
+                                    onChange={(v: string) => setNested("smtpServer", "authType", v)}
+                                    options={[
+                                        { value: "basic", label: t("sxRealmSettingsSmtpAuthBasic") },
+                                        { value: "token", label: t("sxRealmSettingsSmtpAuthToken") }
+                                    ]}
+                                />
+                            )}
+                            {smtpAuth && authType === "basic" && (
+                                <TextField
+                                    label={t("sxRealmSettingsSmtpPassword")}
+                                    type="password"
+                                    value={smtp.password}
+                                    onChange={(v: string) => setNested("smtpServer", "password", v)}
+                                />
+                            )}
+                            {smtpAuth && authType === "token" && (
+                                <TextField
+                                    label={t("sxRealmSettingsSmtpTokenUrl")}
+                                    hint={t("sxRealmSettingsSmtpTokenUrlHint")}
+                                    value={smtp.authTokenUrl}
+                                    onChange={(v: string) => setNested("smtpServer", "authTokenUrl", v)}
+                                    placeholder="https://login.example.com/oauth2/token"
+                                />
+                            )}
+                            {smtpAuth && authType === "token" && (
+                                <TextField
+                                    label={t("sxRealmSettingsSmtpTokenScope")}
+                                    hint={t("sxRealmSettingsSmtpTokenScopeHint")}
+                                    value={smtp.authTokenScope}
+                                    onChange={(v: string) => setNested("smtpServer", "authTokenScope", v)}
+                                />
+                            )}
+                            {smtpAuth && authType === "token" && (
+                                <TextField
+                                    label={t("sxRealmSettingsSmtpTokenClientId")}
+                                    value={smtp.authTokenClientId}
+                                    onChange={(v: string) => setNested("smtpServer", "authTokenClientId", v)}
+                                />
+                            )}
+                            {smtpAuth && authType === "token" && (
+                                <TextField
+                                    label={t("sxRealmSettingsSmtpTokenClientSecret")}
+                                    type="password"
+                                    value={smtp.authTokenClientSecret}
+                                    onChange={(v: string) =>
+                                        setNested("smtpServer", "authTokenClientSecret", v)
+                                    }
+                                />
+                            )}
                         </Card>
                     </Section>
+                    <SmtpTestConnection realm={realm} smtp={smtp} />
                 </>
             )}
 
@@ -633,39 +705,66 @@ export default function RealmSettings() {
             )}
 
             {tab === "localization" && (
-                <Section label={t("sxRealmSettingsTabLocalization")}>
-                    <Card>
-                        <ToggleRow
-                            label={t("sxRealmSettingsInternationalization")}
-                            checked={e.internationalizationEnabled}
-                            onChange={(v: boolean) => set("internationalizationEnabled", v)}
+                <>
+                    <SegmentTabs
+                        value={locTab}
+                        onChange={setLocTab}
+                        items={LOCALIZATION_TABS.map(x => ({ value: x.key, label: t(x.label) }))}
+                        ariaLabel={t("sxRealmSettingsTabLocalization")}
+                    />
+                    {locTab === "locales" && (
+                        <Section label={t("sxRealmSettingsLocales")}>
+                            <Card>
+                                <ToggleRow
+                                    label={t("sxRealmSettingsInternationalization")}
+                                    checked={e.internationalizationEnabled}
+                                    onChange={(v: boolean) => set("internationalizationEnabled", v)}
+                                />
+                                {e.internationalizationEnabled && (
+                                    <TextField
+                                        label={t("sxRealmSettingsSupportedLocales")}
+                                        hint={t("sxRealmSettingsSupportedLocalesHint")}
+                                        value={locales.join(", ")}
+                                        onChange={(v: string) =>
+                                            set(
+                                                "supportedLocales",
+                                                v
+                                                    .split(",")
+                                                    .map((s: string) => s.trim())
+                                                    .filter(Boolean)
+                                            )
+                                        }
+                                    />
+                                )}
+                                {e.internationalizationEnabled && (
+                                    <ChoiceField
+                                        label={t("sxRealmSettingsDefaultLocale")}
+                                        value={e.defaultLocale || (locales[0] ?? "")}
+                                        onChange={(v: string) => set("defaultLocale", v)}
+                                        options={locales.length ? locales : ["tr", "en"]}
+                                    />
+                                )}
+                            </Card>
+                        </Section>
+                    )}
+                    {locTab === "overrides" && (
+                        <RealmOverrides
+                            key={realm}
+                            realm={realm}
+                            locales={loadedRef.current?.supportedLocales || []}
+                            defaultLocale={loadedRef.current?.defaultLocale}
                         />
-                        {e.internationalizationEnabled && (
-                            <TextField
-                                label={t("sxRealmSettingsSupportedLocales")}
-                                hint={t("sxRealmSettingsSupportedLocalesHint")}
-                                value={locales.join(", ")}
-                                onChange={(v: string) =>
-                                    set(
-                                        "supportedLocales",
-                                        v
-                                            .split(",")
-                                            .map((s: string) => s.trim())
-                                            .filter(Boolean)
-                                    )
-                                }
-                            />
-                        )}
-                        {e.internationalizationEnabled && (
-                            <ChoiceField
-                                label={t("sxRealmSettingsDefaultLocale")}
-                                value={e.defaultLocale || (locales[0] ?? "")}
-                                onChange={(v: string) => set("defaultLocale", v)}
-                                options={locales.length ? locales : ["tr", "en"]}
-                            />
-                        )}
-                    </Card>
-                </Section>
+                    )}
+                    {locTab === "bundles" && (
+                        <EffectiveMessageBundles
+                            key={realm}
+                            realm={realm}
+                            locales={loadedRef.current?.supportedLocales || []}
+                            defaultLocale={loadedRef.current?.defaultLocale}
+                            themeInfo={themeInfo}
+                        />
+                    )}
+                </>
             )}
 
             {tab === "sessions" && (
@@ -950,42 +1049,7 @@ export default function RealmSettings() {
                             );
                         })
                     )}
-                    <Section label={t("sxRealmSettingsKeyProviders")}>
-                        {keyProvidersFailed ? (
-                            loadError(t("sxRealmSettingsKeyProvidersLoadError"), retryKeyProviders)
-                        ) : keyProviders === null ? (
-                            <ListSkeleton rows={2} />
-                        ) : keyProviders.length === 0 ? (
-                            <Notice
-                                title={t("sxRealmSettingsNoKeyProvidersTitle")}
-                                description={t("sxRealmSettingsNoKeyProvidersDescription")}
-                            />
-                        ) : (
-                            <Group>
-                                {[...keyProviders]
-                                    .sort(
-                                        (a, b) =>
-                                            Number(b.config?.priority?.[0] || 0) -
-                                            Number(a.config?.priority?.[0] || 0)
-                                    )
-                                    .map((c: any) => (
-                                        <Row
-                                            key={c.id}
-                                            title={c.name}
-                                            subtitle={c.providerId}
-                                            trailing={
-                                                <span className="text-sm text-muted-foreground tabular-nums">
-                                                    {t("sxRealmSettingsKeyPriority", {
-                                                        priority: c.config?.priority?.[0] ?? "0"
-                                                    })}
-                                                </span>
-                                            }
-                                        />
-                                    ))}
-                            </Group>
-                        )}
-                        <Footnote>{t("sxRealmSettingsKeysFootnote")}</Footnote>
-                    </Section>
+                    <KeyProviders realm={realm} componentTypes={keyTypes} onChanged={retryKeys} />
                 </>
             )}
 
@@ -1030,6 +1094,21 @@ export default function RealmSettings() {
                                         />
                                     </FieldItem>
                                 )}
+                                <ActionRow
+                                    label={t("sxRealmSettingsClearUserEvents")}
+                                    hint={t("sxRealmSettingsClearUserEventsHint")}
+                                >
+                                    <Button
+                                        variant="outline"
+                                        className={DANGER_OUTLINE}
+                                        onClick={() => clearEvents("user")}
+                                        disabled={clearing === "user"}
+                                    >
+                                        {clearing === "user"
+                                            ? t("sxRealmSettingsClearing")
+                                            : t("sxRealmSettingsClearUserEvents")}
+                                    </Button>
+                                </ActionRow>
                             </Card>
                         </Section>
                         <Section label={t("sxRealmSettingsAdminEvents")}>
@@ -1048,6 +1127,29 @@ export default function RealmSettings() {
                                         }
                                     />
                                 )}
+                                {eventsCfg.adminEventsEnabled && (
+                                    <NumField
+                                        label={t("sxRealmSettingsEventsExpiration")}
+                                        v={adminExp}
+                                        on={(x: any) => setAdminExp(x)}
+                                        hint={t("sxRealmSettingsAdminEventsExpirationHint")}
+                                    />
+                                )}
+                                <ActionRow
+                                    label={t("sxRealmSettingsClearAdminEvents")}
+                                    hint={t("sxRealmSettingsClearAdminEventsHint")}
+                                >
+                                    <Button
+                                        variant="outline"
+                                        className={DANGER_OUTLINE}
+                                        onClick={() => clearEvents("admin")}
+                                        disabled={clearing === "admin"}
+                                    >
+                                        {clearing === "admin"
+                                            ? t("sxRealmSettingsClearing")
+                                            : t("sxRealmSettingsClearAdminEvents")}
+                                    </Button>
+                                </ActionRow>
                             </Card>
                         </Section>
                         <Section label={t("sxRealmSettingsEventListeners")}>
@@ -1074,147 +1176,27 @@ export default function RealmSettings() {
                     </>
                 ))}
 
-            {tab === "user-profile" &&
-                (profileFailed ? (
-                    loadError(t("sxRealmSettingsUserProfileLoadError"), retryProfile)
-                ) : profile === null ? (
-                    <ListSkeleton />
-                ) : (
-                    <>
-                        <Section label={t("sxRealmSettingsAttributes")}>
-                            {(profile.attributes || []).length === 0 ? (
-                                <Notice
-                                    title={t("sxRealmSettingsNoAttributesTitle")}
-                                    description={t("sxRealmSettingsNoAttributesDescription")}
-                                />
-                            ) : (
-                                <Group>
-                                    {(profile.attributes || []).map((a: any) => (
-                                        <Row
-                                            key={a.name}
-                                            title={a.displayName || a.name}
-                                            subtitle={[
-                                                a.name,
-                                                a.permissions?.view?.length
-                                                    ? t("sxRealmSettingsAttributeViewers", {
-                                                          roles: a.permissions.view.join(", ")
-                                                      })
-                                                    : null
-                                            ]
-                                                .filter(Boolean)
-                                                .join(" · ")}
-                                            trailing={
-                                                a.required ? (
-                                                    <Chip tone="info">{t("sxRealmSettingsRequired")}</Chip>
-                                                ) : undefined
-                                            }
-                                        />
-                                    ))}
-                                </Group>
-                            )}
-                            <Footnote>{t("sxRealmSettingsUserProfileFootnote")}</Footnote>
-                        </Section>
-                        <Section label={t("sxRealmSettingsRawConfig")}>
-                            <JsonCard
-                                rows={16}
-                                value={profileJson}
-                                onChange={setProfileJson}
-                                label={t("sxRealmSettingsRawConfig")}
-                            />
-                            {profileErr && <ErrorNote>{profileErr}</ErrorNote>}
-                        </Section>
-                        <SaveBar onClick={saveProfile} saving={savingProfile} />
-                    </>
-                ))}
+            {tab === "user-profile" && <UserProfileEditor key={realm} realm={realm} />}
 
-            {tab === "client-policies" &&
-                (cpFailed ? (
-                    loadError(t("sxRealmSettingsClientPoliciesLoadError"), retryPolicies)
-                ) : profilesDoc === null ? (
-                    <ListSkeleton />
-                ) : (
-                    <>
-                        <Section label={t("sxRealmSettingsProfiles")}>
-                            {(profilesDoc.profiles || []).concat(profilesDoc.globalProfiles || [])
-                                .length === 0 ? (
-                                <Notice
-                                    title={t("sxRealmSettingsNoProfilesTitle")}
-                                    description={t("sxRealmSettingsNoProfilesDescription")}
-                                />
-                            ) : (
-                                <Group>
-                                    {(profilesDoc.profiles || []).map((p: any) => (
-                                        <Row key={`p-${p.name}`} title={p.name} subtitle={p.description} />
-                                    ))}
-                                    {(profilesDoc.globalProfiles || []).map((p: any) => (
-                                        <Row
-                                            key={`g-${p.name}`}
-                                            title={p.name}
-                                            subtitle={p.description}
-                                            trailing={<Chip>{t("sxRealmSettingsGlobal")}</Chip>}
-                                        />
-                                    ))}
-                                </Group>
-                            )}
-                        </Section>
-                        <Section label={t("sxRealmSettingsProfilesJson")}>
-                            <JsonCard
-                                rows={12}
-                                value={profilesJson}
-                                onChange={setProfilesJson}
-                                label={t("sxRealmSettingsProfilesJson")}
-                            />
-                            <SaveBar
-                                className="mt-4"
-                                onClick={saveProfiles}
-                                saving={savingProfiles}
-                                label={t("sxRealmSettingsSaveProfiles")}
-                            />
-                        </Section>
-                        <Section label={t("sxRealmSettingsPolicies")}>
-                            {(policiesDoc?.policies || []).length === 0 ? (
-                                <Notice
-                                    title={t("sxRealmSettingsNoPoliciesTitle")}
-                                    description={t("sxRealmSettingsNoPoliciesDescription")}
-                                />
-                            ) : (
-                                <Group>
-                                    {(policiesDoc?.policies || []).map((p: any) => (
-                                        <Row
-                                            key={`pol-${p.name}`}
-                                            title={p.name}
-                                            subtitle={p.description}
-                                            trailing={
-                                                p.enabled === false ? (
-                                                    <Chip>{t("sxRealmSettingsPolicyOff")}</Chip>
-                                                ) : (
-                                                    <Chip tone="success">{t("sxRealmSettingsPolicyOn")}</Chip>
-                                                )
-                                            }
-                                        />
-                                    ))}
-                                </Group>
-                            )}
-                        </Section>
-                        <Section label={t("sxRealmSettingsPoliciesJson")}>
-                            <JsonCard
-                                rows={12}
-                                value={policiesJson}
-                                onChange={setPoliciesJson}
-                                label={t("sxRealmSettingsPoliciesJson")}
-                            />
-                            {cpErr && <ErrorNote>{cpErr}</ErrorNote>}
-                            <SaveBar
-                                className="mt-4"
-                                onClick={savePolicies}
-                                saving={savingPolicies}
-                                label={t("sxRealmSettingsSavePolicies")}
-                            />
-                        </Section>
-                    </>
-                ))}
+            {tab === "user-registration" && (
+                <UserRegistration key={realm} realm={realm} defaultRole={e.defaultRole} />
+            )}
+
+            {tab === "client-policies" && <ClientPoliciesEditor key={realm} realm={realm} />}
 
             {isGlobalTab && <SaveBar onClick={save} saving={saving} disabled={loading} />}
+
+            {tab === "general" && <DeleteRealmSection realm={realm} />}
+
+            {importOpen && (
+                <PartialImportModal
+                    realm={realm}
+                    onClose={() => setImportOpen(false)}
+                    onImported={retryKeys}
+                />
+            )}
+            {exportOpen && <PartialExportModal realm={realm} onClose={() => setExportOpen(false)} />}
+            <ConfirmDialog opts={confirmOpts} onClose={() => setConfirmOpts(null)} />
         </>
     );
 }
@@ -1233,267 +1215,4 @@ function StatusChip({ status }: any) {
     if (s === "PASSIVE") return <Chip tone="warning">{t("sxRealmSettingsKeyPassive")}</Chip>;
     if (s === "DISABLED") return <Chip tone="danger">{t("sxRealmSettingsKeyDisabled")}</Chip>;
     return <Chip>{status || "—"}</Chip>;
-}
-
-function SaveBar({ onClick, saving, disabled, label, className }: any) {
-    const t = useT();
-    return (
-        <div className={`flex justify-end ${className ?? ""}`}>
-            <Button type="button" size="form" onClick={onClick} disabled={saving || disabled}>
-                {saving ? t("sxRealmSettingsSaving") : (label ?? t("sxRealmSettingsSave"))}
-            </Button>
-        </div>
-    );
-}
-
-function Footnote({ children }: any) {
-    return <p className="mt-2 px-0.5 text-[13px] text-muted-foreground">{children}</p>;
-}
-
-function ErrorNote({ children }: any) {
-    return (
-        <p className="mt-2 px-0.5 text-[13px] text-[#d70015] [overflow-wrap:anywhere] dark:text-[#ff453a]">
-            {children}
-        </p>
-    );
-}
-
-function flatten(children: any): any[] {
-    return Children.toArray(children).flatMap((c: any) =>
-        isValidElement(c) && c.type === Fragment ? flatten(c.props.children) : [c]
-    );
-}
-
-function Card({ children }: any) {
-    const segments: { field: boolean; items: any[] }[] = [];
-    flatten(children).forEach(item => {
-        const field = isValidElement(item) && !!(item.type as any)?.isField;
-        const last = segments[segments.length - 1];
-        if (field && last?.field) last.items.push(item);
-        else segments.push({ field, items: [item] });
-    });
-    return (
-        <div className={GROUP}>
-            {segments.map((segment, index) => (
-                <Fragment key={index}>
-                    {index > 0 && <div aria-hidden className={SEPARATOR} />}
-                    {segment.field ? (
-                        <div className="grid gap-4 p-4 sm:grid-cols-2">{segment.items}</div>
-                    ) : (
-                        segment.items
-                    )}
-                </Fragment>
-            ))}
-        </div>
-    );
-}
-
-function ToggleRow({ label, hint, checked, onChange, disabled }: any) {
-    const id = useId();
-    return (
-        <div className="flex min-h-14 items-center justify-between gap-4 px-4 py-3">
-            <label htmlFor={id} className="min-w-0 cursor-pointer">
-                <span className="block text-base">{label}</span>
-                {hint && (
-                    <span className="mt-0.5 block text-[13px] text-muted-foreground [overflow-wrap:anywhere]">
-                        {hint}
-                    </span>
-                )}
-            </label>
-            <Switch
-                id={id}
-                checked={!!checked}
-                onCheckedChange={(v: boolean) => onChange(v)}
-                disabled={disabled}
-            />
-        </div>
-    );
-}
-
-function InfoRow({ label, children }: any) {
-    return (
-        <div className="flex min-h-14 items-center justify-between gap-4 px-4 py-3">
-            <span className="shrink-0 text-base">{label}</span>
-            <span className="min-w-0 text-end">{children}</span>
-        </div>
-    );
-}
-
-function FieldItem({ label, hint, wide, htmlFor, children }: any) {
-    return (
-        <Field size="lg" className={`min-w-0 ${wide ? "sm:col-span-2" : ""}`}>
-            {label && <FieldLabel htmlFor={htmlFor}>{label}</FieldLabel>}
-            {children}
-            {hint && <FieldDescription className="ps-0.5 text-[13px]">{hint}</FieldDescription>}
-        </Field>
-    );
-}
-FieldItem.isField = true;
-
-function TextField({ label, hint, value, onChange, placeholder, type, mono, wide }: any) {
-    const id = useId();
-    return (
-        <FieldItem label={label} hint={hint} wide={wide} htmlFor={id}>
-            <Input
-                id={id}
-                size="lg"
-                type={type}
-                className={mono ? "font-mono data-[size=lg]:text-[15px]" : undefined}
-                value={value ?? ""}
-                onChange={(ev: any) => onChange(ev.target.value)}
-                placeholder={placeholder}
-            />
-        </FieldItem>
-    );
-}
-TextField.isField = true;
-
-function NumField({ label, v, on, unit }: any) {
-    const t = useT();
-    const id = useId();
-    const hint = unit === undefined ? t("sxRealmSettingsSeconds") : unit;
-    return (
-        <FieldItem label={label} hint={hint || undefined} htmlFor={id}>
-            <Input
-                id={id}
-                size="lg"
-                type="number"
-                className="tabular-nums"
-                value={v ?? ""}
-                onChange={(ev: any) => on(ev.target.value)}
-                placeholder="0"
-            />
-        </FieldItem>
-    );
-}
-NumField.isField = true;
-
-function ChoiceField({ label, value, onChange, options }: any) {
-    const t = useT();
-    const id = useId();
-    const normalized = options.map((o: any) => (typeof o === "string" ? { value: o, label: o } : o));
-    const known = normalized.some((o: any) => o.value === value);
-    return (
-        <FieldItem label={label} htmlFor={id}>
-            <NativeSelect
-                id={id}
-                size="lg"
-                className="w-full"
-                value={value ?? ""}
-                onChange={(ev: any) => onChange(ev.target.value)}
-            >
-                {(value === undefined || value === "") && (
-                    <NativeSelectOption value="" disabled>
-                        {t("sxRealmSettingsSelect")}
-                    </NativeSelectOption>
-                )}
-                {!known && value !== undefined && value !== "" && (
-                    <NativeSelectOption value={value}>{value}</NativeSelectOption>
-                )}
-                {normalized.map((o: any) => (
-                    <NativeSelectOption key={o.value} value={o.value}>
-                        {o.label}
-                    </NativeSelectOption>
-                ))}
-            </NativeSelect>
-        </FieldItem>
-    );
-}
-ChoiceField.isField = true;
-
-function ThemeField({ label, value, options, onChange }: any) {
-    const t = useT();
-    const id = useId();
-    const list = options || [];
-    return (
-        <FieldItem label={label} htmlFor={id}>
-            <NativeSelect
-                id={id}
-                size="lg"
-                className="w-full"
-                value={value || ""}
-                onChange={(ev: any) => onChange(ev.target.value)}
-            >
-                <NativeSelectOption value="">{t("sxRealmSettingsDefaultTheme")}</NativeSelectOption>
-                {value && !list.includes(value) && (
-                    <NativeSelectOption value={value}>{value}</NativeSelectOption>
-                )}
-                {list.map((o: string) => (
-                    <NativeSelectOption key={o} value={o}>
-                        {o}
-                    </NativeSelectOption>
-                ))}
-            </NativeSelect>
-        </FieldItem>
-    );
-}
-ThemeField.isField = true;
-
-function JsonCard({ rows, value, onChange, label }: any) {
-    return (
-        <div className={`${GROUP} p-4`}>
-            <Textarea
-                aria-label={label}
-                className="font-mono text-xs"
-                rows={rows}
-                value={value}
-                onChange={(ev: any) => onChange(ev.target.value)}
-                spellCheck={false}
-            />
-        </div>
-    );
-}
-
-function ChipMulti({ selected, options, onChange, placeholder }: any) {
-    const t = useT();
-    const available = (options || []).filter((o: string) => !selected.includes(o));
-    const remove = (v: string) => onChange(selected.filter((x: string) => x !== v));
-    const add = (v: string) => {
-        if (v && !selected.includes(v)) onChange([...selected, v]);
-    };
-    return (
-        <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap gap-1.5">
-                {selected.length === 0 && (
-                    <span className="ps-0.5 text-[15px] text-muted-foreground">
-                        {t("sxRealmSettingsNoneSelected")}
-                    </span>
-                )}
-                {selected.map((v: string) => (
-                    <span
-                        key={v}
-                        className="inline-flex h-7 max-w-full items-center gap-1 rounded-full border border-[#d2d2d7] bg-background ps-2.5 pe-1 text-[13px] dark:border-[#48484a] dark:bg-transparent"
-                    >
-                        <span className="truncate font-mono">{v}</span>
-                        <button
-                            type="button"
-                            onClick={() => remove(v)}
-                            aria-label={t("sxRealmSettingsRemoveValue", { value: v })}
-                            className="grid size-5 shrink-0 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-black/5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 dark:hover:bg-white/10"
-                        >
-                            <XIcon className="size-3" />
-                        </button>
-                    </span>
-                ))}
-            </div>
-            {available.length > 0 && (
-                <NativeSelect
-                    size="lg"
-                    className="w-full"
-                    aria-label={placeholder}
-                    value=""
-                    onChange={(ev: any) => add(ev.target.value)}
-                >
-                    <NativeSelectOption value="" disabled>
-                        {placeholder}
-                    </NativeSelectOption>
-                    {available.map((o: string) => (
-                        <NativeSelectOption key={o} value={o}>
-                            {o}
-                        </NativeSelectOption>
-                    ))}
-                </NativeSelect>
-            )}
-        </div>
-    );
 }
