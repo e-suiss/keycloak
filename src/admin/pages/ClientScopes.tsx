@@ -1,8 +1,9 @@
 // @ts-nocheck
 import { Button } from "@ui/components/button";
-import { Field, FieldGroup, FieldLabel } from "@ui/components/field";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@ui/components/field";
 import { Input } from "@ui/components/input";
 import { NativeSelect, NativeSelectOption } from "@ui/components/native-select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ui/components/select";
 import {
     Confirm,
     ConfirmAction,
@@ -28,6 +29,7 @@ import { useAdminClient } from "../admin-client";
 import { AdminPage, Chip, Group, ListSkeleton, Notice, SearchField, Section, TextAction } from "../ui/kit";
 import { useT } from "../ui/i18n";
 import { useRealm } from "../ui/realm";
+import { changeRealmScopeType, loadRealmScopeTypes, SCOPE_TYPE_LABELS, SCOPE_TYPES } from "./clients/shared";
 
 function useConfirmDialog() {
     const t = useT();
@@ -98,6 +100,8 @@ export default function ClientScopes() {
 
     const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
     const [scopes, setScopes] = useState<any[]>([]);
+    const [types, setTypes] = useState<Record<string, string>>({});
+    const [busyType, setBusyType] = useState<string | null>(null);
     const [reloadKey, setReloadKey] = useState(0);
     const [query, setQuery] = useState("");
 
@@ -106,15 +110,16 @@ export default function ClientScopes() {
     const [name, setName] = useState("");
     const [description, setDescription] = useState("");
     const [protocol, setProtocol] = useState("openid-connect");
+    const [newType, setNewType] = useState("none");
 
     useEffect(() => {
         let alive = true;
         setStatus("loading");
-        adminClient.clientScopes
-            .find()
-            .then(list => {
+        Promise.all([adminClient.clientScopes.find(), loadRealmScopeTypes(adminClient)])
+            .then(([list, typeMap]) => {
                 if (!alive) return;
                 setScopes(Array.isArray(list) ? list : []);
+                setTypes(typeMap);
                 setStatus("ready");
             })
             .catch(() => alive && setStatus("error"));
@@ -129,6 +134,7 @@ export default function ClientScopes() {
         setName("");
         setDescription("");
         setProtocol("openid-connect");
+        setNewType("none");
         setCreateOpen(true);
     };
 
@@ -136,12 +142,17 @@ export default function ClientScopes() {
         if (!name.trim()) return;
         setSaving(true);
         try {
-            await adminClient.clientScopes.create({
-                name: name.trim(),
+            const scopeName = name.trim().replace(/ /g, "_");
+            const created = await adminClient.clientScopes.create({
+                name: scopeName,
                 description: description.trim() || undefined,
                 protocol,
                 attributes: {}
             });
+            if (newType !== "none") {
+                const newId = created?.id || (await adminClient.clientScopes.findOneByName({ name: scopeName }))?.id;
+                if (newId) await changeRealmScopeType(adminClient, newId, "none", newType);
+            }
             addAlert(t("sxClientScopesCreated"), AlertVariant.success);
             setCreateOpen(false);
             reload();
@@ -160,6 +171,7 @@ export default function ClientScopes() {
             danger: true,
             onConfirm: async () => {
                 try {
+                    await changeRealmScopeType(adminClient, scope.id, types[scope.id] || "none", "none");
                     await adminClient.clientScopes.del({ id: scope.id });
                     addAlert(t("sxClientScopesDeleted"), AlertVariant.success);
                     reload();
@@ -168,6 +180,22 @@ export default function ClientScopes() {
                 }
             }
         });
+    };
+
+    const changeType = async (scope: any, to: string) => {
+        const from = types[scope.id] || "none";
+        if (from === to) return;
+        setBusyType(scope.id);
+        try {
+            await changeRealmScopeType(adminClient, scope.id, from, to);
+            setTypes(prev => ({ ...prev, [scope.id]: to }));
+            addAlert(t("sxClientDetailScopeTypeUpdated"), AlertVariant.success);
+        } catch (err) {
+            addError(t("sxClientDetailScopeTypeUpdateFailed"), err);
+            reload();
+        } finally {
+            setBusyType(null);
+        }
     };
 
     const sorted = useMemo(
@@ -221,6 +249,22 @@ export default function ClientScopes() {
                                         <span className="hidden sm:inline-flex">
                                             <Chip>{s.protocol || "openid-connect"}</Chip>
                                         </span>
+                                        <Select
+                                            value={types[s.id] || "none"}
+                                            disabled={busyType === s.id}
+                                            onValueChange={(v: string) => changeType(s, v)}
+                                        >
+                                            <SelectTrigger size="sm" aria-label={t("sxClientScopesXAssignedType")}>
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent align="end">
+                                                {SCOPE_TYPES.map(type => (
+                                                    <SelectItem key={type} value={type}>
+                                                        {t(SCOPE_TYPE_LABELS[type])}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
                                         <TextAction tone="danger" onClick={() => handleDelete(s)}>
                                             {t("sxCommonDelete")}
                                         </TextAction>
@@ -264,6 +308,21 @@ export default function ClientScopes() {
                                     </NativeSelectOption>
                                     <NativeSelectOption value="saml">saml</NativeSelectOption>
                                 </NativeSelect>
+                            </Field>
+                            <Field>
+                                <FieldLabel>{t("sxCommonType")}</FieldLabel>
+                                <NativeSelect
+                                    className="w-full"
+                                    value={newType}
+                                    onChange={e => setNewType(e.target.value)}
+                                >
+                                    {SCOPE_TYPES.map(type => (
+                                        <NativeSelectOption key={type} value={type}>
+                                            {t(SCOPE_TYPE_LABELS[type])}
+                                        </NativeSelectOption>
+                                    ))}
+                                </NativeSelect>
+                                <FieldDescription>{t("sxClientScopesXTypeHelp")}</FieldDescription>
                             </Field>
                         </FieldGroup>
                     </ModalBody>

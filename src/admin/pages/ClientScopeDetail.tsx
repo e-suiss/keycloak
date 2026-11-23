@@ -2,7 +2,7 @@
 
 import { CaretLeftIcon, CheckIcon } from "@phosphor-icons/react";
 import { Button } from "@ui/components/button";
-import { Field, FieldLabel } from "@ui/components/field";
+import { Field, FieldDescription, FieldLabel } from "@ui/components/field";
 import { Input } from "@ui/components/input";
 import { NativeSelect, NativeSelectOption } from "@ui/components/native-select";
 import { Switch } from "@ui/components/switch";
@@ -36,10 +36,13 @@ import {
 } from "../ui/kit";
 import { useT } from "../ui/i18n";
 import { useRealm } from "../ui/realm";
+import RoleScopeMapping from "./clients/RoleScopeMapping";
+import { changeRealmScopeType, loadRealmScopeTypes, SCOPE_TYPE_LABELS, SCOPE_TYPES } from "./clients/shared";
 
 const TABS = [
     { value: "settings", label: "sxClientScopeDetailTabSettings" },
-    { value: "mappers", label: "sxClientScopeDetailTabMappers" }
+    { value: "mappers", label: "sxClientScopeDetailTabMappers" },
+    { value: "scope", label: "sxClientDetailScope" }
 ];
 
 const DANGER_BUTTON =
@@ -128,6 +131,7 @@ export default function ClientScopeDetail() {
                 />
             )}
             {tab === "mappers" && <MappersTab scope={scope} />}
+            {tab === "scope" && <RoleScopeMapping resource="clientScopes" id={scope.id} name={scope.name} />}
         </AdminPage>
     );
 }
@@ -154,7 +158,27 @@ function SettingsTab({ scope, reload, onDeleted }: any) {
     const [f, setF] = useState(() => initialForm(scope));
     const set = (k: string, v: any) => setF(p => ({ ...p, [k]: v }));
     const [saving, setSaving] = useState(false);
-    const dirty = JSON.stringify(f) !== JSON.stringify(initialForm(scope));
+    const [savedType, setSavedType] = useState<string | null>(null);
+    const [type, setType] = useState<string | null>(null);
+    const [typeAttempt, setTypeAttempt] = useState(0);
+    const [typeFailed, setTypeFailed] = useState(false);
+    const dirty = JSON.stringify(f) !== JSON.stringify(initialForm(scope)) || type !== savedType;
+
+    useEffect(() => {
+        let alive = true;
+        setTypeFailed(false);
+        loadRealmScopeTypes(adminClient)
+            .then(map => {
+                if (!alive) return;
+                const v = map[scope.id] || "none";
+                setSavedType(v);
+                setType(v);
+            })
+            .catch(() => alive && setTypeFailed(true));
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, scope.id, typeAttempt]);
 
     const save = async () => {
         const name = f.name.trim();
@@ -183,6 +207,10 @@ function SettingsTab({ scope, reload, onDeleted }: any) {
                     attributes
                 }
             );
+            if (type && savedType && type !== savedType) {
+                await changeRealmScopeType(adminClient, scope.id, savedType, type);
+                setSavedType(type);
+            }
             addAlert(t("sxClientScopeDetailSaved"), AlertVariant.success);
             reload();
         } catch (e) {
@@ -248,6 +276,33 @@ function SettingsTab({ scope, reload, onDeleted }: any) {
                         </NativeSelect>
                     </Field>
                     <Field size="lg">
+                        <FieldLabel htmlFor="scope-type">{t("sxCommonType")}</FieldLabel>
+                        {typeFailed ? (
+                            <Notice
+                                title={t("sxClientScopesXTypeLoadError")}
+                                description={t("sxLoadErrorDescription")}
+                                onRetry={() => setTypeAttempt(n => n + 1)}
+                            />
+                        ) : type === null ? (
+                            <div aria-busy="true" className="h-13.5 w-full animate-pulse rounded-xl bg-[#e5e5ea] dark:bg-[#2c2c2e]" />
+                        ) : (
+                            <NativeSelect
+                                id="scope-type"
+                                size="lg"
+                                className="w-full"
+                                value={type}
+                                onChange={(e: any) => setType(e.target.value)}
+                            >
+                                {SCOPE_TYPES.map(item => (
+                                    <NativeSelectOption key={item} value={item}>
+                                        {t(SCOPE_TYPE_LABELS[item])}
+                                    </NativeSelectOption>
+                                ))}
+                            </NativeSelect>
+                        )}
+                        <FieldDescription>{t("sxClientScopesXTypeHelp")}</FieldDescription>
+                    </Field>
+                    <Field size="lg">
                         <FieldLabel htmlFor="scope-gui-order">{t("sxClientScopeDetailGuiOrder")}</FieldLabel>
                         <Input
                             size="lg"
@@ -303,7 +358,10 @@ function SettingsTab({ scope, reload, onDeleted }: any) {
                     size="form"
                     block
                     disabled={saving || !dirty}
-                    onClick={() => setF(initialForm(scope))}
+                    onClick={() => {
+                        setF(initialForm(scope));
+                        setType(savedType);
+                    }}
                 >
                     {t("sxCommonCancel")}
                 </Button>

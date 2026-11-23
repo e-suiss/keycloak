@@ -87,6 +87,11 @@ import { useRealm } from "../ui/realm";
 import { useT } from "../ui/i18n";
 import { i18n } from "../i18n/i18n";
 import ClientAuthorization from "./ClientAuthorization";
+import KeyExportModal from "./clients/KeyExportModal";
+import RoleScopeMapping from "./clients/RoleScopeMapping";
+import SamlKeys from "./clients/SamlKeys";
+import { RotatedSecretSection, SecretExpiry } from "./clients/SecretRotation";
+import { configToForm, formToConfig } from "./clients/shared";
 
 const lines = (s: string) =>
     (s || "")
@@ -276,7 +281,7 @@ export default function ClientDetail() {
             ? [{ key: "service", label: t("sxClientDetailTabServiceAccount") }]
             : []),
         { key: "sessions", label: t("sxNavSessions") },
-        ...(oidc ? [{ key: "keys", label: t("sxClientDetailTabKeys") }] : []),
+        ...(oidc || protocol === "saml" ? [{ key: "keys", label: t("sxClientDetailTabKeys") }] : []),
         { key: "advanced", label: t("sxClientDetailTabAdvanced") },
         { key: "events", label: t("sxNavEvents") },
         { key: "adminperm", label: t("sxNavAdminPermissions") }
@@ -384,6 +389,7 @@ export default function ClientDetail() {
                     {tab === "keys" && oidc && (
                         <KeysTab
                             id={id}
+                            clientId={client.clientId}
                             edited={edited}
                             setEdited={setEdited}
                             adminClient={adminClient}
@@ -392,6 +398,9 @@ export default function ClientDetail() {
                             reload={loadClient}
                             confirm={confirm}
                         />
+                    )}
+                    {tab === "keys" && protocol === "saml" && (
+                        <SamlKeys id={id} client={client} reload={loadClient} />
                     )}
                     {tab === "advanced" && (
                         <AdvancedTab
@@ -1199,6 +1208,7 @@ function CredentialsTab({ id, client, adminClient, addAlert, addError, reload }:
     const [savingCfg, setSavingCfg] = useState(false);
     const [regToken, setRegToken] = useState("");
     const [genningToken, setGenningToken] = useState(false);
+    const [secretVersion, setSecretVersion] = useState(0);
 
     const authenticatorType = client?.clientAuthenticatorType || "client-secret";
 
@@ -1248,6 +1258,8 @@ function CredentialsTab({ id, client, adminClient, addAlert, addError, reload }:
             const res = await adminClient.clients.generateNewClientSecret({ id });
             setSecret(res?.value ?? "");
             addAlert(t("sxClientDetailSecretRegenerated"), AlertVariant.success);
+            setSecretVersion(n => n + 1);
+            await reload();
         } catch (err) {
             addError(t("sxClientDetailSecretRegenerateFailed"), err);
         }
@@ -1332,11 +1344,16 @@ function CredentialsTab({ id, client, adminClient, addAlert, addError, reload }:
                     ) : (
                         <Group>
                             <CopyRow value={secret} onCopy={copy} />
+                            {client?.attributes?.["client.secret.expiration.time"] && <SecretExpiry client={client} />}
                             <ActionRow onClick={regenerate}>{t("sxClientDetailRegenerate")}</ActionRow>
                         </Group>
                     )}
                     <GroupFooter>{t("sxClientDetailClientSecretHelp")}</GroupFooter>
                 </Section>
+            )}
+
+            {authenticatorType === "client-secret" && !failed && (
+                <RotatedSecretSection id={id} client={client} version={secretVersion} reload={reload} />
             )}
 
             {authenticatorType === "client-jwt" && (
@@ -2312,6 +2329,7 @@ function AddScopeModal({ unassigned, onAdd, onClose }: any) {
 
 function DedicatedScopeModal({
     id,
+    clientId,
     adminClient,
     addAlert,
     addError,
@@ -2335,6 +2353,9 @@ function DedicatedScopeModal({
     const [newName, setNewName] = useState("");
     const [newConfig, setNewConfig] = useState<any>({});
     const [saving, setSaving] = useState(false);
+    const [editing, setEditing] = useState<any>(null);
+    const [editName, setEditName] = useState("");
+    const [editConfig, setEditConfig] = useState<any>({});
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -2372,6 +2393,32 @@ function DedicatedScopeModal({
         setPickedType(null);
         setNewName("");
         setNewConfig({});
+        setEditing(null);
+        setEditName("");
+        setEditConfig({});
+    };
+    const openEdit = (m: any) => {
+        setEditing(m);
+        setEditName(m.name || "");
+        setEditConfig(configToForm(m.config));
+        setView("edit");
+    };
+    const saveEdit = async () => {
+        if (!editing || !editName.trim()) return;
+        setSaving(true);
+        try {
+            await adminClient.clients.updateProtocolMapper(
+                { id, mapperId: editing.id },
+                { ...editing, name: editName.trim(), config: formToConfig(editConfig) }
+            );
+            addAlert(t("sxClientDetailXMapperUpdated"), AlertVariant.success);
+            goList();
+            await load();
+        } catch (err) {
+            addError(t("sxClientDetailXMapperUpdateFailed"), err);
+        } finally {
+            setSaving(false);
+        }
     };
     const toggleSel = (name: string) =>
         setSelected(prev => {
@@ -2515,7 +2562,8 @@ function DedicatedScopeModal({
                                                     <ItemRow
                                                         key={m.id}
                                                         title={m.name}
-                                                        subtitle={m.protocolMapper}
+                                                        subtitle={mapperTypes.find((mt: any) => mt.id === m.protocolMapper)?.name || m.protocolMapper}
+                                                        onClick={() => openEdit(m)}
                                                         trailing={
                                                             <RowDelete
                                                                 onClick={() => deleteMapper(m)}
@@ -2537,9 +2585,52 @@ function DedicatedScopeModal({
                                             />
                                         </Group>
                                         <GroupFooter>{t("sxClientDetailFullScopeFooter")}</GroupFooter>
+                                        {!fullScope && (
+                                            <div className="mt-6">
+                                                <RoleScopeMapping resource="clients" id={id} name={clientId || id} />
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </>
+                        ) : view === "edit" && editing ? (
+                            <div className="flex flex-col gap-4">
+                                <SubBack onClick={goList}>{t("sxClientDetailMappers")}</SubBack>
+                                <Field size="lg">
+                                    <FieldLabel>{t("sxCommonName")}</FieldLabel>
+                                    <Input
+                                        size="lg"
+                                        value={editName}
+                                        onChange={(e: any) => setEditName(e.target.value)}
+                                        placeholder={t("sxClientDetailMapperName")}
+                                    />
+                                </Field>
+                                <Field size="lg">
+                                    <FieldLabel>{t("sxCommonType")}</FieldLabel>
+                                    <Input
+                                        size="lg"
+                                        readOnly
+                                        className="text-muted-foreground"
+                                        value={mapperTypes.find((mt: any) => mt.id === editing.protocolMapper)?.name || editing.protocolMapper}
+                                    />
+                                </Field>
+                                <ConfigForm
+                                    properties={mapperTypes.find((mt: any) => mt.id === editing.protocolMapper)?.properties}
+                                    value={editConfig}
+                                    onChange={(name: string, v: string[]) =>
+                                        setEditConfig((c: any) => ({ ...c, [name]: v }))
+                                    }
+                                />
+                                <SaveBar>
+                                    <Button
+                                        size="form"
+                                        disabled={saving || !editName.trim()}
+                                        onClick={saveEdit}
+                                    >
+                                        {saving ? t("sxCommonSaving") : t("sxCommonSave")}
+                                    </Button>
+                                </SaveBar>
+                            </div>
                         ) : view === "choose" ? (
                             <div className="flex flex-col gap-3">
                                 <SubBack onClick={() => setView("list")}>{t("sxClientDetailMappers")}</SubBack>
@@ -2691,6 +2782,10 @@ function EvaluateScopes({ id, adminClient, addError }: any) {
     const [rolesFailed, setRolesFailed] = useState(false);
     const [token, setToken] = useState<any>(null);
     const [tokenFailed, setTokenFailed] = useState(false);
+    const [idToken, setIdToken] = useState<any>(null);
+    const [idTokenFailed, setIdTokenFailed] = useState(false);
+    const [userInfo, setUserInfo] = useState<any>(null);
+    const [userInfoFailed, setUserInfoFailed] = useState(false);
     const [evaluating, setEvaluating] = useState(false);
 
     const scopeParam = useMemo(
@@ -2729,6 +2824,8 @@ function EvaluateScopes({ id, adminClient, addError }: any) {
             setMappersFailed(false);
             setRolesFailed(false);
             setTokenFailed(false);
+            setIdTokenFailed(false);
+            setUserInfoFailed(false);
             try {
                 const m = await adminClient.clients.evaluateListProtocolMapper({
                     id,
@@ -2752,19 +2849,22 @@ function EvaluateScopes({ id, adminClient, addError }: any) {
                 setRolesFailed(true);
             }
             if (uid) {
-                try {
-                    const generated = await adminClient.clients.evaluateGenerateAccessToken({
-                        id,
-                        userId: uid,
-                        scope: scopeParam
-                    });
-                    setToken(generated ?? null);
-                } catch {
-                    setToken(null);
-                    setTokenFailed(true);
-                }
+                const params = { id, userId: uid, scope: scopeParam };
+                const [access, idt, info] = await Promise.allSettled([
+                    adminClient.clients.evaluateGenerateAccessToken(params),
+                    adminClient.clients.evaluateGenerateIdToken(params),
+                    adminClient.clients.evaluateGenerateUserInfo(params)
+                ]);
+                setToken(access.status === "fulfilled" ? (access.value ?? null) : null);
+                setTokenFailed(access.status === "rejected");
+                setIdToken(idt.status === "fulfilled" ? (idt.value ?? null) : null);
+                setIdTokenFailed(idt.status === "rejected");
+                setUserInfo(info.status === "fulfilled" ? (info.value ?? null) : null);
+                setUserInfoFailed(info.status === "rejected");
             } else {
                 setToken(null);
+                setIdToken(null);
+                setUserInfo(null);
             }
             setEvaluating(false);
         },
@@ -2863,7 +2963,9 @@ function EvaluateScopes({ id, adminClient, addError }: any) {
                         value={view}
                         onChange={setView}
                         items={[
-                            { value: "token", label: t("sxClientDetailSampleToken") },
+                            { value: "token", label: t("sxClientDetailXGeneratedAccessToken") },
+                            { value: "idtoken", label: t("sxClientDetailXGeneratedIdToken") },
+                            { value: "userinfo", label: t("sxClientDetailXGeneratedUserInfo") },
                             { value: "mappers", label: t("sxClientDetailEffectiveMappers") },
                             { value: "roles", label: t("sxClientDetailEffectiveRoles") }
                         ]}
@@ -2873,25 +2975,33 @@ function EvaluateScopes({ id, adminClient, addError }: any) {
                         <ListSkeleton />
                     ) : (
                     <>
-                    {view === "token" &&
-                        (!picked ? (
-                            <Notice
-                                title={t("sxClientDetailPickUserTitle")}
-                                description={t("sxClientDetailPickUserDescription")}
-                            />
-                        ) : tokenFailed ? (
-                            <Notice
-                                title={t("sxClientDetailTokenEvalErrorTitle")}
-                                description={t("sxLoadErrorDescription")}
-                                onRetry={() => evaluate()}
-                            />
-                        ) : (
-                            <CodeBlock size="sm">
-                                <CodeBlockContent className="max-h-112 scroll-fade-y">
-                                    {token ? JSON.stringify(token, null, 2) : "—"}
-                                </CodeBlockContent>
-                            </CodeBlock>
-                        ))}
+                    {["token", "idtoken", "userinfo"].includes(view) &&
+                        (() => {
+                            const value = view === "token" ? token : view === "idtoken" ? idToken : userInfo;
+                            const failedNow = view === "token" ? tokenFailed : view === "idtoken" ? idTokenFailed : userInfoFailed;
+                            if (!picked)
+                                return (
+                                    <Notice
+                                        title={t("sxClientDetailPickUserTitle")}
+                                        description={t("sxClientDetailPickUserDescription")}
+                                    />
+                                );
+                            if (failedNow)
+                                return (
+                                    <Notice
+                                        title={view === "userinfo" ? t("sxClientDetailXUserInfoEvalErrorTitle") : t("sxClientDetailTokenEvalErrorTitle")}
+                                        description={t("sxLoadErrorDescription")}
+                                        onRetry={() => evaluate()}
+                                    />
+                                );
+                            return (
+                                <CodeBlock size="sm">
+                                    <CodeBlockContent className="max-h-112 scroll-fade-y">
+                                        {value ? JSON.stringify(value, null, 2) : "—"}
+                                    </CodeBlockContent>
+                                </CodeBlock>
+                            );
+                        })()}
 
                     {view === "mappers" &&
                         (mappersFailed ? (
@@ -3372,6 +3482,7 @@ const KEYSTORE_FORMATS = [
 
 function KeysTab({
     id,
+    clientId,
     edited,
     setEdited,
     adminClient,
@@ -3387,6 +3498,7 @@ function KeysTab({
     const [loadingCert, setLoadingCert] = useState(true);
     const [certFailed, setCertFailed] = useState(false);
     const [keystoreFormat, setKeystoreFormat] = useState("JKS");
+    const [exportOpen, setExportOpen] = useState(false);
     const fileRef = useRef<HTMLInputElement>(null);
 
     const loadCert = useCallback(async () => {
@@ -3544,6 +3656,11 @@ function KeysTab({
                         ) : (
                             <EmptyRow>{t("sxClientDetailNoCert")}</EmptyRow>
                         )}
+                        {cert && (
+                            <ActionRow onClick={() => setExportOpen(true)}>
+                                {t("sxCommonExport")}
+                            </ActionRow>
+                        )}
                         <ActionRow danger onClick={generateKey}>
                             {t("sxClientDetailGenerateKeyTitle")}
                         </ActionRow>
@@ -3580,6 +3697,14 @@ function KeysTab({
                 </Group>
                 <GroupFooter>{t("sxClientDetailImportCertFooter")}</GroupFooter>
             </Section>
+            {exportOpen && (
+                <KeyExportModal
+                    id={id}
+                    attr="jwt.credential"
+                    defaultAlias={clientId}
+                    onClose={() => setExportOpen(false)}
+                />
+            )}
         </div>
     );
 }
