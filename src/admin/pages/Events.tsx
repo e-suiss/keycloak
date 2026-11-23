@@ -19,6 +19,7 @@ import { AdminPage, Chip, GROUP, Group, ListSkeleton, Notice, Section, SegmentTa
 import { useTranslation } from "react-i18next";
 import { useT } from "../ui/i18n";
 import { useRealm } from "../ui/realm";
+import { Link } from "react-router-dom";
 
 const PAGE = 100;
 
@@ -52,6 +53,41 @@ const opTone = (op: string) => {
 };
 
 const OP_TYPES = ["CREATE", "UPDATE", "DELETE", "ACTION"];
+
+function SavingOffBanner({ tab }: { tab: "login" | "admin" }) {
+    const t = useT();
+    const { adminClient } = useAdminClient();
+    const { realm } = useRealm();
+    const [config, setConfig] = useState<any>(null);
+
+    useEffect(() => {
+        let alive = true;
+        adminClient.realms
+            .getConfigEvents({ realm })
+            .then(cfg => alive && setConfig(cfg || {}))
+            .catch(() => alive && setConfig(null));
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, realm]);
+
+    if (!config) return null;
+    const off = tab === "login" ? !config.eventsEnabled : !config.adminEventsEnabled;
+    if (!off) return null;
+    return (
+        <div className="flex flex-col gap-2 rounded-xl border border-[#b25000]/40 bg-[#b25000]/8 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between dark:border-[#ff9f0a]/40 dark:bg-[#ff9f0a]/10">
+            <span className="text-[#b25000] dark:text-[#ff9f0a]">
+                {t(tab === "login" ? "sxEventsSavingOffUser" : "sxEventsSavingOffAdmin")}
+            </span>
+            <Link
+                to={`/${realm}/realm-settings`}
+                className="shrink-0 rounded-md font-medium text-primary outline-none hover:opacity-70 focus-visible:ring-2 focus-visible:ring-ring/50"
+            >
+                {t("sxEventsOpenSettings")}
+            </Link>
+        </div>
+    );
+}
 
 export default function Events() {
     const t = useT();
@@ -170,6 +206,7 @@ export default function Events() {
                 </>
             }
         >
+            <SavingOffBanner tab={tab} />
             <SegmentTabs
                 ariaLabel={t("sxEventsTypeLabel")}
                 value={tab}
