@@ -12,7 +12,12 @@ import type { Environment } from "./environment";
 import { AdminShell } from "./shell/AdminShell";
 import { initAdminI18n } from "./ui/i18n";
 import { AppSkeleton, PageSkeleton } from "./ui/kit";
-import { RealmProvider } from "./ui/realm";
+import { RealmProvider, useRealm } from "./ui/realm";
+
+function RealmOutlet() {
+    const { realm } = useRealm();
+    return <Outlet key={realm} />;
+}
 
 export const App = () => {
     const { keycloak, environment } = useEnvironment<Environment>();
@@ -43,7 +48,7 @@ export const App = () => {
                     <Suspense
                         fallback={<PageSkeleton />}
                     >
-                        <Outlet />
+                        <RealmOutlet />
                     </Suspense>
                 </AdminShell>
                 <SessionExpirationWarningOverlay warnUserSecondsBeforeAutoLogout={45} />

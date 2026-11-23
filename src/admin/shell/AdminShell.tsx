@@ -2,6 +2,8 @@
 
 import {
     AppWindowIcon,
+    CaretUpDownIcon,
+    CheckIcon,
     BuildingsIcon,
     ClockCounterClockwiseIcon,
     DatabaseIcon,
@@ -22,8 +24,16 @@ import {
     UsersThreeIcon
 } from "@phosphor-icons/react";
 import { cn } from "@ui/lib/utils";
-import type { PropsWithChildren } from "react";
-import { Link, useLocation } from "react-router-dom";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuTrigger
+} from "@ui/components/dropdown-menu";
+import { type PropsWithChildren, useEffect, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useAdminClient } from "../admin-client";
 import { useEnvironment } from "../../shared/keycloak-ui-shared";
 import { HAIRLINE, NavBrandBar, navLinkClass, Shell, useNavDrawer } from "../../shared/shell/Shell";
 import { UserMenu } from "../../shared/shell/UserMenu";
@@ -104,6 +114,115 @@ function useActive() {
     return (to: string) => pathname === to || pathname.startsWith(`${to}/`);
 }
 
+function RealmPicker() {
+    const t = useT();
+    const { adminClient } = useAdminClient();
+    const { realm } = useRealm();
+    const navigate = useNavigate();
+    const { setOpen } = useNavDrawer();
+    const [realms, setRealms] = useState<any[] | null>(null);
+    const [failed, setFailed] = useState(false);
+    const [attempt, setAttempt] = useState(0);
+    const [query, setQuery] = useState("");
+
+    useEffect(() => {
+        let alive = true;
+        setFailed(false);
+        adminClient.realms
+            .find({ briefRepresentation: true })
+            .then(list => {
+                if (!alive) return;
+                const sorted = [...(Array.isArray(list) ? list : [])].sort((a, b) =>
+                    (a.realm || "").localeCompare(b.realm || "")
+                );
+                setRealms(sorted);
+            })
+            .catch(() => alive && setFailed(true));
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, attempt]);
+
+    const current = realms?.find(r => r.realm === realm);
+    const label = (r: any) => (r?.displayName && !/^\$\{.*\}$/.test(r.displayName) ? r.displayName : r?.realm);
+    const filtered = (realms || []).filter(r =>
+        `${r.realm} ${r.displayName || ""}`.toLowerCase().includes(query.trim().toLowerCase())
+    );
+
+    return (
+        <DropdownMenu onOpenChange={open => !open && setQuery("")}>
+            <DropdownMenuTrigger asChild>
+                <button
+                    type="button"
+                    aria-label={t("sxRealmSelect")}
+                    className="mb-1 flex h-12 w-full items-center gap-2.5 rounded-xl border border-[#e5e5ea] bg-[#f5f5f7] px-3 text-left outline-none transition-colors hover:bg-[#e5e5ea]/60 focus-visible:ring-2 focus-visible:ring-ring/50 dark:border-[#38383a] dark:bg-[#1c1c1e] dark:hover:bg-[#2c2c2e]"
+                >
+                    <span className="grid size-6 shrink-0 place-items-center rounded-md bg-primary text-[11px] font-semibold text-white uppercase">
+                        {(realm || "?").charAt(0)}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                        <span className="block text-[11px] leading-tight text-muted-foreground">{t("sxRealmCurrent")}</span>
+                        <span className="block truncate text-sm font-medium leading-tight">{label(current) || realm}</span>
+                    </span>
+                    <CaretUpDownIcon className="size-4 shrink-0 text-muted-foreground" />
+                </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+                align="start"
+                sideOffset={6}
+                className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-56 rounded-xl border border-[#e5e5ea] bg-background p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.18)] ring-0 dark:border-[#38383a] dark:bg-[#1c1c1e]"
+            >
+                <DropdownMenuLabel className="px-2.5 pt-1.5 pb-1 text-xs font-normal text-muted-foreground">
+                    {t("sxRealmSelect")}
+                </DropdownMenuLabel>
+                {realms && realms.length > 7 && (
+                    <div className="px-1 pb-1">
+                        <input
+                            value={query}
+                            onChange={event => setQuery(event.target.value)}
+                            onKeyDown={event => event.stopPropagation()}
+                            placeholder={t("sxRealmSearch")}
+                            aria-label={t("sxRealmSearch")}
+                            className="h-9 w-full rounded-lg border border-[#e5e5ea] bg-background px-2.5 text-sm outline-none focus-visible:border-ring dark:border-[#38383a]"
+                        />
+                    </div>
+                )}
+                {failed ? (
+                    <div className="px-2.5 py-2 text-[13px] text-muted-foreground">
+                        {t("sxRealmLoadError")}{" "}
+                        <button type="button" className="font-medium text-primary" onClick={() => setAttempt(n => n + 1)}>
+                            {t("sxRetry")}
+                        </button>
+                    </div>
+                ) : realms === null ? (
+                    <div className="flex flex-col gap-2 px-2.5 py-2">
+                        <div className="h-3 w-3/5 animate-pulse rounded-md bg-[#e5e5ea] dark:bg-[#2c2c2e]" />
+                        <div className="h-3 w-2/5 animate-pulse rounded-md bg-[#e5e5ea] dark:bg-[#2c2c2e]" />
+                    </div>
+                ) : filtered.length === 0 ? (
+                    <div className="px-2.5 py-2 text-[13px] text-muted-foreground">{t("sxRealmNone")}</div>
+                ) : (
+                    <div className="max-h-80 overflow-y-auto">
+                        {filtered.map(r => (
+                            <DropdownMenuItem
+                                key={r.id || r.realm}
+                                className="rounded-lg px-2.5 py-2 text-sm"
+                                onSelect={() => {
+                                    setOpen(false);
+                                    if (r.realm !== realm) navigate(`/${encodeURIComponent(r.realm)}/dashboard`);
+                                }}
+                            >
+                                <span className="min-w-0 flex-1 truncate">{label(r)}</span>
+                                {r.realm === realm && <CheckIcon className="size-4 text-primary" />}
+                            </DropdownMenuItem>
+                        ))}
+                    </div>
+                )}
+            </DropdownMenuContent>
+        </DropdownMenu>
+    );
+}
+
 function AdminNav() {
     const t = useT();
     const groups = visible(useNavGroups());
@@ -113,6 +232,7 @@ function AdminNav() {
     return (
         <>
             <NavBrandBar title={t("sxBrandTitle")} suffix={t("sxBrandSuffix")} />
+            <RealmPicker />
             <nav aria-label={t("sxMenu")}>
                 {groups.map(group => (
                     <div key={group.label}>
