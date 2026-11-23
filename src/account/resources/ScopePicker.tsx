@@ -40,6 +40,7 @@ export function ScopePicker({ control, name, scopes, id }: ScopePickerProps) {
                             <ToggleGroupItem
                                 key={scope.name}
                                 value={scope.name}
+                                className="h-7.5 rounded-full border-[#d2d2d7] px-3 text-[13px] font-medium aria-pressed:border-primary aria-pressed:bg-primary/10 aria-pressed:text-primary aria-pressed:hover:bg-primary/15 aria-pressed:hover:text-primary dark:border-[#48484a]"
                             >
                                 {selected.includes(scope.name) && <CheckIcon />}
                                 {scopeLabel(scope)}
