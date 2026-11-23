@@ -1,14 +1,3 @@
-/**
- * WARNING: Before modifying this file, run the following command:
- *
- * $ npx keycloakify own --path "shared/keycloak-ui-shared/alerts/Alerts.tsx"
- *
- * This file is provided by @keycloakify/keycloak-ui-shared version 260601.0.0.
- * It was copied into your repository by the postinstall script: `keycloakify sync-extensions`.
- */
-
-/* eslint-disable */
-
 // @ts-nocheck
 
 import { type PropsWithChildren, useCallback, useMemo, useState } from "react";
@@ -66,8 +55,10 @@ export const AlertProvider = ({ children }: PropsWithChildren) => {
     const setTimeout = useSetTimeout();
     const [alerts, setAlerts] = useState<AlertEntry[]>([]);
 
-    const removeAlert = (id: number) =>
-        setAlerts(alerts => alerts.filter(alert => alert.id !== id));
+    const removeAlert = useCallback(
+        (id: number) => setAlerts(alerts => alerts.filter(alert => alert.id !== id)),
+        []
+    );
 
     const addAlert = useCallback<AddAlertFunction>(
         (message, variant = AlertVariant.success, description) => {
