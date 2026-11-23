@@ -1,6 +1,6 @@
 // @ts-nocheck
 
-import { DeviceMobileIcon, MonitorIcon, SignOutIcon } from "@phosphor-icons/react";
+import { ClockCounterClockwiseIcon, DeviceMobileIcon, MonitorIcon, SignOutIcon } from "@phosphor-icons/react";
 import { Button } from "@ui/components/button";
 import { Spinner } from "@ui/components/spinner";
 import {
@@ -13,6 +13,14 @@ import {
     ConfirmHeader,
     ConfirmTitle
 } from "@ui/patterns/confirm";
+import {
+    Modal,
+    ModalBody,
+    ModalContent,
+    ModalFooter,
+    ModalHeader,
+    ModalTitle
+} from "@ui/patterns/modal";
 import { useEffect, useRef, useState } from "react";
 import { AlertVariant, useAlerts } from "../../shared/keycloak-ui-shared";
 import { useAdminClient } from "../admin-client";
@@ -82,6 +90,7 @@ export default function Sessions() {
     const [more, setMore] = useState(false);
     const [busy, setBusy] = useState<string | null>(null);
     const [attempt, setAttempt] = useState(0);
+    const [revocationOpen, setRevocationOpen] = useState(false);
 
     useEffect(() => {
         const id = setTimeout(() => setSearch(query.trim()), 300);
@@ -180,10 +189,16 @@ export default function Sessions() {
             title={t("sxNavSessions")}
             description={t("sxSessionsDescription")}
             actions={
-                <Button type="button" variant="destructive" onClick={logoutAll}>
-                    <SignOutIcon weight="bold" data-icon="inline-start" />
-                    {t("sxSessionsSignOutAll")}
-                </Button>
+                <>
+                    <Button type="button" variant="plain" onClick={() => setRevocationOpen(true)}>
+                        <ClockCounterClockwiseIcon weight="bold" data-icon="inline-start" />
+                        {t("sxSessionsRevocation")}
+                    </Button>
+                    <Button type="button" variant="destructive" onClick={logoutAll}>
+                        <SignOutIcon weight="bold" data-icon="inline-start" />
+                        {t("sxSessionsSignOutAll")}
+                    </Button>
+                </>
             }
         >
             <div className="flex flex-col gap-3">
@@ -243,6 +258,8 @@ export default function Sessions() {
                     </>
                 )}
             </Section>
+
+            {revocationOpen && <RevocationModal onClose={() => setRevocationOpen(false)} />}
 
             <Confirm open={!!confirmOpts} onOpenChange={o => !o && setConfirmOpts(null)}>
                 <ConfirmContent>
@@ -314,5 +331,135 @@ function SessionRow({ s, busy, onSignOut }: any) {
                 </>
             }
         />
+    );
+}
+
+function RevocationModal({ onClose }: any) {
+    const t = useT();
+    const { i18n } = useTranslation();
+    const { adminClient } = useAdminClient();
+    const { realm } = useRealm();
+    const { addAlert, addError } = useAlerts();
+    const [notBefore, setNotBefore] = useState<number | null>(null);
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
+    const [attempt, setAttempt] = useState(0);
+    const [busy, setBusy] = useState<string | null>(null);
+
+    useEffect(() => {
+        let alive = true;
+        setStatus("loading");
+        adminClient.realms
+            .findOne({ realm })
+            .then((rep: any) => {
+                if (!alive) return;
+                setNotBefore(Number(rep?.notBefore) || 0);
+                setStatus("ready");
+            })
+            .catch(() => alive && setStatus("error"));
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, realm, attempt]);
+
+    const run = async (key: string, fn: () => Promise<void>) => {
+        setBusy(key);
+        try {
+            await fn();
+            onClose();
+        } finally {
+            setBusy(null);
+        }
+    };
+
+    const setNow = () =>
+        run("now", async () => {
+            try {
+                await adminClient.realms.update({ realm }, { realm, notBefore: Math.floor(Date.now() / 1000) });
+                addAlert(t("sxSessionsNotBeforeSet"), AlertVariant.success);
+            } catch (e) {
+                addError(t("sxSessionsNotBeforeSetError"), e);
+            }
+        });
+
+    const clear = () =>
+        run("clear", async () => {
+            try {
+                await adminClient.realms.update({ realm }, { realm, notBefore: 0 });
+                addAlert(t("sxSessionsNotBeforeCleared"), AlertVariant.success);
+            } catch (e) {
+                addError(t("sxSessionsNotBeforeClearError"), e);
+            }
+        });
+
+    const push = () =>
+        run("push", async () => {
+            try {
+                const result = await adminClient.realms.pushRevocation({ realm });
+                const ok = result?.successRequests || [];
+                const failed = result?.failedRequests || [];
+                if (ok.length === 0 && failed.length === 0) {
+                    addAlert(t("sxSessionsPushNoAdminUrl"), AlertVariant.warning);
+                    return;
+                }
+                if (ok.length > 0)
+                    addAlert(t("sxSessionsPushSuccess", { nodes: ok.join(", ") }), AlertVariant.success);
+                if (failed.length > 0)
+                    addAlert(t("sxSessionsPushFailed", { nodes: failed.join(", ") }), AlertVariant.danger);
+            } catch (e) {
+                addError(t("sxSessionsPushError"), e);
+            }
+        });
+
+    return (
+        <Modal open onOpenChange={o => !o && !busy && onClose()}>
+            <ModalContent>
+                <ModalHeader>
+                    <ModalTitle>{t("sxSessionsRevocation")}</ModalTitle>
+                </ModalHeader>
+                <ModalBody>
+                    <div className="flex flex-col gap-4">
+                        <p className="text-[15px] leading-[1.45] text-muted-foreground">
+                            {t("sxSessionsRevocationDescription")}
+                        </p>
+                        {status === "loading" && <ListSkeleton rows={1} />}
+                        {status === "error" && (
+                            <Notice
+                                title={t("sxSessionsNotBeforeLoadError")}
+                                description={t("sxLoadErrorDescription")}
+                                onRetry={() => setAttempt(n => n + 1)}
+                            />
+                        )}
+                        {status === "ready" && (
+                            <Group>
+                                <Row
+                                    title={t("sxSessionsNotBefore")}
+                                    subtitle={
+                                        <span className="tabular-nums">
+                                            {notBefore
+                                                ? new Date(notBefore * 1000).toLocaleString(i18n.language)
+                                                : t("sxSessionsNotBeforeNone")}
+                                        </span>
+                                    }
+                                />
+                            </Group>
+                        )}
+                    </div>
+                </ModalBody>
+                <ModalFooter>
+                    <Button type="button" variant="plain" disabled={!!busy} onClick={clear}>
+                        {busy === "clear" && <Spinner data-icon="inline-start" />}
+                        {t("sxSessionsNotBeforeClear")}
+                    </Button>
+                    <Button type="button" variant="plain" disabled={!!busy} onClick={push}>
+                        {busy === "push" && <Spinner data-icon="inline-start" />}
+                        {t("sxSessionsPush")}
+                    </Button>
+                    <Button type="button" disabled={!!busy} onClick={setNow}>
+                        {busy === "now" && <Spinner data-icon="inline-start" />}
+                        {t("sxSessionsSetToNow")}
+                    </Button>
+                </ModalFooter>
+            </ModalContent>
+        </Modal>
     );
 }

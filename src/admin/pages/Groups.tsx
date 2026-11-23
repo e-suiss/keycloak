@@ -1,7 +1,9 @@
 // @ts-nocheck
 
 import {
+    ArrowsOutCardinalIcon,
     CaretRightIcon,
+    CopyIcon,
     DotsThreeIcon,
     FolderPlusIcon,
     StarIcon,
@@ -42,9 +44,12 @@ import { Fragment, useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AlertVariant, useAlerts } from "../../shared/keycloak-ui-shared";
 import { useAdminClient } from "../admin-client";
-import { AdminPage, Chip, GROUP, ListSkeleton, Notice, SEPARATOR, Section, TextAction } from "../ui/kit";
+import { AdminPage, Chip, GROUP, ListSkeleton, Notice, SEPARATOR, SearchField, Section, TextAction } from "../ui/kit";
+import { useCapabilities } from "../ui/capabilities";
 import { useT } from "../ui/i18n";
 import { useRealm } from "../ui/realm";
+import { DuplicateGroupModal } from "./groups/DuplicateGroupModal";
+import { MoveGroupModal } from "./groups/MoveGroupModal";
 
 export default function Groups() {
     const t = useT();
@@ -64,6 +69,17 @@ export default function Groups() {
     const [createParent, setCreateParent] = useState<any>(undefined);
     const [newName, setNewName] = useState("");
     const [creating, setCreating] = useState(false);
+    const [query, setQuery] = useState("");
+    const [term, setTerm] = useState("");
+    const [moving, setMoving] = useState<any>(null);
+    const [duplicating, setDuplicating] = useState<any>(null);
+    const caps = useCapabilities();
+    const copyPermissions = caps.isFeatureEnabled("ADMIN_FINE_GRAINED_AUTHZ");
+
+    useEffect(() => {
+        const timer = setTimeout(() => setTerm(query.trim()), 300);
+        return () => clearTimeout(timer);
+    }, [query]);
 
     useEffect(() => {
         let alive = true;
@@ -71,7 +87,9 @@ export default function Groups() {
             setStatus("loading");
             try {
                 const [list, def] = await Promise.all([
-                    adminClient.groups.find({ briefRepresentation: false }),
+                    term
+                        ? adminClient.groups.find({ search: term, briefRepresentation: false, first: 0, max: 100 })
+                        : adminClient.groups.find({ briefRepresentation: false }),
                     adminClient.realms.getDefaultGroups({ realm })
                 ]);
                 if (!alive) return;
@@ -85,7 +103,7 @@ export default function Groups() {
         return () => {
             alive = false;
         };
-    }, [adminClient, realm, reloadKey]);
+    }, [adminClient, realm, term, reloadKey]);
 
     const openCreate = (parent: any) => {
         setNewName("");
@@ -154,7 +172,13 @@ export default function Groups() {
             description={t("sxGroupsDescription")}
             actions={<Button onClick={() => openCreate(null)}>{t("sxGroupsNew")}</Button>}
         >
-            <Section label={t("sxNavGroups")}>
+            <SearchField
+                value={query}
+                onChange={setQuery}
+                onEnter={() => setTerm(query.trim())}
+                placeholder={t("sxGroupsSearch")}
+            />
+            <Section label={term ? t("sxGroupsSearchResults") : t("sxNavGroups")}>
                 {status === "loading" && <ListSkeleton />}
                 {status === "error" && (
                     <Notice
@@ -163,7 +187,10 @@ export default function Groups() {
                         onRetry={reload}
                     />
                 )}
-                {status === "ready" && roots.length === 0 && (
+                {status === "ready" && roots.length === 0 && term && (
+                    <Notice title={t("sxGroupsNoMatchTitle")} description={t("sxGroupsNoMatchDescription")} />
+                )}
+                {status === "ready" && roots.length === 0 && !term && (
                     <Notice
                         title={t("sxGroupsEmptyTitle")}
                         description={t("sxGroupsEmptyDescription")}
@@ -171,7 +198,7 @@ export default function Groups() {
                     />
                 )}
                 {status === "ready" && roots.length > 0 && (
-                    <ul className={GROUP}>
+                    <ul key={`${term}:${reloadKey}`} className={GROUP}>
                         {roots.map((g, i) => (
                             <Fragment key={g.id}>
                                 {i > 0 && <li aria-hidden className={SEPARATOR} />}
@@ -179,10 +206,13 @@ export default function Groups() {
                                     group={g}
                                     depth={0}
                                     defaults={defaults}
+                                    term={term}
                                     onOpen={id => navigate(`/${realm}/groups/${id}`)}
                                     onAddChild={openCreate}
                                     onDelete={remove}
                                     onToggleDefault={toggleDefault}
+                                    onMove={setMoving}
+                                    onDuplicate={setDuplicating}
                                 />
                             </Fragment>
                         ))}
@@ -225,6 +255,27 @@ export default function Groups() {
                     </ModalFooter>
                 </ModalContent>
             </Modal>
+            {moving && (
+                <MoveGroupModal
+                    group={moving}
+                    onClose={() => setMoving(null)}
+                    onMoved={() => {
+                        setMoving(null);
+                        reload();
+                    }}
+                />
+            )}
+            {duplicating && (
+                <DuplicateGroupModal
+                    group={duplicating}
+                    copyPermissions={copyPermissions}
+                    onClose={() => setDuplicating(null)}
+                    onDone={() => {
+                        setDuplicating(null);
+                        reload();
+                    }}
+                />
+            )}
             <Confirm
                 open={!!confirmOpts}
                 onOpenChange={o => !o && setConfirmOpts(null)}
@@ -263,15 +314,20 @@ function TreeNode({
     group,
     depth,
     defaults,
+    term,
     onOpen,
     onAddChild,
     onDelete,
-    onToggleDefault
+    onToggleDefault,
+    onMove,
+    onDuplicate
 }: any) {
     const t = useT();
     const { adminClient } = useAdminClient();
-    const [open, setOpen] = useState(false);
-    const [children, setChildren] = useState<any[] | null>(null);
+    const preset = term && Array.isArray(group.subGroups) && group.subGroups.length > 0 ? sortGroups(group.subGroups) : null;
+    const [open, setOpen] = useState(!!preset);
+    const [children, setChildren] = useState<any[] | null>(preset);
+    const matched = !!term && (group.name ?? "").toLowerCase().includes(term.toLowerCase());
     const [loading, setLoading] = useState(false);
     const [failed, setFailed] = useState(false);
     const hasChildren = (group.subGroupCount ?? group.subGroups?.length ?? 0) > 0;
@@ -328,7 +384,14 @@ function TreeNode({
                         <UsersThreeIcon className="size-4.5" />
                     </span>
                     <span className="min-w-0">
-                        <span className="block truncate text-base font-medium">{group.name}</span>
+                        <span className={cn("block truncate text-base font-medium", matched && "text-primary")}>
+                            {group.name}
+                        </span>
+                        {matched && (
+                            <span className="mt-0.5 block truncate font-mono text-[13px] text-muted-foreground">
+                                {group.path}
+                            </span>
+                        )}
                         {isDefault && (
                             <span className="mt-0.5 flex items-center gap-1 text-[13px] text-muted-foreground sm:hidden">
                                 <StarIcon weight="fill" className="size-3" /> {t("sxGroupsDefault")}
@@ -361,6 +424,12 @@ function TreeNode({
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => onToggleDefault(group)}>
                                 <StarIcon /> {isDefault ? t("sxGroupsUnsetDefault") : t("sxGroupsSetDefault")}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => onMove(group)}>
+                                <ArrowsOutCardinalIcon /> {t("sxGroupsMoveTo")}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => onDuplicate(group)}>
+                                <CopyIcon /> {t("sxGroupsDuplicate")}
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem variant="destructive" onClick={() => onDelete(group)}>
@@ -397,10 +466,13 @@ function TreeNode({
                                 group={c}
                                 depth={depth + 1}
                                 defaults={defaults}
+                                term={term}
                                 onOpen={onOpen}
                                 onAddChild={onAddChild}
                                 onDelete={onDelete}
                                 onToggleDefault={onToggleDefault}
+                                onMove={onMove}
+                                onDuplicate={onDuplicate}
                             />
                         </Fragment>
                     ))

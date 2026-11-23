@@ -44,6 +44,7 @@ import {
 import { useT } from "../ui/i18n";
 import { useRealm } from "../ui/realm";
 import { initials } from "../ui/util";
+import { PermissionsPanel, useFineGrainedV1 } from "./groups/PermissionsPanel";
 
 const TABS = [
     { value: "details", label: "sxRoleDetailTabDetails" },
@@ -98,6 +99,8 @@ export default function RoleDetail() {
     const [attempt, setAttempt] = useState(0);
     const [role, setRole] = useState<any>(null);
     const [tab, setTab] = useState("details");
+    const showPermissions = useFineGrainedV1();
+    const tabs = showPermissions ? [...TABS, { value: "permissions", label: "sxRoleDetailTabPermissions" }] : TABS;
 
     const fetchRole = () =>
         adminClient.roles.findOneByName({ name: id }).catch(e => {
@@ -177,7 +180,7 @@ export default function RoleDetail() {
                 ariaLabel={t("sxRoleDetailSections")}
                 value={tab}
                 onChange={setTab}
-                items={TABS.map(item => ({ value: item.value, label: t(item.label) }))}
+                items={tabs.map(item => ({ value: item.value, label: t(item.label) }))}
             />
 
             {tab === "details" && (
@@ -191,6 +194,7 @@ export default function RoleDetail() {
             {tab === "attributes" && <AttributesTab role={role} reload={reload} />}
             {tab === "composite" && <CompositeTab role={role} reload={reload} />}
             {tab === "users" && <UsersTab role={role} />}
+            {tab === "permissions" && showPermissions && <PermissionsPanel type="roles" id={role.id} />}
         </AdminPage>
     );
 }

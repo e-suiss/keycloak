@@ -1,8 +1,7 @@
 // @ts-nocheck
 
-import { PlusIcon, ShieldCheckIcon, UserPlusIcon, UsersThreeIcon } from "@phosphor-icons/react";
+import { PlusIcon, UserPlusIcon, UsersThreeIcon } from "@phosphor-icons/react";
 import { Button } from "@ui/components/button";
-import { Checkbox } from "@ui/components/checkbox";
 import { Field, FieldLabel } from "@ui/components/field";
 import { Input } from "@ui/components/input";
 import {
@@ -43,6 +42,8 @@ import {
 import { useT } from "../ui/i18n";
 import { useRealm } from "../ui/realm";
 import { initials } from "../ui/util";
+import { PermissionsPanel, useFineGrainedV1 } from "./groups/PermissionsPanel";
+import { RoleMappingPanel } from "./groups/RoleMappingPanel";
 
 const DANGER_BTN = "bg-[#d70015] text-white hover:bg-[#d70015]/90 dark:bg-[#ff453a] dark:hover:bg-[#ff453a]/90";
 
@@ -144,6 +145,8 @@ export default function GroupDetail() {
     const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
     const [attempt, setAttempt] = useState(0);
     const [tab, setTab] = useState("members");
+    const showPermissions = useFineGrainedV1();
+    const tabs = showPermissions ? [...TABS, { value: "permissions", label: "sxGroupDetailTabPermissions" }] : TABS;
 
     const reload = async () => {
         try {
@@ -219,16 +222,17 @@ export default function GroupDetail() {
                 ariaLabel={t("sxGroupDetailSections")}
                 value={tab}
                 onChange={setTab}
-                items={TABS.map(item => ({ value: item.value, label: t(item.label) }))}
+                items={tabs.map(item => ({ value: item.value, label: t(item.label) }))}
             />
 
             <div key={group.id}>
                 {tab === "members" && <MembersTab group={group} />}
                 {tab === "attributes" && <AttributesTab group={group} reload={reload} />}
-                {tab === "roles" && <RolesTab group={group} />}
+                {tab === "roles" && <RoleMappingPanel group={group} />}
                 {tab === "children" && (
                     <ChildrenTab group={group} onOpen={cid => navigate(`/${realm}/groups/${cid}`)} reload={reload} />
                 )}
+                {tab === "permissions" && showPermissions && <PermissionsPanel type="groups" id={group.id} />}
                 {tab === "settings" && (
                     <SettingsTab group={group} reload={reload} onDeleted={() => navigate(`/${realm}/groups`)} />
                 )}
@@ -533,189 +537,6 @@ function AttributesTab({ group, reload }: any) {
                 </Button>
             </div>
         </div>
-    );
-}
-
-function RolesTab({ group }: any) {
-    const t = useT();
-    const { adminClient } = useAdminClient();
-    const { addAlert, addError } = useAlerts();
-    const [confirmOpts, setConfirmOpts] = useState<any>(null);
-    const confirm = setConfirmOpts;
-    const [picking, setPicking] = useState(false);
-    const {
-        data: assigned,
-        setData: setAssigned,
-        status,
-        retry
-    } = useLoader(() => adminClient.groups.listRealmRoleMappings({ id: group.id }), [adminClient, group.id]);
-
-    const removeRole = (r: any) =>
-        confirm({
-            title: t("sxGroupDetailRemoveRoleTitle"),
-            message: t("sxGroupDetailRemoveRoleMessage", { name: r.name }),
-            confirmLabel: t("sxGroupDetailUnassign"),
-            danger: true,
-            onConfirm: async () => {
-                try {
-                    await adminClient.groups.delRealmRoleMappings({
-                        id: group.id,
-                        roles: [{ id: r.id, name: r.name }]
-                    });
-                    addAlert(t("sxGroupDetailRoleRemoved"), AlertVariant.success);
-                    setAssigned(prev => prev.filter(x => x.id !== r.id));
-                } catch (e) {
-                    addError(t("sxGroupDetailRoleRemoveError"), e);
-                }
-            }
-        });
-
-    return (
-        <Section
-            label={t("sxGroupDetailAssignedRoles")}
-            action={
-                status === "ready" && (
-                    <TextAction onClick={() => setPicking(true)}>
-                        <AddLabel icon={<PlusIcon weight="bold" />}>{t("sxGroupDetailAssignRole")}</AddLabel>
-                    </TextAction>
-                )
-            }
-        >
-            {status === "loading" && <ListSkeleton />}
-            {status === "error" && (
-                <Notice
-                    title={t("sxGroupDetailRolesLoadError")}
-                    description={t("sxLoadErrorDescription")}
-                    onRetry={retry}
-                />
-            )}
-            {status === "ready" &&
-                (assigned.length === 0 ? (
-                    <Notice
-                        title={t("sxGroupDetailNoRolesTitle")}
-                        description={t("sxGroupDetailNoRolesDescription")}
-                        action={<Button onClick={() => setPicking(true)}>{t("sxGroupDetailAssignRole")}</Button>}
-                    />
-                ) : (
-                    <Group>
-                        {assigned.map(r => (
-                            <Row
-                                key={r.id}
-                                leading={
-                                    <IconTile>
-                                        <ShieldCheckIcon />
-                                    </IconTile>
-                                }
-                                title={r.name}
-                                subtitle={r.description || undefined}
-                                trailing={
-                                    <TextAction tone="danger" onClick={() => removeRole(r)} aria-label={t("sxGroupDetailRemoveRoleTitle")}>
-                                        {t("sxGroupDetailUnassign")}
-                                    </TextAction>
-                                }
-                            />
-                        ))}
-                    </Group>
-                ))}
-            {picking && (
-                <PickRoleModal
-                    group={group}
-                    assigned={new Set(assigned.map(r => r.id))}
-                    onClose={() => setPicking(false)}
-                    onAdded={() => {
-                        setPicking(false);
-                        retry();
-                    }}
-                />
-            )}
-            <ConfirmDialog opts={confirmOpts} onClose={() => setConfirmOpts(null)} />
-        </Section>
-    );
-}
-
-function PickRoleModal({ group, onClose, onAdded }: any) {
-    const t = useT();
-    const { adminClient } = useAdminClient();
-    const { addAlert, addError } = useAlerts();
-    const [sel, setSel] = useState<Set<string>>(new Set());
-    const [saving, setSaving] = useState(false);
-    const {
-        data: roles,
-        status,
-        retry
-    } = useLoader(() => adminClient.groups.listAvailableRealmRoleMappings({ id: group.id }), [adminClient, group.id]);
-
-    const toggle = (id: string) =>
-        setSel(prev => {
-            const next = new Set(prev);
-            next.has(id) ? next.delete(id) : next.add(id);
-            return next;
-        });
-
-    const save = async () => {
-        const chosen = roles.filter(r => sel.has(r.id)).map(r => ({ id: r.id, name: r.name }));
-        if (chosen.length === 0) return;
-        setSaving(true);
-        try {
-            await adminClient.groups.addRealmRoleMappings({ id: group.id, roles: chosen });
-            addAlert(t("sxGroupDetailRolesAssigned", { total: chosen.length }), AlertVariant.success);
-            onAdded();
-        } catch (e) {
-            addError(t("sxGroupDetailRolesAssignError"), e);
-            setSaving(false);
-        }
-    };
-
-    return (
-        <Modal open onOpenChange={o => !o && onClose()}>
-            <ModalContent className="sm:max-w-2xl">
-                <ModalHeader>
-                    <ModalTitle>{t("sxGroupDetailAssignRole")}</ModalTitle>
-                </ModalHeader>
-                <ModalBody>
-                    {status === "loading" ? (
-                        <ListSkeleton />
-                    ) : status === "error" ? (
-                        <Notice
-                            title={t("sxGroupDetailRolesLoadError")}
-                            description={t("sxLoadErrorDescription")}
-                            onRetry={retry}
-                        />
-                    ) : roles.length === 0 ? (
-                        <Notice
-                            title={t("sxGroupDetailNoAvailableRolesTitle")}
-                            description={t("sxGroupDetailNoAvailableRolesDescription")}
-                        />
-                    ) : (
-                        <ul className={GROUP}>
-                            {roles.map((r, i) => (
-                                <Fragment key={r.id}>
-                                    {i > 0 && <li aria-hidden className={SEPARATOR} />}
-                                    <li>
-                                        <label className="flex min-h-14 cursor-pointer items-center gap-3 px-4 py-2.5 hover:bg-black/3 dark:hover:bg-white/4">
-                                            <Checkbox checked={sel.has(r.id)} onCheckedChange={() => toggle(r.id)} />
-                                            <span className="min-w-0">
-                                                <span className="block truncate text-base font-medium">{r.name}</span>
-                                                {r.description && (
-                                                    <span className="mt-0.5 block truncate text-[13px] text-muted-foreground">
-                                                        {r.description}
-                                                    </span>
-                                                )}
-                                            </span>
-                                        </label>
-                                    </li>
-                                </Fragment>
-                            ))}
-                        </ul>
-                    )}
-                </ModalBody>
-                <ModalFooter>
-                    <Button disabled={saving || sel.size === 0} onClick={save}>
-                        {saving ? t("sxGroupDetailAssigning") : t("sxGroupDetailAssignCount", { total: sel.size })}
-                    </Button>
-                </ModalFooter>
-            </ModalContent>
-        </Modal>
     );
 }
 
