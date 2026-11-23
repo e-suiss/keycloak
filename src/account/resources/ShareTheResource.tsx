@@ -1,14 +1,3 @@
-/**
- * WARNING: Before modifying this file, run the following command:
- *
- * $ npx keycloakify own --path "account/resources/ShareTheResource.tsx"
- *
- * This file is provided by @keycloakify/keycloak-account-ui version 260601.0.0.
- * It was copied into your repository by the postinstall script: `keycloakify sync-extensions`.
- */
-
-/* eslint-disable */
-
 // @ts-nocheck
 
 import { XIcon } from "@phosphor-icons/react";
@@ -60,14 +49,13 @@ export const ShareTheResource = ({
     const { t } = useTranslation();
     const context = useEnvironment();
     const { addAlert, addError } = useAccountAlerts();
-    const form = useForm<FormValues>();
+    const form = useForm<FormValues>({ mode: "onTouched" });
     const {
         control,
         register,
         reset,
         formState: { errors, isValid },
-        setError,
-        clearErrors,
+        getValues,
         handleSubmit
     } = form;
     const { fields, append, remove } = useFieldArray<FormValues>({
@@ -106,24 +94,18 @@ export const ShareTheResource = ({
         reset({});
     };
 
-    const validateUser = async () => {
-        const userOrEmails = fields.map(f => f.value).filter(f => f !== "");
-        const userPermission = permissions?.flatMap(p => [p.username, p.email]);
-
-        const hasUsers = userOrEmails.length > 0;
-        const alreadyShared =
-            userOrEmails.filter(u => userPermission?.includes(u)).length !== 0;
-
-        if (!hasUsers || alreadyShared) {
-            setError("usernames", {
-                message: !hasUsers ? t("required") : t("resourceAlreadyShared")
-            });
-        } else {
-            clearErrors();
-        }
-
-        return hasUsers && !alreadyShared;
+    const validateUser = () => {
+        const userOrEmails = (getValues("usernames") ?? [])
+            .map(({ value }) => value?.trim())
+            .filter(Boolean);
+        const userPermission = permissions?.flatMap(p => [p.username, p.email]) ?? [];
+        if (userOrEmails.length === 0) return t("required");
+        if (userOrEmails.some(u => userPermission.includes(u))) return t("resourceAlreadyShared");
+        return true;
     };
+
+    const usernameError =
+        errors.usernames?.[fields.length - 1]?.value?.message ?? errors.usernames?.message;
 
     if (!open) {
         return null;
@@ -131,27 +113,27 @@ export const ShareTheResource = ({
 
     return (
         <Modal open onOpenChange={next => !next && onClose()}>
-            <ModalContent>
-                <ModalHeader>
-                    <ModalTitle>
+            <ModalContent className="sm:max-w-110 sm:gap-4 sm:rounded-[18px] sm:p-6">
+                <ModalHeader className="group-has-data-[slot=drawer-close-button]/drawer-popup:ps-5.5 group-data-[swipe-axis=y]/drawer-popup:text-start">
+                    <ModalTitle className="text-[17px] font-semibold sm:text-lg">
                         {t("shareTheResource", { name: resource.name })}
                     </ModalTitle>
                 </ModalHeader>
-                <ModalBody>
+                <ModalBody className="max-md:px-5.5 max-md:pt-3">
                     <form id="share-form" onSubmit={handleSubmit(addShare)}>
-                        <FieldGroup>
-                            <Field data-invalid={errors.usernames !== undefined}>
-                                <FieldLabel htmlFor="users">
+                        <FieldGroup className="gap-4.5">
+                            <Field data-invalid={usernameError !== undefined}>
+                                <FieldLabel htmlFor="users" className="text-sm font-medium">
                                     {t("shareUser")}
-                                    <span className="text-destructive"> *</span>
+                                    <span className="text-[#d70015] dark:text-[#ff453a]"> *</span>
                                 </FieldLabel>
                                 <div className="flex items-center gap-2">
                                     <Input
                                         id="users"
                                         data-testid="users"
                                         placeholder={t("usernamePlaceholder")}
-                                        aria-invalid={errors.usernames !== undefined}
-                                        className="flex-1"
+                                        aria-invalid={usernameError !== undefined}
+                                        className="h-12 flex-1 rounded-xl text-[15px]"
                                         {...register(
                                             `usernames.${fields.length - 1}.value`,
                                             {
@@ -163,6 +145,7 @@ export const ShareTheResource = ({
                                         key="add-user"
                                         variant="secondary"
                                         data-testid="add"
+                                        className="h-12 rounded-xl bg-[#e5e5ea] px-4 text-[15px] font-medium text-muted-foreground hover:bg-[#d2d2d7] dark:bg-[#2c2c2e] dark:hover:bg-[#3a3a3c]"
                                         onClick={() => append({ value: "" })}
                                         disabled={isDisabled}
                                     >
@@ -188,19 +171,19 @@ export const ShareTheResource = ({
                                         )}
                                     </div>
                                 )}
-                                {errors.usernames && (
-                                    <FieldError>{errors.usernames.message!}</FieldError>
+                                {usernameError && (
+                                    <FieldError>{usernameError}</FieldError>
                                 )}
                             </Field>
                             <Field data-testid="permissions">
-                                <FieldLabel>{t("permissions")}</FieldLabel>
+                                <FieldLabel className="text-sm font-medium">{t("permissions")}</FieldLabel>
                                 <ScopePicker
                                     control={control}
                                     name="permissions"
                                     scopes={resource.scopes}
                                 />
                             </Field>
-                            <div>
+                            <div className="[&>div]:text-[15px] [&>div]:leading-[1.55]">
                                 <SharedWith permissions={permissions} />
                             </div>
                             <Button
@@ -208,8 +191,9 @@ export const ShareTheResource = ({
                                 data-testid="done"
                                 disabled={!isValid}
                                 type="submit"
-                                size="lg"
+                                size="form"
                                 block
+                                className="mt-0.5"
                             >
                                 {t("done")}
                             </Button>
