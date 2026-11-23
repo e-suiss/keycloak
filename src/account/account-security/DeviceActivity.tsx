@@ -1,268 +1,296 @@
-/**
- * WARNING: Before modifying this file, run the following command:
- *
- * $ npx keycloakify own --path "account/account-security/DeviceActivity.tsx"
- *
- * This file is provided by @keycloakify/keycloak-account-ui version 260601.0.0.
- * It was copied into your repository by the postinstall script: `keycloakify sync-extensions`.
- */
-
-/* eslint-disable */
-
 // @ts-nocheck
 
-import { DesktopIcon, DeviceMobileIcon } from "@phosphor-icons/react";
-import { Badge } from "@ui/components/badge";
 import { Button } from "@ui/components/button";
 import {
-    Item,
-    ItemActions,
-    ItemContent,
-    ItemDescription,
-    ItemGroup,
-    ItemMedia,
-    ItemSeparator,
-    ItemTitle
-} from "@ui/components/item";
-import { Spinner } from "@ui/components/spinner";
-import {
-    Confirm,
-    ConfirmAction,
-    ConfirmCancel,
-    ConfirmContent,
-    ConfirmDescription,
-    ConfirmFooter,
-    ConfirmHeader,
-    ConfirmTitle,
-    ConfirmTrigger
+  Confirm,
+  ConfirmAction,
+  ConfirmCancel,
+  ConfirmContent,
+  ConfirmDescription,
+  ConfirmFooter,
+  ConfirmHeader,
+  ConfirmTitle,
+  ConfirmTrigger,
 } from "@ui/patterns/confirm";
-import { Fragment, type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { label, useEnvironment } from "../../shared/keycloak-ui-shared";
-
 import type { AccountEnvironment } from "..";
 import { deleteSession, getDevices } from "../api/methods";
 import type {
-    ClientRepresentation,
-    DeviceRepresentation,
-    SessionRepresentation
+  ClientRepresentation,
+  DeviceRepresentation,
+  SessionRepresentation,
 } from "../api/representations";
 import { Page } from "../components/page/Page";
-import { formatDate } from "../utils/formatDate";
+import { SessionsSkeleton } from "../root/Skeleton";
 import { useAccountAlerts } from "../utils/useAccountAlerts";
-import { usePromise } from "../utils/usePromise";
 
-const ConfirmButton = ({
-    trigger,
-    title,
-    confirmLabel,
-    cancelLabel,
-    onConfirm,
-    children
+const GROUP =
+  "w-full overflow-hidden rounded-xl border border-[#e5e5ea] bg-[#f5f5f7] text-left dark:border-[#38383a] dark:bg-[#1c1c1e]";
+const SEPARATOR = "ms-4 h-px bg-[#e5e5ea] dark:bg-[#38383a]";
+const DANGER_TEXT = "text-[#d70015] dark:text-[#ff453a]";
+
+type State =
+  | { status: "loading" }
+  | { status: "error" }
+  | {
+      status: "ready";
+      rows: { device: DeviceRepresentation; session: SessionRepresentation }[];
+    };
+
+function ConfirmButton({
+  trigger,
+  title,
+  confirmLabel,
+  cancelLabel,
+  onConfirm,
+  children,
 }: {
-    trigger: ReactNode;
-    title: ReactNode;
-    confirmLabel: string;
-    cancelLabel: string;
-    onConfirm: () => void;
-    children: ReactNode;
-}) => (
+  trigger: ReactNode;
+  title: ReactNode;
+  confirmLabel: string;
+  cancelLabel: string;
+  onConfirm: () => void;
+  children: ReactNode;
+}) {
+  return (
     <Confirm>
-        <ConfirmTrigger asChild>{trigger}</ConfirmTrigger>
-        <ConfirmContent>
-            <ConfirmHeader>
-                <ConfirmTitle>{title}</ConfirmTitle>
-                <ConfirmDescription>{children}</ConfirmDescription>
-            </ConfirmHeader>
-            <ConfirmFooter>
-                <ConfirmCancel>{cancelLabel}</ConfirmCancel>
-                <ConfirmAction onClick={() => onConfirm()}>{confirmLabel}</ConfirmAction>
-            </ConfirmFooter>
-        </ConfirmContent>
+      <ConfirmTrigger asChild>{trigger}</ConfirmTrigger>
+      <ConfirmContent>
+        <ConfirmHeader>
+          <ConfirmTitle>{title}</ConfirmTitle>
+          <ConfirmDescription>{children}</ConfirmDescription>
+        </ConfirmHeader>
+        <ConfirmFooter>
+          <ConfirmCancel>{cancelLabel}</ConfirmCancel>
+          <ConfirmAction onClick={() => onConfirm()}>
+            {confirmLabel}
+          </ConfirmAction>
+        </ConfirmFooter>
+      </ConfirmContent>
     </Confirm>
-);
+  );
+}
+
+function Notice({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div className={GROUP}>
+      <div className="px-4 py-6 text-center">
+        <div className="text-base font-semibold">{title}</div>
+        <p className="mt-1.5 text-sm text-muted-foreground">{description}</p>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function sortRows(devices: DeviceRepresentation[]) {
+  const rows = devices.flatMap((device) =>
+    device.sessions.map((session) => ({ device, session })),
+  );
+  return rows.sort(
+    (a, b) => Number(!!b.session.current) - Number(!!a.session.current),
+  );
+}
 
 export const DeviceActivity = () => {
-    const { t } = useTranslation();
-    const context = useEnvironment<AccountEnvironment>();
-    const { addAlert, addError } = useAccountAlerts();
+  const { t } = useTranslation();
+  const context = useEnvironment<AccountEnvironment>();
+  const { addAlert, addError } = useAccountAlerts();
+  const [state, setState] = useState<State>({ status: "loading" });
+  const [attempt, setAttempt] = useState(0);
+  const locale = context.environment.locale;
 
-    const [devices, setDevices] = useState<DeviceRepresentation[]>();
-    const [key, setKey] = useState(0);
-    const refresh = () => setKey(key + 1);
+  useEffect(() => {
+    const controller = new AbortController();
+    setState((previous) =>
+      previous.status === "ready" ? previous : { status: "loading" },
+    );
+    getDevices({ signal: controller.signal, context })
+      .then((devices) =>
+        setState({ status: "ready", rows: sortRows(devices ?? []) }),
+      )
+      .catch((error) => {
+        if (error?.name !== "AbortError") setState({ status: "error" });
+      });
+    return () => controller.abort();
+  }, [attempt]);
 
-    const moveCurrentToTop = (devices: DeviceRepresentation[]) => {
-        let currentDevice = devices[0];
+  const signOutAll = async () => {
+    await deleteSession(context);
+    await context.keycloak.logout();
+  };
 
-        const index = devices.findIndex(d => d.current);
-        currentDevice = devices.splice(index, 1)[0];
-        devices.unshift(currentDevice);
-
-        const sessionIndex = currentDevice.sessions.findIndex(s => s.current);
-        const currentSession = currentDevice.sessions.splice(sessionIndex, 1)[0];
-        currentDevice.sessions.unshift(currentSession);
-
-        setDevices(devices);
-    };
-
-    usePromise(signal => getDevices({ signal, context }), moveCurrentToTop, [key]);
-
-    const signOutAll = async () => {
-        await deleteSession(context);
-        await context.keycloak.logout();
-    };
-
-    const signOutSession = async (
-        session: SessionRepresentation,
-        device: DeviceRepresentation
-    ) => {
-        try {
-            await deleteSession(context, session.id);
-            addAlert(t("signedOutSession", { browser: session.browser, os: device.os }));
-            refresh();
-        } catch (error) {
-            addError("errorSignOutMessage", error);
-        }
-    };
-
-    const makeClientsString = (clients: ClientRepresentation[]): string => {
-        let clientsString = "";
-        clients.forEach((client, index) => {
-            let clientName: string;
-            if (client.clientName !== "") {
-                clientName = label(t, client.clientName);
-            } else {
-                clientName = client.clientId;
-            }
-
-            clientsString += clientName;
-
-            if (clients.length > index + 1) clientsString += ", ";
-        });
-
-        return clientsString;
-    };
-
-    if (!devices) {
-        return (
-            <div className="flex justify-center py-24">
-                <Spinner className="size-6 text-muted-foreground" />
-            </div>
-        );
+  const signOutSession = async (
+    session: SessionRepresentation,
+    device: DeviceRepresentation,
+  ) => {
+    try {
+      await deleteSession(context, session.id);
+      addAlert(
+        t("signedOutSession", { browser: session.browser, os: device.os }),
+      );
+      setAttempt((n) => n + 1);
+    } catch (error) {
+      addError("errorSignOutMessage", error);
     }
+  };
 
-    const sessionSubtitle = (session: SessionRepresentation) => (
-        <ItemDescription className="line-clamp-none">
-            <span className="block tabular-nums">{session.ipAddress}</span>
-            <span className="block">
-                {t("lastAccessedOn")}{" "}
-                <span className="tabular-nums">
-                    {formatDate(
-                        new Date(session.lastAccess * 1000),
-                        context.environment.locale
-                    )}
-                </span>
-            </span>
-            {makeClientsString(session.clients) && (
-                <span className="block">{makeClientsString(session.clients)}</span>
-            )}
-        </ItemDescription>
-    );
+  const deviceName = (
+    device: DeviceRepresentation,
+    session: SessionRepresentation,
+  ) => {
+    const os = device.os?.toLowerCase().includes("unknown")
+      ? t("unknownOperatingSystem")
+      : device.os;
+    const version =
+      device.osVersion && !device.osVersion.toLowerCase().includes("unknown")
+        ? ` ${device.osVersion}`
+        : "";
+    return `${os}${version} / ${session.browser}`;
+  };
 
+  const lastAccess = (seconds: number) => {
+    const date = new Date(seconds * 1000);
+    const day = date.toLocaleDateString(locale, {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+    const time = date.toLocaleTimeString(locale, {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
     return (
-        <Page title={t("deviceActivity")} description={t("signedInDevicesExplanation")}>
-            <div className="space-y-7">
-                <section>
-                    <h3 className="mb-2 ms-1 text-sm font-medium text-muted-foreground">
-                        {t("signedInDevices")}
-                    </h3>
-                    <ItemGroup variant="inset">
-                        {devices.map((device, deviceIndex) =>
-                            device.sessions.map((session, index) => (
-                                <Fragment key={device.id}>
-                                    {(deviceIndex > 0 || index > 0) && <ItemSeparator />}
-                                    <Item
-                                        size="sm"
-                                        role="listitem"
-                                        data-testid={`row-${index}`}
-                                    >
-                                        <ItemMedia variant="icon">
-                                            {device.mobile ? (
-                                                <DeviceMobileIcon />
-                                            ) : (
-                                                <DesktopIcon />
-                                            )}
-                                        </ItemMedia>
-                                        <ItemContent className="min-w-0">
-                                            <ItemTitle className="session-title">
-                                                {device.os.toLowerCase().includes("unknown")
-                                                    ? t("unknownOperatingSystem")
-                                                    : device.os}{" "}
-                                                {!device.osVersion
-                                                    .toLowerCase()
-                                                    .includes("unknown") &&
-                                                    device.osVersion}{" "}
-                                                / {session.browser}
-                                            </ItemTitle>
-                                            {sessionSubtitle(session)}
-                                        </ItemContent>
-                                        <ItemActions>
-                                            {session.current && (
-                                                <Badge variant="outline">
-                                                    {t("currentSession")}
-                                                </Badge>
-                                            )}
-                                            {!session.current && (
-                                                <ConfirmButton
-                                                    trigger={
-                                                        <Button
-                                                            variant="destructive"
-                                                            size="sm"
-                                                        >
-                                                            {t("signOut")}
-                                                        </Button>
-                                                    }
-                                                    title={t("signOut")}
-                                                    confirmLabel={t("confirm")}
-                                                    cancelLabel={t("cancel")}
-                                                    onConfirm={() =>
-                                                        signOutSession(session, device)
-                                                    }
-                                                >
-                                                    {t("signOutWarning")}
-                                                </ConfirmButton>
-                                            )}
-                                        </ItemActions>
-                                    </Item>
-                                </Fragment>
-                            ))
-                        )}
-
-                        {(devices.length > 1 || devices[0].sessions.length > 1) && (
-                            <>
-                                <ItemSeparator />
-                                <Item size="sm" role="listitem">
-                                    <ConfirmButton
-                                        trigger={
-                                            <Button variant="destructive" block>
-                                                {t("signOutAllDevices")}
-                                            </Button>
-                                        }
-                                        title={t("signOutAllDevices")}
-                                        confirmLabel={t("confirm")}
-                                        cancelLabel={t("cancel")}
-                                        onConfirm={() => signOutAll()}
-                                    >
-                                        {t("signOutAllDevicesWarning")}
-                                    </ConfirmButton>
-                                </Item>
-                            </>
-                        )}
-                    </ItemGroup>
-                </section>
-            </div>
-        </Page>
+      <>
+        {t("lastAccessedOn")}{" "}
+        <span className="whitespace-nowrap">{`${day}, ${time}`}</span>
+      </>
     );
+  };
+
+  const clientNames = (clients: ClientRepresentation[]) =>
+    clients
+      .map((client) =>
+        client.clientName ? label(t, client.clientName) : client.clientId,
+      )
+      .join(", ");
+
+  return (
+    <Page title={t("sessions")} description={t("sessionsDescription")}>
+      <h2 className="mb-2 ms-0.5 text-center text-sm font-medium text-muted-foreground">
+        {t("signedInDevices")}
+      </h2>
+
+      {state.status === "loading" && <SessionsSkeleton />}
+
+      {state.status === "error" && (
+        <Notice
+          title={t("sessionsLoadError")}
+          description={t("signingInLoadErrorDescription")}
+        >
+          <Button
+            size="sm"
+            className="mt-3.5 h-8.5 px-4 font-medium"
+            onClick={() => setAttempt((n) => n + 1)}
+          >
+            {t("tryAgain")}
+          </Button>
+        </Notice>
+      )}
+
+      {state.status === "ready" && state.rows.length === 0 && (
+        <Notice
+          title={t("sessionsEmpty")}
+          description={t("sessionsEmptyDescription")}
+        />
+      )}
+
+      {state.status === "ready" && state.rows.length > 0 && (
+        <ul className={GROUP}>
+          {state.rows.map(({ device, session }, index) => {
+            const clients = clientNames(session.clients ?? []);
+            return (
+              <li key={session.id} data-testid={`row-${index}`}>
+                {index > 0 && <div className={SEPARATOR} />}
+                <div className="flex items-start justify-between gap-3 px-4 py-3.5">
+                  <div className="min-w-0 text-[13px] leading-[1.45] text-muted-foreground">
+                    <div
+                      id={`session-${session.id}`}
+                      className="text-base leading-normal font-medium text-foreground"
+                    >
+                      {deviceName(device, session)}
+                    </div>
+                    {session.ipAddress && (
+                      <div className="mt-0.5 tabular-nums">
+                        {session.ipAddress}
+                      </div>
+                    )}
+                    <div className="mt-0.5 tabular-nums">
+                      {lastAccess(session.lastAccess)}
+                    </div>
+                    {clients && <div className="mt-0.5">{clients}</div>}
+                  </div>
+                  {session.current ? (
+                    <span className="flex h-6.5 shrink-0 items-center rounded-full border border-[#d2d2d7] px-2.5 text-[13px] font-medium dark:border-[#48484a]">
+                      {t("currentSession")}
+                    </span>
+                  ) : (
+                    <ConfirmButton
+                      trigger={
+                        <button
+                          type="button"
+                          aria-describedby={`session-${session.id}`}
+                          className={`shrink-0 rounded-md text-[15px] font-medium outline-none transition-opacity hover:opacity-70 focus-visible:ring-2 focus-visible:ring-ring/50 ${DANGER_TEXT}`}
+                        >
+                          {t("sessionClose")}
+                        </button>
+                      }
+                      title={t("signOut")}
+                      confirmLabel={t("sessionClose")}
+                      cancelLabel={t("cancel")}
+                      onConfirm={() => signOutSession(session, device)}
+                    >
+                      {t("signOutWarning")}
+                    </ConfirmButton>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      <div className="mt-7">
+        <ConfirmButton
+          trigger={
+            <Button
+              size="form"
+              block
+              className="bg-[#d70015] text-white hover:bg-[#d70015]/90 dark:bg-[#ff453a] dark:hover:bg-[#ff453a]/90"
+            >
+              {t("signOutAllDevices")}
+            </Button>
+          }
+          title={t("signOutAllDevices")}
+          confirmLabel={t("sessionClose")}
+          cancelLabel={t("cancel")}
+          onConfirm={() => signOutAll()}
+        >
+          {t("signOutAllDevicesWarning")}
+        </ConfirmButton>
+      </div>
+    </Page>
+  );
 };
 
 export default DeviceActivity;
