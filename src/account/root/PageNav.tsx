@@ -1,8 +1,7 @@
 // @ts-nocheck
 
-import { SidebarContent, SidebarGroup, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@ui/components/sidebar";
-import { Badge } from "@ui/components/badge";
-import { type MouseEvent as ReactMouseEvent, type ReactNode, Suspense, useState } from "react";
+import { cn } from "@ui/lib/utils";
+import { type MouseEvent as ReactMouseEvent, type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { matchPath, useHref, useLinkClickHandler, useLocation } from "react-router-dom";
 import { useEnvironment } from "../../shared/keycloak-ui-shared";
@@ -11,8 +10,9 @@ import fetchContentJson from "../content/fetchContent";
 import type { TFuncKey } from "../i18n-type";
 import { usePromise } from "../utils/usePromise";
 import { NavIcon } from "./NavIcon";
+import { HAIRLINE, useNavDrawer } from "./Shell";
 
-type RootMenuItem = {
+export type RootMenuItem = {
     id?: string;
     label: TFuncKey;
     path: string;
@@ -80,6 +80,67 @@ export function usePageTitle(menuItems: MenuItem[] | undefined) {
     return t((active?.label ?? leaves[0]?.label ?? "personalInfo") as TFuncKey);
 }
 
+export function NavBrand() {
+    const { t } = useTranslation();
+    return (
+        <div
+            data-testid="page-header"
+            className={`-mx-3 mb-3.5 flex h-12 shrink-0 items-center gap-2 sm:h-15 border-b px-5.5 ${HAIRLINE}`}
+        >
+            <span aria-hidden className="size-5.5 shrink-0 rounded-full bg-muted-foreground" />
+            <span className="text-base font-semibold">{t("consoleBrand")}</span>
+            <span className="text-xs text-muted-foreground">{t("consoleBrandSuffix")}</span>
+        </div>
+    );
+}
+
+export function NavSections({
+    menuItems,
+    features,
+    renderLeaf
+}: {
+    menuItems: MenuItem[] | undefined;
+    features: Feature;
+    renderLeaf: (leaf: RootMenuItem) => ReactNode;
+}) {
+    const { t } = useTranslation();
+    return (
+        <nav aria-label={t("openMenu")}>
+            {buildSections(menuItems, features).map((section, i) => (
+                <div key={i} className={i > 0 && !section.label ? "pt-3" : undefined}>
+                    {section.label && (
+                        <div className="px-2.5 pt-4.5 pb-1.5 text-xs text-muted-foreground">
+                            {t(section.label)}
+                        </div>
+                    )}
+                    <ul>{section.items.map(leaf => renderLeaf(leaf))}</ul>
+                </div>
+            ))}
+        </nav>
+    );
+}
+
+export function navLinkClass(isActive: boolean) {
+    return cn(
+        "mt-0.5 flex h-8.5 items-center gap-2.5 rounded-lg px-2.5 text-sm text-foreground outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50",
+        isActive
+            ? "bg-[#e5e5ea] font-medium dark:bg-[#2c2c2e]"
+            : "hover:bg-[#e5e5ea]/60 dark:hover:bg-[#2c2c2e]/60"
+    );
+}
+
+export function NavLinkContent({ icon, label, isActive }: { icon: string; label: ReactNode; isActive: boolean }) {
+    return (
+        <>
+            <NavIcon
+                name={icon}
+                className={cn("size-4 shrink-0", isActive ? "text-primary" : "text-muted-foreground")}
+            />
+            <span className="flex-1 truncate">{label}</span>
+        </>
+    );
+}
+
 export const PageNav = () => {
     const { t } = useTranslation();
     const { environment } = useEnvironment<AccountEnvironment>();
@@ -87,56 +148,25 @@ export const PageNav = () => {
 
     return (
         <>
-            <SidebarHeader>
-                <a
-                    href={
-                        environment.referrerUrl?.replace("_hash_", "#") ||
-                        environment.logoUrl ||
-                        "/"
-                    }
-                    data-testid="page-header"
-                    className="flex items-center gap-2 font-semibold"
-                >
-                    <BrandMark className="size-5" />
-                    Wallet
-                    <Badge variant="secondary">Hesap</Badge>
-                </a>
-                <span className="text-xs text-muted-foreground">Hesap Konsolu</span>
-            </SidebarHeader>
-
-            <SidebarContent>
-                <Suspense
-                    fallback={
-                        <div className="px-3 py-2 text-sm text-muted-foreground">
-                            …
-                        </div>
-                    }
-                >
-                    {buildSections(menuItems, environment.features).map((section, i) => (
-                        <SidebarGroup key={i}>
-                            {section.label && (
-                                <SidebarGroupLabel>{t(section.label)}</SidebarGroupLabel>
-                            )}
-                            <SidebarMenu>
-                                {section.items.map(leaf => (
-                                    <NavLeaf
-                                        key={leaf.label as string}
-                                        path={leaf.path}
-                                        icon={leaf.label as string}
-                                        label={t(leaf.label)}
-                                    />
-                                ))}
-                            </SidebarMenu>
-                        </SidebarGroup>
-                    ))}
-                </Suspense>
-            </SidebarContent>
+            <NavBrand />
+            <NavSections
+                menuItems={menuItems}
+                features={environment.features}
+                renderLeaf={leaf => (
+                    <NavLeaf
+                        key={leaf.label as string}
+                        path={leaf.path}
+                        icon={leaf.label as string}
+                        label={t(leaf.label)}
+                    />
+                )}
+            />
         </>
     );
 };
 
 /** Group consecutive loose leaves together so every section has the same rhythm. */
-function buildSections(menuItems: MenuItem[] | undefined, features: Feature) {
+export function buildSections(menuItems: MenuItem[] | undefined, features: Feature) {
     const sections: { label?: TFuncKey; items: RootMenuItem[] }[] = [];
     if (!menuItems) return sections;
     let leaves: RootMenuItem[] = [];
@@ -171,6 +201,7 @@ type NavLeafProps = {
 export const NavLeaf = ({ path, icon, label }: NavLeafProps) => {
     const { environment } = useEnvironment<AccountEnvironment>();
     const { pathname } = useLocation();
+    const { setOpen } = useNavDrawer();
     const fullPath = getFullUrl(path, environment.baseUrl);
     const isActive = !!matchPath(fullPath, pathname);
     const menuItemPath = fullPath + location.search;
@@ -178,29 +209,19 @@ export const NavLeaf = ({ path, icon, label }: NavLeafProps) => {
     const handleClick = useLinkClickHandler(menuItemPath);
 
     return (
-        <SidebarMenuItem>
-            <SidebarMenuButton asChild isActive={isActive}>
-                <a
-                    data-testid={path}
-                    href={href}
-                    onClick={event =>
-                        handleClick(
-                            event as unknown as ReactMouseEvent<HTMLAnchorElement>
-                        )
-                    }
-                >
-                    <NavIcon name={icon} active={isActive} />
-                    <span className="flex-1 text-left">{label}</span>
-                </a>
-            </SidebarMenuButton>
-        </SidebarMenuItem>
+        <li>
+            <a
+                data-testid={path}
+                href={href}
+                aria-current={isActive ? "page" : undefined}
+                onClick={event => {
+                    handleClick(event as unknown as ReactMouseEvent<HTMLAnchorElement>);
+                    setOpen(false);
+                }}
+                className={navLinkClass(isActive)}
+            >
+                <NavLinkContent icon={icon} label={label} isActive={isActive} />
+            </a>
+        </li>
     );
 };
-
-function BrandMark({ className }: { className?: string }) {
-    return (
-        <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden>
-            <path d="M17 1.6c.1 1-.3 2-1 2.8-.7.8-1.8 1.4-2.8 1.3-.1-1 .4-2 1-2.7.8-.8 2-1.4 2.8-1.4ZM19.6 17c-.5 1.2-.8 1.8-1.5 2.9-1 1.5-2.3 3.4-4 3.4-1.5 0-1.9-1-3.9-1-2 0-2.4 1-3.9 1-1.7 0-3-1.7-3.9-3.2C-.1 16.9-.4 11.8 2 9.1c1.1-1.3 2.6-2 4-2 1.6 0 2.6 1 3.9 1 1.3 0 2-1 3.9-1 1.3 0 2.7.7 3.7 1.9-3.3 1.8-2.7 6.5.1 8Z" />
-        </svg>
-    );
-}

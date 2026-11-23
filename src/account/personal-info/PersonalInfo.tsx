@@ -1,39 +1,22 @@
 // @ts-nocheck
 
-import { CaretRightIcon } from "@phosphor-icons/react";
-import { Avatar, AvatarFallback } from "@ui/components/avatar";
+import { CaretRightIcon, CheckIcon } from "@phosphor-icons/react";
 import { Button } from "@ui/components/button";
-import { Field, FieldError } from "@ui/components/field";
+import { Field, FieldError, FieldLabel } from "@ui/components/field";
 import { Input } from "@ui/components/input";
-import {
-    Item,
-    ItemActions,
-    ItemContent,
-    ItemGroup,
-    ItemSeparator,
-    ItemTitle
-} from "@ui/components/item";
 import { NativeSelect, NativeSelectOption } from "@ui/components/native-select";
-import { Spinner } from "@ui/components/spinner";
-import {
-    Modal,
-    ModalBody,
-    ModalContent,
-    ModalFooter,
-    ModalHeader,
-    ModalTitle
-} from "@ui/patterns/modal";
+import { Modal, ModalBody, ModalContent, ModalHeader, ModalTitle } from "@ui/patterns/modal";
 import type { TFunction } from "i18next";
 import { get } from "lodash-es";
-import { Fragment, type ReactNode, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { type ErrorOption, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { useEnvironment } from "../../shared/keycloak-ui-shared";
+import { SECURITY_IMAGES, securityImageSrc } from "../../shared/securityImages";
 import {
     beerify,
     debeerify,
     fieldName,
-    isRequiredAttribute,
     labelAttribute,
     setUserProfileServerError
 } from "../../shared/keycloak-ui-shared/user-profile/utils";
@@ -41,9 +24,17 @@ import type { AccountEnvironment } from "..";
 import { getPersonalInfo, getSupportedLocales, savePersonalInfo } from "../api/methods";
 import type { UserProfileMetadata, UserRepresentation } from "../api/representations";
 import { Page } from "../components/page/Page";
+import { FormSkeleton } from "../root/Skeleton";
 import type { TFuncKey } from "../i18n-type";
 import { useAccountAlerts } from "../utils/useAccountAlerts";
 import { usePromise } from "../utils/usePromise";
+
+const SECURITY_IMAGE = "securityImage";
+
+const HIDDEN = new Set(["locale", "username"]);
+
+const firstValue = (value: unknown) =>
+    (Array.isArray(value) ? value[0] : value) as string | undefined;
 
 function localeName(code: string) {
     try {
@@ -53,18 +44,53 @@ function localeName(code: string) {
     }
 }
 
-const LOCALE = "__locale__";
+function toFormValues(user: UserRepresentation): UserRepresentation {
+    return {
+        ...user,
+        attributes: Object.fromEntries(
+            Object.entries(user.attributes || {}).map(([k, v]) => [beerify(k), v])
+        )
+    };
+}
 
-function initialsOf(name: string) {
+function inputTypeOf(attribute: any) {
+    const type = attribute.annotations?.inputType as string | undefined;
+    if (type?.startsWith("html5-")) return type.slice("html5-".length);
+    return attribute.name === "email" ? "email" : "text";
+}
+
+function SecurityImageThumb({ value, className }: { value?: string; className?: string }) {
+    const src = securityImageSrc(value);
+    if (!src) return null;
     return (
-        name
-            .trim()
-            .split(/\s+/)
-            .filter(Boolean)
-            .slice(0, 2)
-            .map(part => part[0])
-            .join("")
-            .toUpperCase() || "?"
+        <img
+            src={src}
+            alt=""
+            className={`object-cover dark:[filter:invert(1)_hue-rotate(180deg)_brightness(1.25)] ${className ?? ""}`}
+        />
+    );
+}
+
+function ActionRow({
+    id,
+    onClick,
+    children
+}: {
+    id: string;
+    onClick: () => void;
+    children: ReactNode;
+}) {
+    return (
+        <button
+            type="button"
+            id={id}
+            data-testid={id}
+            onClick={onClick}
+            className="flex h-13.5 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-4 text-left text-[17px] outline-none transition-colors hover:bg-accent/40 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring dark:bg-foreground/6"
+        >
+            <span className="flex min-w-0 items-center truncate">{children}</span>
+            <CaretRightIcon className="size-3.5 shrink-0 text-muted-foreground/60" />
+        </button>
     );
 }
 
@@ -73,10 +99,9 @@ export const PersonalInfo = () => {
     const context = useEnvironment<AccountEnvironment>();
     const [userProfileMetadata, setUserProfileMetadata] = useState<UserProfileMetadata>();
     const [supportedLocales, setSupportedLocales] = useState<string[]>([]);
-    const [editing, setEditing] = useState<any>(null);
-    const [snapshot, setSnapshot] = useState("");
+    const [pickingImage, setPickingImage] = useState(false);
     const form = useForm<UserRepresentation>({ mode: "onChange" });
-    const { handleSubmit, reset, setValue, getValues, watch, register, formState } = form;
+    const { handleSubmit, reset, setValue, watch, register, formState } = form;
     const { addAlert } = useAccountAlerts();
 
     usePromise(
@@ -88,10 +113,7 @@ export const PersonalInfo = () => {
         ([personalInfo, locales]) => {
             setUserProfileMetadata(personalInfo.userProfileMetadata);
             setSupportedLocales(locales);
-            reset(personalInfo);
-            Object.entries(personalInfo.attributes || {}).forEach(([k, v]) =>
-                setValue(`attributes[${beerify(k)}]`, v)
-            );
+            reset(toFormValues(personalInfo));
         }
     );
 
@@ -101,13 +123,14 @@ export const PersonalInfo = () => {
                 Object.entries(user.attributes || {}).map(([k, v]) => [debeerify(k), v])
             );
             await savePersonalInfo(context, { ...user, attributes });
-            const locale = attributes.locale?.toString();
+            const locale = firstValue(attributes.locale);
             if (locale) {
                 window.dispatchEvent(
                     new CustomEvent("languageChanged", { detail: { language: locale } })
                 );
             }
             await context.keycloak.updateToken();
+            reset(user);
             addAlert(t("accountUpdatedMessage"));
         } catch (error) {
             addAlert(t("accountUpdatedError"), "danger");
@@ -121,14 +144,13 @@ export const PersonalInfo = () => {
     };
 
     if (!userProfileMetadata) {
-        return (
-            <div className="grid place-items-center py-24">
-                <Spinner />
-            </div>
-        );
+        return <FormSkeleton />;
     }
 
-    const attributes = userProfileMetadata.attributes ?? [];
+    const attributes = (userProfileMetadata.attributes ?? []).filter(
+        a => !HIDDEN.has(a.name) && !a.name?.toLowerCase().includes("pet")
+    );
+    const imageAttribute = attributes.find(a => a.name === SECURITY_IMAGE);
 
     const {
         updateEmailFeatureEnabled,
@@ -145,236 +167,189 @@ export const PersonalInfo = () => {
         attribute.annotations?.["kc.required.action.supported"] &&
         (!isRegistrationEmailAsUsername || isEditUserNameAllowed);
 
-    const idt = context.keycloak?.idTokenParsed as
-        | { name?: string; preferred_username?: string; email?: string }
-        | undefined;
-    const heroName = idt?.name || idt?.email || "";
-    const heroEmail = idt?.email || "";
+    const renderControl = (attribute: any) => {
+        const name = fieldName(attribute.name);
+        const value = firstValue(watch(name));
 
-    const openEdit = (attribute: any) => {
-        setSnapshot(getValues(fieldName(attribute.name)) ?? "");
-        setEditing(attribute);
-    };
-    const openLocale = () => {
-        setSnapshot(getValues("attributes.locale") ?? context.environment.locale);
-        setEditing(LOCALE);
-    };
-    const cancelEdit = () => {
-        if (editing === LOCALE) {
-            setValue("attributes.locale" as any, snapshot);
-        } else if (editing) {
-            setValue(fieldName(editing.name), snapshot);
-        }
-        setEditing(null);
-    };
-    const saveEdit = handleSubmit(async data => {
-        await onSubmit(data);
-        setEditing(null);
-    });
-
-    const editingAttr = editing && editing !== LOCALE ? editing : null;
-    const editError = editingAttr
-        ? (get(formState.errors, fieldName(editingAttr.name)) as
-              | { message?: string }
-              | undefined)
-        : undefined;
-
-    const rows: ReactNode[] = attributes
-        .filter(
-            a =>
-                a.name !== "locale" &&
-                a.name !== "username" &&
-                !a.name?.toLowerCase().includes("pet")
-        )
-        .map(attribute => {
-            const asAction = emailAsAction(attribute);
-            const value = watch(fieldName(attribute.name));
-            const onClick = asAction
-                ? () => context.keycloak.login({ action: "UPDATE_EMAIL" })
-                : attribute.readOnly
-                  ? undefined
-                  : () => openEdit(attribute);
+        if (emailAsAction(attribute)) {
             return (
-                <FieldRow
-                    key={attribute.name}
+                <ActionRow
                     id={attribute.name}
-                    label={
-                        <>
-                            {labelAttribute(t, attribute)}
-                            {isRequiredAttribute(attribute) && (
-                                <span className="text-destructive"> *</span>
-                            )}
-                        </>
-                    }
-                    value={value}
-                    onClick={onClick}
+                    onClick={() => context.keycloak.login({ action: "UPDATE_EMAIL" })}
+                >
+                    {value || "—"}
+                </ActionRow>
+            );
+        }
+
+        if (attribute.name === SECURITY_IMAGE && !attribute.readOnly) {
+            return (
+                <ActionRow id={attribute.name} onClick={() => setPickingImage(true)}>
+                    {value ? (
+                        <SecurityImageThumb value={value} className="size-8 rounded-lg" />
+                    ) : (
+                        "—"
+                    )}
+                </ActionRow>
+            );
+        }
+
+        if (attribute.readOnly) {
+            return (
+                <Input
+                    size="lg"
+                    id={attribute.name}
+                    data-testid={attribute.name}
+                    readOnly
+                    value={value || "—"}
+                    className="text-muted-foreground"
                 />
             );
-        });
+        }
 
-    if (supportedLocales.length > 1) {
-        rows.push(
-            <FieldRow
-                key="locale"
-                id="locale"
-                label={t("selectALocale")}
-                value={localeName(watch("attributes.locale") || context.environment.locale)}
-                onClick={openLocale}
-            />
+        const error = get(formState.errors, name) as { message?: string } | undefined;
+        return (
+            <>
+                <Input
+                    size="lg"
+                    id={attribute.name}
+                    data-testid={attribute.name}
+                    type={inputTypeOf(attribute)}
+                    aria-invalid={error !== undefined}
+                    {...register(name)}
+                />
+                {error?.message && <FieldError>{error.message}</FieldError>}
+            </>
         );
-    }
+    };
+
+    const imageOptions: string[] =
+        imageAttribute?.validators?.options?.options ?? Object.keys(SECURITY_IMAGES);
+    const currentImage = firstValue(watch(fieldName(SECURITY_IMAGE)));
 
     return (
         <Page title={t("personalInfo")} description={t("personalInfoDescription")}>
-            {/* Profile hero */}
-            <div className="mb-9 flex flex-col items-center gap-3.5 pt-1 text-center">
-                <Avatar size="xl">
-                    <AvatarFallback>{initialsOf(heroName)}</AvatarFallback>
-                </Avatar>
-                <div className="min-w-0">
-                    <p className="truncate text-2xl font-semibold">{heroName}</p>
-                    {heroEmail && (
-                        <p className="mt-0.5 truncate text-sm text-muted-foreground">
-                            {heroEmail}
-                        </p>
+            <form onSubmit={handleSubmit(onSubmit)} noValidate>
+                <div className="flex flex-col gap-4">
+                    {attributes.map(attribute => (
+                        <Field key={attribute.name} size="lg">
+                            <FieldLabel htmlFor={attribute.name}>
+                                {labelAttribute(t, attribute)}
+                            </FieldLabel>
+                            {renderControl(attribute)}
+                        </Field>
+                    ))}
+
+                    {supportedLocales.length > 1 && (
+                        <Field size="lg">
+                            <FieldLabel htmlFor="locale">{t("selectALocale")}</FieldLabel>
+                            <NativeSelect
+                                id="locale"
+                                size="lg"
+                                className="w-full"
+                                {...register("attributes.locale" as any)}
+                            >
+                                {supportedLocales.map(l => (
+                                    <NativeSelectOption key={l} value={l}>
+                                        {localeName(l)}
+                                    </NativeSelectOption>
+                                ))}
+                            </NativeSelect>
+                        </Field>
                     )}
                 </div>
-            </div>
 
-            <div className="space-y-7">
-                <section>
-                    <h3 className="mb-2 ms-1 text-sm font-medium text-muted-foreground">
-                        {t("personalInfo")}
-                    </h3>
-                    <ItemGroup variant="inset">
-                        {rows.map((row, index) => (
-                            <Fragment key={(row as any)?.key ?? index}>
-                                {index > 0 && <ItemSeparator />}
-                                {row}
-                            </Fragment>
-                        ))}
-                    </ItemGroup>
+                <div className="mt-7 flex flex-col gap-1.5">
+                    <Button
+                        type="submit"
+                        data-testid="save"
+                        size="form"
+                        block
+                        disabled={!formState.isDirty || formState.isSubmitting}
+                    >
+                        {t("save")}
+                    </Button>
+                    <Button
+                        type="button"
+                        data-testid="cancel"
+                        variant="plain"
+                        size="form"
+                        block
+                        disabled={!formState.isDirty || formState.isSubmitting}
+                        onClick={() => reset()}
+                    >
+                        {t("cancel")}
+                    </Button>
+                </div>
+            </form>
+
+            {deleteAccountAllowed && (
+                <section className="mt-7 border-t border-border pt-6">
+                    <p className="mb-3 text-[13px] leading-[1.4] text-muted-foreground">
+                        {t("deleteAccountWarning")}
+                    </p>
+                    <Button
+                        id="delete-account-btn"
+                        size="form"
+                        block
+                        className="bg-[#d70015] text-white hover:bg-[#d70015]/90 dark:bg-[#ff453a] dark:hover:bg-[#ff453a]/90"
+                        onClick={() => context.keycloak.login({ action: "delete_account" })}
+                    >
+                        {t("deleteAccount")}
+                    </Button>
                 </section>
+            )}
 
-                {deleteAccountAllowed && (
-                    <section>
-                        <Button
-                            id="delete-account-btn"
-                            variant="destructive"
-                            size="lg"
-                            block
-                            onClick={() =>
-                                context.keycloak.login({ action: "delete_account" })
-                            }
-                        >
-                            {t("deleteAccount")}
-                        </Button>
-                        <p className="mt-2 ms-1 text-sm text-muted-foreground">
-                            {t("deleteAccountWarning")}
-                        </p>
-                    </section>
-                )}
-            </div>
-
-            {/* Tap-to-edit sheet */}
-            {editing && (
-                <Modal open onOpenChange={open => !open && cancelEdit()}>
+            {pickingImage && imageAttribute && (
+                <Modal open onOpenChange={open => !open && setPickingImage(false)}>
                     <ModalContent>
                         <ModalHeader>
-                            <ModalTitle>
-                                {editing === LOCALE
-                                    ? t("selectALocale")
-                                    : labelAttribute(t, editing)}
-                            </ModalTitle>
+                            <ModalTitle>{labelAttribute(t, imageAttribute)}</ModalTitle>
                         </ModalHeader>
                         <ModalBody>
-                            {editing === LOCALE ? (
-                                <NativeSelect
-                                    id="locale"
-                                    defaultValue={
-                                        getValues("attributes.locale") ||
-                                        context.environment.locale
-                                    }
-                                    className="w-full"
-                                    {...register("attributes.locale" as any)}
-                                >
-                                    {supportedLocales.map(l => (
-                                        <NativeSelectOption key={l} value={l}>
-                                            {localeName(l)}
-                                        </NativeSelectOption>
-                                    ))}
-                                </NativeSelect>
-                            ) : (
-                                <Field data-invalid={editError !== undefined}>
-                                    <Input
-                                        id={editingAttr.name}
-                                        data-testid={editingAttr.name}
-                                        type={editingAttr.name === "email" ? "email" : "text"}
-                                        aria-invalid={editError !== undefined}
-                                        {...register(fieldName(editingAttr.name))}
-                                    />
-                                    {editError?.message && (
-                                        <FieldError>{editError.message}</FieldError>
-                                    )}
-                                </Field>
-                            )}
-                        </ModalBody>
-                        <ModalFooter>
-                            <Button
-                                data-testid="save"
-                                size="lg"
-                                block
-                                onClick={() => saveEdit()}
+                            <div
+                                role="radiogroup"
+                                aria-label={labelAttribute(t, imageAttribute)}
+                                className="mx-auto grid w-fit grid-cols-[repeat(3,92px)] gap-3"
                             >
-                                {t("save")}
-                            </Button>
-                        </ModalFooter>
+                                {imageOptions.map((key, i) => (
+                                    <label
+                                        key={key}
+                                        className="relative size-23 cursor-pointer rounded-[20px] has-checked:ring-2 has-checked:ring-primary has-focus-visible:ring-2 has-focus-visible:ring-ring/50"
+                                    >
+                                        <input
+                                            type="radio"
+                                            name="security-image-choice"
+                                            value={key}
+                                            checked={currentImage === key}
+                                            onChange={() => {
+                                                setValue(fieldName(SECURITY_IMAGE), [key], {
+                                                    shouldDirty: true
+                                                });
+                                                setPickingImage(false);
+                                            }}
+                                            aria-label={`${i + 1}`}
+                                            className="peer sr-only"
+                                        />
+                                        <SecurityImageThumb
+                                            value={key}
+                                            className="size-full rounded-[20px]"
+                                        />
+                                        <span
+                                            aria-hidden="true"
+                                            className="absolute -top-1.5 -right-1.5 hidden size-5.5 place-items-center rounded-full bg-primary text-white shadow-[0_1px_3px_rgba(0,0,0,0.25)] peer-checked:grid"
+                                        >
+                                            <CheckIcon weight="bold" className="size-3" />
+                                        </span>
+                                    </label>
+                                ))}
+                            </div>
+                        </ModalBody>
                     </ModalContent>
                 </Modal>
             )}
         </Page>
     );
 };
-
-/** A read-only value row that opens an edit sheet on tap (appleid.apple.com style). */
-function FieldRow({
-    id,
-    label,
-    value,
-    onClick
-}: {
-    id?: string;
-    label: ReactNode;
-    value?: ReactNode;
-    onClick?: () => void;
-}) {
-    const tappable = !!onClick;
-    const content = (
-        <>
-            <ItemContent>
-                <ItemTitle className="font-normal">{label}</ItemTitle>
-            </ItemContent>
-            <ItemActions className="min-w-0">
-                <span
-                    className="min-w-0 truncate text-muted-foreground"
-                    data-testid={id ? `${id}-value` : undefined}
-                >
-                    {value || "—"}
-                </span>
-                {tappable && <CaretRightIcon className="text-muted-foreground" />}
-            </ItemActions>
-        </>
-    );
-    if (tappable) {
-        return (
-            <Item size="sm" asChild>
-                <button type="button" onClick={onClick}>
-                    {content}
-                </button>
-            </Item>
-        );
-    }
-    return <Item size="sm">{content}</Item>;
-}
 
 export default PersonalInfo;

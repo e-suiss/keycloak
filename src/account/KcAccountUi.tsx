@@ -18,6 +18,7 @@ import { startColorSchemeManagement } from "./colorScheme";
 import { environment } from "./environment";
 import { i18n } from "./i18n/i18n";
 import { Root } from "./root/Root";
+import { AccountSkeleton } from "./root/Skeleton";
 
 document.title = "Account Management";
 
@@ -36,7 +37,7 @@ export default function KcAccountUi() {
     }
 
     return (
-        <KeycloakProvider environment={environment}>
+        <KeycloakProvider environment={environment} fallback={<AccountSkeleton />}>
             <Root />
             <SessionExpirationWarningOverlay warnUserSecondsBeforeAutoLogout={45} />
         </KeycloakProvider>

@@ -129,6 +129,10 @@
   }
   html {
     @apply font-sans;
+    scrollbar-gutter: stable;
+  }
+  html body[data-scroll-locked] {
+    margin-right: 0 !important;
   }
   /* Browser autofill paints its own (light) background and text color over inputs; keep ours.
      The UA background is !important, so its change is delayed until it never shows. !important

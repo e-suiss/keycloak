@@ -27,18 +27,11 @@ import type { AccountEnvironment } from "..";
 import fetchContentJson from "../content/fetchContent";
 import { routes } from "../routes";
 import { usePromise } from "../utils/usePromise";
-import { Spinner as UiSpinner } from "@ui/components/spinner";
+import { AccountSkeleton, RouteSkeleton } from "./Skeleton";
 import { Header } from "./Header";
 import { type MenuItem, PageNav } from "./PageNav";
 import { Shell } from "./Shell";
-
-function Spinner() {
-    return (
-        <div className="grid min-h-screen place-items-center bg-background">
-            <UiSpinner className="size-6" />
-        </div>
-    );
-}
+import { useTranslation } from "react-i18next";
 
 function mapRoutes(
     context: KeycloakContext<AccountEnvironment>,
@@ -69,6 +62,7 @@ function mapRoutes(
 
 export const Root = () => {
     const context = useEnvironment<AccountEnvironment>();
+    const { t } = useTranslation();
     const [content, setContent] = useState<RouteObject[]>();
 
     usePromise(
@@ -80,8 +74,8 @@ export const Root = () => {
                         new URL(context.environment.baseUrl).pathname
                     ),
                     element: (
-                        <Shell header={<Header />} sidebar={<PageNav />}>
-                            <Suspense fallback={<Spinner />}>
+                        <Shell header={<Header />} sidebar={<PageNav />} menuLabel={t("openMenu")}>
+                            <Suspense fallback={<RouteSkeleton />}>
                                 <Outlet />
                             </Suspense>
                         </Shell>
@@ -94,7 +88,7 @@ export const Root = () => {
     );
 
     if (!content) {
-        return <Spinner />;
+        return <AccountSkeleton />;
     }
     return <RouterProvider router={createBrowserRouter(content)} />;
 };

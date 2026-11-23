@@ -16,6 +16,7 @@ import { Keycloak } from "oidc-spa/keycloak-js";
 import {
     createContext,
     type PropsWithChildren,
+    type ReactNode,
     useContext,
     useEffect,
     useMemo,
@@ -49,11 +50,13 @@ export const useEnvironment = <T extends BaseEnvironment = BaseEnvironment>() =>
 interface KeycloakContextProps<T extends BaseEnvironment> {
     environment: T;
     keycloak?: Keycloak;
+    fallback?: ReactNode;
 }
 
 export const KeycloakProvider = <T extends BaseEnvironment>({
     environment,
     keycloak: externalKeycloak,
+    fallback,
     children
 }: PropsWithChildren<KeycloakContextProps<T>>) => {
     KeycloakEnvContext = createKeycloakEnvContext<T>();
@@ -104,6 +107,7 @@ export const KeycloakProvider = <T extends BaseEnvironment>({
     }
 
     if (!init) {
+        if (fallback !== undefined) return <>{fallback}</>;
         return (
             <div className="grid min-h-screen place-items-center bg-background">
                 <Spinner className="size-6" />
