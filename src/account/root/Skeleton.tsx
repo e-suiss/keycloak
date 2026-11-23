@@ -8,7 +8,7 @@ import { matchPath } from "react-router-dom";
 
 import { content } from "../assets/content";
 import { environment } from "../environment";
-import { flattenLeaves, NavBrand, NavLinkContent, NavSections, navLinkClass } from "./PageNav";
+import { flattenLeaves, NavBrand, pageTitleKey, NavLinkContent, NavSections, navLinkClass } from "./PageNav";
 import { HAIRLINE, Shell } from "./Shell";
 
 export function Bar({ className, style }: { className?: string; style?: React.CSSProperties }) {
@@ -60,6 +60,72 @@ export function PageSkeleton() {
     );
 }
 
+export function MethodsSkeleton() {
+    const widths = ["38%", "50%", "34%"];
+    return (
+        <div
+            aria-busy="true"
+            className="w-full overflow-hidden rounded-xl border border-[#e5e5ea] bg-[#f5f5f7] dark:border-[#38383a] dark:bg-[#1c1c1e]"
+        >
+            {widths.map((width, index) => (
+                <Fragment key={index}>
+                    {index > 0 && <div className="ms-4 h-px bg-[#e5e5ea] dark:bg-[#38383a]" />}
+                    <div className="flex h-13 items-center justify-between px-4">
+                        <Bar className="h-3" style={{ width }} />
+                        <Bar className="h-2.5 w-[14%]" />
+                    </div>
+                </Fragment>
+            ))}
+        </div>
+    );
+}
+
+export function SessionsSkeleton() {
+    const rows = [
+        ["48%", "70%"],
+        ["40%", "55%"]
+    ];
+    return (
+        <div
+            aria-busy="true"
+            className="w-full overflow-hidden rounded-xl border border-[#e5e5ea] bg-[#f5f5f7] dark:border-[#38383a] dark:bg-[#1c1c1e]"
+        >
+            {rows.map(([title, detail], index) => (
+                <Fragment key={index}>
+                    {index > 0 && <div className="ms-4 h-px bg-[#e5e5ea] dark:bg-[#38383a]" />}
+                    <div className="flex flex-col gap-2 p-4">
+                        <Bar className="h-3.5" style={{ width: title }} />
+                        <Bar className="h-2.5" style={{ width: detail }} />
+                    </div>
+                </Fragment>
+            ))}
+        </div>
+    );
+}
+
+export function ListSkeleton() {
+    const rows = [
+        ["40%", "60%"],
+        ["34%", "50%"]
+    ];
+    return (
+        <div
+            aria-busy="true"
+            className="w-full overflow-hidden rounded-xl border border-[#e5e5ea] bg-[#f5f5f7] dark:border-[#38383a] dark:bg-[#1c1c1e]"
+        >
+            {rows.map(([title, detail], index) => (
+                <Fragment key={index}>
+                    {index > 0 && <div className="ms-4 h-px bg-[#e5e5ea] dark:bg-[#38383a]" />}
+                    <div className="flex flex-col gap-2 p-4">
+                        <Bar className="h-3.5" style={{ width: title }} />
+                        <Bar className="h-2.5" style={{ width: detail }} />
+                    </div>
+                </Fragment>
+            ))}
+        </div>
+    );
+}
+
 export function FormSkeleton({ fields = 8 }: { fields?: number }) {
     return (
         <PageFrame>
@@ -83,7 +149,27 @@ function activeLeaf() {
 }
 
 export function RouteSkeleton() {
-    return activeLeaf()?.path === "" ? <FormSkeleton /> : <PageSkeleton />;
+    const path = activeLeaf()?.path;
+    if (path === "") return <FormSkeleton />;
+    if (path === "account-security/signing-in")
+        return (
+            <PageFrame>
+                <MethodsSkeleton />
+            </PageFrame>
+        );
+    if (path === "account-security/device-activity")
+        return (
+            <PageFrame>
+                <SessionsSkeleton />
+            </PageFrame>
+        );
+    if (["account-security/linked-accounts", "applications", "groups"].includes(path))
+        return (
+            <PageFrame>
+                <ListSkeleton />
+            </PageFrame>
+        );
+    return <PageSkeleton />;
 }
 
 export function AccountSkeleton() {
@@ -127,7 +213,7 @@ export function AccountSkeleton() {
                         <SidebarSimpleIcon className="size-5 text-muted-foreground" />
                     </span>
                     <span className="pointer-events-none absolute inset-x-14 truncate text-center text-base font-semibold sm:static sm:text-left sm:text-lg">
-                        {active ? t(active.label) : ""}
+                        {active ? t(pageTitleKey(active.label)) : ""}
                     </span>
                     <Bar className="size-7 rounded-full sm:size-7.5" />
                 </header>

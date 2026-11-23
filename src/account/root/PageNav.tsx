@@ -69,6 +69,12 @@ function matchMenuItem(
 }
 
 /** Title of the active leaf — drives the header (desktop) and main heading (mobile). */
+const PAGE_TITLES: Record<string, string> = { signingIn: "accountSecurity", deviceActivity: "sessions" };
+
+export function pageTitleKey(label: string) {
+    return PAGE_TITLES[label] ?? label;
+}
+
 export function usePageTitle(menuItems: MenuItem[] | undefined) {
     const { t } = useTranslation();
     const { environment } = useEnvironment<AccountEnvironment>();
@@ -77,7 +83,7 @@ export function usePageTitle(menuItems: MenuItem[] | undefined) {
     const active = leaves.find(item =>
         matchMenuItem(pathname, item, environment.baseUrl)
     );
-    return t((active?.label ?? leaves[0]?.label ?? "personalInfo") as TFuncKey);
+    return t(pageTitleKey(active?.label ?? leaves[0]?.label ?? "personalInfo") as TFuncKey);
 }
 
 export function NavBrand() {
