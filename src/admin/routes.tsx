@@ -1,5 +1,5 @@
-import { Empty, EmptyHeader, EmptyTitle } from "@ui/components/empty";
 // @ts-nocheck
+import { Empty, EmptyHeader, EmptyTitle } from "@ui/components/empty";
 // Custom admin routes — shadcn pages only, no PatternFly feature routes.
 import { lazy } from "react";
 import { Navigate, type RouteObject } from "react-router-dom";
@@ -32,6 +32,9 @@ const WorkflowDetail = lazy(() => import("./pages/WorkflowDetail"));
 const Permissions = lazy(() => import("./pages/Permissions"));
 const Terms = lazy(() => import("./pages/Terms"));
 const RegistrationConfig = lazy(() => import("./pages/RegistrationConfig"));
+const Realms = lazy(() => import("./pages/Realms"));
+const CreateRealm = lazy(() => import("./pages/CreateRealm"));
+const ServerInfo = lazy(() => import("./pages/ServerInfo"));
 const IamManagement = lazy(() => import("./iam-management/IamManagement"));
 
 function NotFound() {
@@ -82,6 +85,9 @@ export const RootRoute: RouteObject = {
         { path: ":realm/terms", element: <Terms /> },
         { path: ":realm/registration-config", element: <RegistrationConfig /> },
         { path: ":realm/iam-management", element: <IamManagement /> },
+        { path: ":realm/realms", element: <Realms /> },
+        { path: ":realm/realms/new", element: <CreateRealm /> },
+        { path: ":realm/server-info", element: <ServerInfo /> },
         { path: "*", element: <NotFound /> }
     ]
 };

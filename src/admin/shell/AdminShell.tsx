@@ -4,6 +4,8 @@ import {
     AppWindowIcon,
     CaretUpDownIcon,
     CheckIcon,
+    GearIcon,
+    PlusIcon,
     BuildingsIcon,
     ClockCounterClockwiseIcon,
     DatabaseIcon,
@@ -29,6 +31,7 @@ import {
     DropdownMenuContent,
     DropdownMenuItem,
     DropdownMenuLabel,
+    DropdownMenuSeparator,
     DropdownMenuTrigger
 } from "@ui/components/dropdown-menu";
 import { type PropsWithChildren, useEffect, useState } from "react";
@@ -40,6 +43,10 @@ import { UserMenu } from "../../shared/shell/UserMenu";
 import { useCapabilities } from "../ui/capabilities";
 import { useT } from "../ui/i18n";
 import { useRealm } from "../ui/realm";
+import { Banners } from "./Banners";
+import { ClearCachesModal } from "./ClearCachesModal";
+import { helpUrls } from "./help";
+import { useRealmsVersion, useWhoAmI, WhoAmIProvider } from "./session";
 
 type NavItem = { to: string; label: string; icon: any; show?: boolean };
 
@@ -124,6 +131,8 @@ function RealmPicker() {
     const [failed, setFailed] = useState(false);
     const [attempt, setAttempt] = useState(0);
     const [query, setQuery] = useState("");
+    const version = useRealmsVersion();
+    const { whoAmI } = useWhoAmI();
 
     useEffect(() => {
         let alive = true;
@@ -141,7 +150,7 @@ function RealmPicker() {
         return () => {
             alive = false;
         };
-    }, [adminClient, attempt]);
+    }, [adminClient, attempt, version]);
 
     const current = realms?.find(r => r.realm === realm);
     const label = (r: any) => (r?.displayName && !/^\$\{.*\}$/.test(r.displayName) ? r.displayName : r?.realm);
@@ -218,6 +227,29 @@ function RealmPicker() {
                         ))}
                     </div>
                 )}
+                <DropdownMenuSeparator className="mx-0 my-1 bg-[#e5e5ea] dark:bg-[#38383a]" />
+                {whoAmI?.createRealm && (
+                    <DropdownMenuItem
+                        className="rounded-lg px-2.5 py-2 text-sm"
+                        onSelect={() => {
+                            setOpen(false);
+                            navigate(`/${encodeURIComponent(realm)}/realms/new`);
+                        }}
+                    >
+                        <PlusIcon className="size-4 text-muted-foreground" />
+                        <span className="min-w-0 flex-1 truncate">{t("sxRealmsCreate")}</span>
+                    </DropdownMenuItem>
+                )}
+                <DropdownMenuItem
+                    className="rounded-lg px-2.5 py-2 text-sm"
+                    onSelect={() => {
+                        setOpen(false);
+                        navigate(`/${encodeURIComponent(realm)}/realms`);
+                    }}
+                >
+                    <GearIcon className="size-4 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate">{t("sxShellManageRealms")}</span>
+                </DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>
     );
@@ -271,20 +303,42 @@ function AdminUserMenu() {
     const t = useT();
     const { keycloak, environment } = useEnvironment();
     const { realm } = useRealm();
+    const navigate = useNavigate();
+    const { hasAccess } = useWhoAmI();
+    const [clearing, setClearing] = useState(false);
+    const isMaster = realm === "master";
     const user = keycloak?.idTokenParsed as
         | { name?: string; preferred_username?: string; email?: string }
         | undefined;
     const name = user?.name || user?.preferred_username || user?.email || "Admin";
     const accountUrl = `${environment.serverBaseUrl}/realms/${encodeURIComponent(realm)}/account/`;
 
+    const items = [
+        { label: t("sxMyAccount"), onSelect: () => window.open(accountUrl, "_blank", "noopener") },
+        {
+            label: isMaster ? t("sxShellServerInfo") : t("sxShellRealmInfo"),
+            onSelect: () => navigate(`/${encodeURIComponent(realm)}/server-info`)
+        },
+        ...(isMaster && hasAccess("manage-realm")
+            ? [{ label: t("sxShellClearCaches"), onSelect: () => setTimeout(() => setClearing(true), 0) }]
+            : []),
+        {
+            label: t("sxShellDocumentation"),
+            onSelect: () => window.open(helpUrls.documentationUrl, "_blank", "noopener,noreferrer")
+        }
+    ];
+
     return (
-        <UserMenu
-            name={name}
-            email={user?.email}
-            items={[{ label: t("sxMyAccount"), onSelect: () => window.open(accountUrl, "_blank", "noopener") }]}
-            signOutLabel={t("sxSignOut")}
-            onSignOut={() => keycloak.logout()}
-        />
+        <>
+            <UserMenu
+                name={name}
+                email={user?.email}
+                items={items}
+                signOutLabel={t("sxSignOut")}
+                onSignOut={() => keycloak.logout()}
+            />
+            {clearing && <ClearCachesModal onClose={() => setClearing(false)} />}
+        </>
     );
 }
 
@@ -293,7 +347,13 @@ function AdminHeader() {
     const groups = useNavGroups();
     const isActive = useActive();
     const { setOpen } = useNavDrawer();
-    const title = groups.flatMap(group => group.items).find(item => isActive(item.to))?.label ?? t("sxNavDashboard");
+    const { realm } = useRealm();
+    const extra = [
+        { to: `/${realm}/realms`, label: t("sxShellManageRealms") },
+        { to: `/${realm}/server-info`, label: realm === "master" ? t("sxShellServerInfo") : t("sxShellRealmInfo") }
+    ];
+    const title =
+        [...groups.flatMap(group => group.items), ...extra].find(item => isActive(item.to))?.label ?? t("sxNavDashboard");
 
     return (
         <header
@@ -318,8 +378,11 @@ function AdminHeader() {
 export function AdminShell({ children }: PropsWithChildren) {
     const t = useT();
     return (
-        <Shell header={<AdminHeader />} sidebar={<AdminNav />} menuLabel={t("sxMenu")}>
-            {children}
-        </Shell>
+        <WhoAmIProvider>
+            <Shell header={<AdminHeader />} sidebar={<AdminNav />} menuLabel={t("sxMenu")}>
+                <Banners />
+                {children}
+            </Shell>
+        </WhoAmIProvider>
     );
 }
