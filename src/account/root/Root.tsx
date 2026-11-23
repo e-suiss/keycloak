@@ -30,7 +30,7 @@ import { usePromise } from "../utils/usePromise";
 import { AccountSkeleton, RouteSkeleton } from "./Skeleton";
 import { Header } from "./Header";
 import { type MenuItem, PageNav } from "./PageNav";
-import { Shell } from "./Shell";
+import { Shell } from "../../shared/shell/Shell";
 import { useTranslation } from "react-i18next";
 
 function mapRoutes(

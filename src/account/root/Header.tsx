@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { AccountMenu } from "./AccountMenu";
 import { useMenuItems, usePageTitle } from "./PageNav";
-import { HAIRLINE, useNavDrawer } from "./Shell";
+import { HAIRLINE, useNavDrawer } from "../../shared/shell/Shell";
 
 export const Header = () => {
     const { t } = useTranslation();

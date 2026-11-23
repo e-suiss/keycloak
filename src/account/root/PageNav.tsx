@@ -10,7 +10,7 @@ import fetchContentJson from "../content/fetchContent";
 import type { TFuncKey } from "../i18n-type";
 import { usePromise } from "../utils/usePromise";
 import { NavIcon } from "./NavIcon";
-import { HAIRLINE, useNavDrawer } from "./Shell";
+import { navLinkClass, NavBrandBar, useNavDrawer } from "../../shared/shell/Shell";
 
 export type RootMenuItem = {
     id?: string;
@@ -88,16 +88,7 @@ export function usePageTitle(menuItems: MenuItem[] | undefined) {
 
 export function NavBrand() {
     const { t } = useTranslation();
-    return (
-        <div
-            data-testid="page-header"
-            className={`-mx-3 mb-3.5 flex h-12 shrink-0 items-center gap-2 sm:h-15 border-b px-5.5 ${HAIRLINE}`}
-        >
-            <span aria-hidden className="size-5.5 shrink-0 rounded-full bg-muted-foreground" />
-            <span className="text-base font-semibold">{t("consoleBrand")}</span>
-            <span className="text-xs text-muted-foreground">{t("consoleBrandSuffix")}</span>
-        </div>
-    );
+    return <NavBrandBar title={t("consoleBrand")} suffix={t("consoleBrandSuffix")} />;
 }
 
 export function NavSections({
@@ -126,14 +117,7 @@ export function NavSections({
     );
 }
 
-export function navLinkClass(isActive: boolean) {
-    return cn(
-        "mt-0.5 flex h-8.5 items-center gap-2.5 rounded-lg px-2.5 text-sm text-foreground outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50",
-        isActive
-            ? "bg-[#e5e5ea] font-medium dark:bg-[#2c2c2e]"
-            : "hover:bg-[#e5e5ea]/60 dark:hover:bg-[#2c2c2e]/60"
-    );
-}
+export { navLinkClass };
 
 export function NavLinkContent({ icon, label, isActive }: { icon: string; label: ReactNode; isActive: boolean }) {
     return (

@@ -1,4 +1,5 @@
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@ui/components/sheet";
+import { cn } from "@ui/lib/utils";
 import {
     createContext,
     type PropsWithChildren,
@@ -9,6 +10,28 @@ import {
 } from "react";
 
 export const HAIRLINE = "border-[#e5e5ea] dark:border-[#38383a]";
+
+export function navLinkClass(isActive: boolean) {
+    return cn(
+        "mt-0.5 flex h-8.5 items-center gap-2.5 rounded-lg px-2.5 text-sm text-foreground outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50",
+        isActive
+            ? "bg-[#e5e5ea] font-medium dark:bg-[#2c2c2e]"
+            : "hover:bg-[#e5e5ea]/60 dark:hover:bg-[#2c2c2e]/60"
+    );
+}
+
+export function NavBrandBar({ title, suffix }: { title: string; suffix: string }) {
+    return (
+        <div
+            data-testid="page-header"
+            className={`-mx-3 mb-3.5 flex h-12 shrink-0 items-center gap-2 border-b px-5.5 sm:h-15 ${HAIRLINE}`}
+        >
+            <span aria-hidden className="size-5.5 shrink-0 rounded-full bg-muted-foreground" />
+            <span className="text-base font-semibold">{title}</span>
+            <span className="text-xs text-muted-foreground">{suffix}</span>
+        </div>
+    );
+}
 
 type NavDrawer = { open: boolean; setOpen: (open: boolean) => void };
 

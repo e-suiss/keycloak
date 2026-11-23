@@ -9,7 +9,7 @@ import { matchPath } from "react-router-dom";
 import { content } from "../assets/content";
 import { environment } from "../environment";
 import { flattenLeaves, NavBrand, pageTitleKey, NavLinkContent, NavSections, navLinkClass } from "./PageNav";
-import { HAIRLINE, Shell } from "./Shell";
+import { HAIRLINE, Shell } from "../../shared/shell/Shell";
 
 export function Bar({ className, style }: { className?: string; style?: React.CSSProperties }) {
     return (
