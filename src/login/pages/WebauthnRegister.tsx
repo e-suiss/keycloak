@@ -25,6 +25,7 @@ export default function WebauthnRegister(props: PageProps<Extract<KcContext, { p
                     <input type="hidden" id="publicKeyCredentialId" name="publicKeyCredentialId" />
                     <input type="hidden" id="authenticatorLabel" name="authenticatorLabel" />
                     <input type="hidden" id="transports" name="transports" />
+                    <input type="hidden" id="authenticatorAttachment" name="authenticatorAttachment" />
                     <input type="hidden" id="error" name="error" />
                     {/* The design has no "sign out other sessions" box; keep Keycloak's default (on). */}
                     <input type="hidden" name="logout-sessions" value="on" />
