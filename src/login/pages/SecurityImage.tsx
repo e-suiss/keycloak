@@ -4,6 +4,7 @@ import type { PageProps } from "keycloakify/login/pages/PageProps";
 import { useState } from "react";
 import type { I18n } from "../i18n";
 import type { KcContext } from "../KcContext";
+import { securityImageSrc } from "../../shared/securityImages";
 
 /**
  * Anti-phishing security image — React counterpart of "security-image.ftl"
@@ -37,7 +38,7 @@ export default function SecurityImage(props: PageProps<Extract<KcContext, { page
             {isConfirm ? (
                 <form autoComplete="off" action={url.loginAction} method="post" className="-mt-1.5 flex flex-col items-center">
                     <div className="size-32.5 overflow-hidden rounded-[29px] bg-muted shadow-[0_10px_30px_rgba(0,0,0,0.12)] dark:shadow-[0_10px_30px_rgba(0,0,0,0.4)]">
-                        {selectedImage && <img src={selectedImage} alt="" className="size-full object-cover dark:[filter:invert(1)_hue-rotate(180deg)_brightness(1.25)]" />}
+                        {selectedImage && <img src={securityImageSrc(selectedImage)} alt="" className="size-full object-cover dark:[filter:invert(1)_hue-rotate(180deg)_brightness(1.25)]" />}
                     </div>
                     <div className="mt-7.5 flex w-full flex-col gap-1.5">
                         <Button type="submit" size="form" block name="securityImageConfirm" value="yes">
@@ -67,7 +68,7 @@ export default function SecurityImage(props: PageProps<Extract<KcContext, { page
                                     className="peer sr-only"
                                 />
                                 <img
-                                    src={src}
+                                    src={securityImageSrc(src)}
                                     alt=""
                                     className="size-full rounded-[20px] object-cover dark:[filter:invert(1)_hue-rotate(180deg)_brightness(1.25)] shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.05)] dark:shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.08)]"
                                 />
