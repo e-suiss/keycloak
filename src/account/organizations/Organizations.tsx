@@ -1,107 +1,119 @@
-/**
- * WARNING: Before modifying this file, run the following command:
- *
- * $ npx keycloakify own --path "account/organizations/Organizations.tsx"
- *
- * This file is provided by @keycloakify/keycloak-account-ui version 260601.0.0.
- * It was copied into your repository by the postinstall script: `keycloakify sync-extensions`.
- */
-
-/* eslint-disable */
-
 // @ts-nocheck
 
 import type OrganizationRepresentation from "@keycloak/keycloak-admin-client/lib/defs/organizationRepresentation";
-import { BuildingsIcon } from "@phosphor-icons/react";
-import {
-    Empty,
-    EmptyDescription,
-    EmptyHeader,
-    EmptyMedia,
-    EmptyTitle
-} from "@ui/components/empty";
-import {
-    Item,
-    ItemContent,
-    ItemDescription,
-    ItemGroup,
-    ItemMedia,
-    ItemSeparator,
-    ItemTitle
-} from "@ui/components/item";
-import { Spinner } from "@ui/components/spinner";
-import { Fragment, useState } from "react";
+import { Button } from "@ui/components/button";
+import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useEnvironment } from "../../shared/keycloak-ui-shared";
 import type { AccountEnvironment } from "..";
 import { getUserOrganizations } from "../api/methods";
 import { Page } from "../components/page/Page";
-import { usePromise } from "../utils/usePromise";
+import { ListSkeleton } from "../root/Skeleton";
+
+const GROUP =
+  "w-full overflow-hidden rounded-xl border border-[#e5e5ea] bg-[#f5f5f7] text-left dark:border-[#38383a] dark:bg-[#1c1c1e]";
+const SEPARATOR = "ms-4 h-px bg-[#e5e5ea] dark:bg-[#38383a]";
+
+type State =
+  | { status: "loading" }
+  | { status: "error" }
+  | { status: "ready"; organizations: OrganizationRepresentation[] };
+
+function Notice({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div className={GROUP}>
+      <div className="px-4 py-6 text-center">
+        <div className="text-base font-semibold">{title}</div>
+        <p className="mt-1.5 text-sm text-muted-foreground">{description}</p>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 export const Organizations = () => {
-    const { t } = useTranslation();
-    const context = useEnvironment<AccountEnvironment>();
+  const { t } = useTranslation();
+  const context = useEnvironment<AccountEnvironment>();
+  const [state, setState] = useState<State>({ status: "loading" });
+  const [attempt, setAttempt] = useState(0);
 
-    const [userOrgs, setUserOrgs] = useState<OrganizationRepresentation[]>([]);
+  useEffect(() => {
+    const controller = new AbortController();
+    setState({ status: "loading" });
+    getUserOrganizations({ signal: controller.signal, context })
+      .then((organizations) =>
+        setState({ status: "ready", organizations: organizations ?? [] }),
+      )
+      .catch((error) => {
+        if (error?.name !== "AbortError") setState({ status: "error" });
+      });
+    return () => controller.abort();
+  }, [attempt]);
 
-    usePromise(signal => getUserOrganizations({ signal, context }), setUserOrgs);
+  return (
+    <Page title={t("organizations")} description={t("organizationDescription")}>
+      <h2 className="mb-2 ms-0.5 text-center text-sm font-medium text-muted-foreground">
+        {t("organizations")}
+      </h2>
 
-    if (!userOrgs) {
-        return (
-            <div className="grid place-items-center py-24">
-                <Spinner />
-            </div>
-        );
-    }
+      {state.status === "loading" && <ListSkeleton />}
 
-    return (
-        <Page title={t("organizations")} description={t("organizationDescription")}>
-            <div className="space-y-7">
-                {userOrgs.length === 0 ? (
-                    <Empty>
-                        <EmptyHeader>
-                            <EmptyMedia variant="icon">
-                                <BuildingsIcon />
-                            </EmptyMedia>
-                            <EmptyTitle>{t("emptyUserOrganizations")}</EmptyTitle>
-                            <EmptyDescription>
-                                {t("emptyUserOrganizationsInstructions")}
-                            </EmptyDescription>
-                        </EmptyHeader>
-                    </Empty>
-                ) : (
-                    <section>
-                        <h3 className="mb-2 ms-1 text-sm font-medium text-muted-foreground">
-                            {t("organizations")}
-                        </h3>
-                        <ItemGroup variant="inset">
-                            {userOrgs.map((org, index) => {
-                                const subtitle =
-                                    org.description ||
-                                    org.domains?.map(d => d.name).join(", ");
-                                return (
-                                    <Fragment key={org.id}>
-                                        {index > 0 && <ItemSeparator />}
-                                        <Item size="sm">
-                                            <ItemMedia variant="icon">
-                                                <BuildingsIcon />
-                                            </ItemMedia>
-                                            <ItemContent>
-                                                <ItemTitle>{org.name}</ItemTitle>
-                                                {subtitle && (
-                                                    <ItemDescription>{subtitle}</ItemDescription>
-                                                )}
-                                            </ItemContent>
-                                        </Item>
-                                    </Fragment>
-                                );
-                            })}
-                        </ItemGroup>
-                    </section>
-                )}
-            </div>
-        </Page>
-    );
+      {state.status === "error" && (
+        <Notice
+          title={t("organizationsLoadError")}
+          description={t("signingInLoadErrorDescription")}
+        >
+          <Button
+            size="sm"
+            className="mt-3.5 h-8.5 px-4 font-medium"
+            onClick={() => setAttempt((n) => n + 1)}
+          >
+            {t("tryAgain")}
+          </Button>
+        </Notice>
+      )}
+
+      {state.status === "ready" && state.organizations.length === 0 && (
+        <Notice
+          title={t("emptyUserOrganizations")}
+          description={t("organizationDescription")}
+        />
+      )}
+
+      {state.status === "ready" && state.organizations.length > 0 && (
+        <ul className={GROUP}>
+          {state.organizations.map((organization, index) => {
+            const subtitle =
+              organization.description ||
+              organization.domains?.map((domain) => domain.name).join(", ");
+            return (
+              <li key={organization.id}>
+                {index > 0 && <div className={SEPARATOR} />}
+                <div className="min-w-0 px-4 py-3.5">
+                  <div className="text-base font-medium">
+                    {organization.name}
+                  </div>
+                  {subtitle && (
+                    <div className="mt-0.5 text-[13px] text-muted-foreground [overflow-wrap:anywhere]">
+                      {subtitle}
+                    </div>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Page>
+  );
 };
 
 export default Organizations;
