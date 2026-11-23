@@ -1,18 +1,8 @@
 // @ts-nocheck
-import { Badge } from "@ui/components/badge";
 import { Button } from "@ui/components/button";
 import { Field, FieldGroup, FieldLabel } from "@ui/components/field";
 import { Input } from "@ui/components/input";
 import { NativeSelect, NativeSelectOption } from "@ui/components/native-select";
-import { Spinner } from "@ui/components/spinner";
-import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow
-} from "@ui/components/table";
 import {
     Confirm,
     ConfirmAction,
@@ -35,10 +25,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AlertVariant, useAlerts } from "../../shared/keycloak-ui-shared";
 import { useAdminClient } from "../admin-client";
+import { AdminPage, Chip, Group, ListSkeleton, Notice, SearchField, Section, TextAction } from "../ui/kit";
+import { useT } from "../ui/i18n";
 import { useRealm } from "../ui/realm";
 
-/** Confirm dialog — returns a [confirm(opts), node] pair. */
 function useConfirmDialog() {
+    const t = useT();
     const [open, setOpen] = useState(false);
     const [state, setState] = useState<any>(null);
     const confirm = (opts: any) => {
@@ -55,7 +47,7 @@ function useConfirmDialog() {
                     )}
                 </ConfirmHeader>
                 <ConfirmFooter>
-                    <ConfirmCancel>Vazgeç</ConfirmCancel>
+                    <ConfirmCancel>{t("sxCommonCancel")}</ConfirmCancel>
                     <ConfirmAction
                         variant={state?.danger ? "destructive" : "default"}
                         onClick={() => {
@@ -64,7 +56,7 @@ function useConfirmDialog() {
                             fn?.();
                         }}
                     >
-                        {state?.confirmLabel ?? "Onayla"}
+                        {state?.confirmLabel ?? t("sxCommonConfirm")}
                     </ConfirmAction>
                 </ConfirmFooter>
             </ConfirmContent>
@@ -73,16 +65,41 @@ function useConfirmDialog() {
     return [confirm, node] as const;
 }
 
+function OpenRow({ title, subtitle, onOpen, trailing, testId }: any) {
+    return (
+        <li
+            data-testid={testId}
+            className="flex items-center gap-3 pe-4 transition-colors hover:bg-black/3 dark:hover:bg-white/4"
+        >
+            <button
+                type="button"
+                onClick={onOpen}
+                className="flex min-h-16 min-w-0 flex-1 flex-col justify-center py-3 ps-4 text-left outline-none focus-visible:bg-black/5 dark:focus-visible:bg-white/6"
+            >
+                <span className="w-full truncate text-base font-medium">{title}</span>
+                {subtitle && (
+                    <span className="mt-0.5 w-full text-[13px] text-muted-foreground [overflow-wrap:anywhere]">
+                        {subtitle}
+                    </span>
+                )}
+            </button>
+            {trailing && <div className="flex shrink-0 items-center gap-3">{trailing}</div>}
+        </li>
+    );
+}
+
 export default function ClientScopes() {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
     const navigate = useNavigate();
     const { addAlert, addError } = useAlerts();
     const [confirm, confirmNode] = useConfirmDialog();
 
-    const [loading, setLoading] = useState(true);
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
     const [scopes, setScopes] = useState<any[]>([]);
-    const [_reloadKey, setReloadKey] = useState(0);
+    const [reloadKey, setReloadKey] = useState(0);
+    const [query, setQuery] = useState("");
 
     const [createOpen, setCreateOpen] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -92,20 +109,19 @@ export default function ClientScopes() {
 
     useEffect(() => {
         let alive = true;
-        (async () => {
-            setLoading(true);
-            try {
-                const list = await adminClient.clientScopes.find().catch(() => []);
+        setStatus("loading");
+        adminClient.clientScopes
+            .find()
+            .then(list => {
                 if (!alive) return;
-                setScopes(list ?? []);
-            } finally {
-                if (alive) setLoading(false);
-            }
-        })();
+                setScopes(Array.isArray(list) ? list : []);
+                setStatus("ready");
+            })
+            .catch(() => alive && setStatus("error"));
         return () => {
             alive = false;
         };
-    }, [adminClient]);
+    }, [adminClient, reloadKey]);
 
     const reload = () => setReloadKey(k => k + 1);
 
@@ -126,11 +142,11 @@ export default function ClientScopes() {
                 protocol,
                 attributes: {}
             });
-            addAlert("Kapsam oluşturuldu.", AlertVariant.success);
+            addAlert(t("sxClientScopesCreated"), AlertVariant.success);
             setCreateOpen(false);
             reload();
         } catch (err) {
-            addError("Kapsam oluşturulamadı.", err);
+            addError(t("sxClientScopesCreateError"), err);
         } finally {
             setSaving(false);
         }
@@ -138,17 +154,17 @@ export default function ClientScopes() {
 
     const handleDelete = (scope: any) => {
         confirm({
-            title: "Kapsamı sil",
-            message: `“${scope.name}” kapsamını silmek istediğinize emin misiniz?`,
-            confirmLabel: "Sil",
+            title: t("sxClientScopesDeleteTitle"),
+            message: t("sxClientScopesDeleteMessage", { name: scope.name }),
+            confirmLabel: t("sxCommonDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.clientScopes.del({ id: scope.id });
-                    addAlert("Kapsam silindi.", AlertVariant.success);
+                    addAlert(t("sxClientScopesDeleted"), AlertVariant.success);
                     reload();
                 } catch (err) {
-                    addError("Kapsam silinemedi.", err);
+                    addError(t("sxClientScopesDeleteError"), err);
                 }
             }
         });
@@ -159,91 +175,85 @@ export default function ClientScopes() {
         [scopes]
     );
 
+    const filtered = useMemo(() => {
+        const q = query.trim().toLowerCase();
+        if (!q) return sorted;
+        return sorted.filter(
+            s => (s.name || "").toLowerCase().includes(q) || (s.description || "").toLowerCase().includes(q)
+        );
+    }, [sorted, query]);
+
     return (
-        <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-            <div className="mb-6 flex flex-wrap items-center justify-end gap-2">
-                <Button onClick={openCreate}>Yeni kapsam</Button>
-            </div>
-            {loading ? (
-                <div className="flex justify-center py-16">
-                    <Spinner className="size-6" />
-                </div>
-            ) : (
-                <Table>
-                    <TableHeader>
-                        <TableRow>
-                            <TableHead>Ad</TableHead>
-                            <TableHead>Açıklama</TableHead>
-                            <TableHead>Protokol</TableHead>
-                            <TableHead />
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {sorted.length === 0 ? (
-                            <TableRow>
-                                <TableCell
-                                    colSpan={4}
-                                    className="py-10 text-center text-muted-foreground"
-                                >
-                                    Kapsam bulunamadı.
-                                </TableCell>
-                            </TableRow>
-                        ) : (
-                            sorted.map(s => {
-                                const go = () => navigate(`/${realm}/client-scopes/${s.id}`);
-                                return (
-                                    <TableRow key={s.id}>
-                                        <TableCell className="cursor-pointer" onClick={go}>
-                                            <span className="font-medium text-foreground">
-                                                {s.name}
-                                            </span>
-                                        </TableCell>
-                                        <TableCell className="cursor-pointer" onClick={go}>
-                                            {s.description || "—"}
-                                        </TableCell>
-                                        <TableCell className="cursor-pointer" onClick={go}>
-                                            <Badge variant="secondary">
-                                                {s.protocol || "openid-connect"}
-                                            </Badge>
-                                        </TableCell>
-                                        <TableCell className="text-end">
-                                            <Button
-                                                variant="destructive"
-                                                onClick={() => handleDelete(s)}
-                                            >
-                                                Sil
-                                            </Button>
-                                        </TableCell>
-                                    </TableRow>
-                                );
-                            })
-                        )}
-                    </TableBody>
-                </Table>
-            )}
+        <AdminPage
+            title={t("sxNavClientScopes")}
+            description={t("sxClientScopesDescription")}
+            actions={<Button onClick={openCreate}>{t("sxClientScopesNew")}</Button>}
+        >
+            <SearchField value={query} onChange={setQuery} placeholder={t("sxClientScopesSearch")} />
+
+            <Section label={t("sxClientScopesListLabel")}>
+                {status === "loading" && <ListSkeleton />}
+                {status === "error" && (
+                    <Notice
+                        title={t("sxClientScopesLoadError")}
+                        description={t("sxLoadErrorDescription")}
+                        onRetry={reload}
+                    />
+                )}
+                {status === "ready" && filtered.length === 0 && (
+                    <Notice
+                        title={query.trim() ? t("sxClientScopesNoMatch") : t("sxClientScopesEmpty")}
+                        description={query.trim() ? t("sxCommonTryDifferentSearch") : t("sxClientScopesEmptyDescription")}
+                        action={query.trim() ? undefined : <Button size="sm" onClick={openCreate}>{t("sxClientScopesNew")}</Button>}
+                    />
+                )}
+                {status === "ready" && filtered.length > 0 && (
+                    <Group>
+                        {filtered.map(s => (
+                            <OpenRow
+                                key={s.id}
+                                testId={`scope-${s.name}`}
+                                onOpen={() => navigate(`/${realm}/client-scopes/${s.id}`)}
+                                title={s.name}
+                                subtitle={s.description || "—"}
+                                trailing={
+                                    <>
+                                        <span className="hidden sm:inline-flex">
+                                            <Chip>{s.protocol || "openid-connect"}</Chip>
+                                        </span>
+                                        <TextAction tone="danger" onClick={() => handleDelete(s)}>
+                                            {t("sxCommonDelete")}
+                                        </TextAction>
+                                    </>
+                                }
+                            />
+                        ))}
+                    </Group>
+                )}
+            </Section>
 
             <Modal open={createOpen} onOpenChange={o => !o && setCreateOpen(false)}>
                 <ModalContent>
                     <ModalHeader>
-                        <ModalTitle>Yeni kapsam</ModalTitle>
+                        <ModalTitle>{t("sxClientScopesNew")}</ModalTitle>
                     </ModalHeader>
                     <ModalBody>
                         <FieldGroup>
                             <Field>
                                 <FieldLabel>
-                                    Ad <span className="text-destructive">*</span>
+                                    {t("sxCommonName")} <span className="text-destructive">*</span>
                                 </FieldLabel>
                                 <Input value={name} onChange={e => setName(e.target.value)} />
                             </Field>
                             <Field>
-                                <FieldLabel>Açıklama</FieldLabel>
+                                <FieldLabel>{t("sxCommonDescription")}</FieldLabel>
                                 <Input
                                     value={description}
                                     onChange={e => setDescription(e.target.value)}
                                 />
                             </Field>
                             <Field>
-                                <FieldLabel>Protokol</FieldLabel>
+                                <FieldLabel>{t("sxCommonProtocol")}</FieldLabel>
                                 <NativeSelect
                                     className="w-full"
                                     value={protocol}
@@ -259,13 +269,13 @@ export default function ClientScopes() {
                     </ModalBody>
                     <ModalFooter>
                         <Button disabled={saving || !name.trim()} onClick={handleCreate}>
-                            Oluştur
+                            {t("sxCommonCreate")}
                         </Button>
                     </ModalFooter>
                 </ModalContent>
             </Modal>
 
             {confirmNode}
-        </div>
+        </AdminPage>
     );
 }

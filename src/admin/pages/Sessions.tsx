@@ -1,37 +1,7 @@
 // @ts-nocheck
 
-import {
-    DeviceMobileIcon,
-    MagnifyingGlassIcon,
-    MonitorIcon,
-    SignOutIcon,
-    UsersThreeIcon
-} from "@phosphor-icons/react";
-import { Avatar, AvatarFallback } from "@ui/components/avatar";
-import { Badge } from "@ui/components/badge";
+import { DeviceMobileIcon, MonitorIcon, SignOutIcon } from "@phosphor-icons/react";
 import { Button } from "@ui/components/button";
-import {
-    Empty,
-    EmptyDescription,
-    EmptyHeader,
-    EmptyMedia,
-    EmptyTitle
-} from "@ui/components/empty";
-import {
-    InputGroup,
-    InputGroupAddon,
-    InputGroupInput
-} from "@ui/components/input-group";
-import {
-    Item,
-    ItemActions,
-    ItemContent,
-    ItemDescription,
-    ItemGroup,
-    ItemMedia,
-    ItemSeparator,
-    ItemTitle
-} from "@ui/components/item";
 import { Spinner } from "@ui/components/spinner";
 import {
     Confirm,
@@ -43,21 +13,58 @@ import {
     ConfirmHeader,
     ConfirmTitle
 } from "@ui/patterns/confirm";
-import { SegmentPicker, SegmentPickerItem } from "@ui/patterns/segment-picker";
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertVariant, useAlerts } from "../../shared/keycloak-ui-shared";
 import { useAdminClient } from "../admin-client";
+import {
+    AdminPage,
+    Chip,
+    Group,
+    ListSkeleton,
+    Notice,
+    Row,
+    SearchField,
+    Section,
+    SegmentTabs,
+    TextAction
+} from "../ui/kit";
+import { useTranslation } from "react-i18next";
+import { useT } from "../ui/i18n";
 import { useRealm } from "../ui/realm";
-import { adminFetch, fmtDate, fmtRelative, initials } from "../ui/util";
+import { adminFetch, initials } from "../ui/util";
 
 const PAGE = 50;
 const FILTERS = [
-    { value: "ALL", label: "Tümü" },
-    { value: "REGULAR", label: "Normal" },
-    { value: "OFFLINE", label: "Çevrimdışı" }
+    { value: "ALL", label: "sxSessionsFilterAll" },
+    { value: "REGULAR", label: "sxSessionsFilterRegular" },
+    { value: "OFFLINE", label: "sxSessionsFilterOffline" }
 ];
 
+function toDate(v: any) {
+    return new Date(typeof v === "number" ? v : Number(v) || v);
+}
+
+function formatDate(v: any, lang: string) {
+    return v ? toDate(v).toLocaleString(lang) : "—";
+}
+
+function formatRelative(v: any, lang: string) {
+    if (!v) return "—";
+    const time = toDate(v).getTime();
+    const rtf = new Intl.RelativeTimeFormat(lang, { numeric: "auto", style: "short" });
+    const sec = Math.round((time - Date.now()) / 1000);
+    if (Math.abs(sec) < 60) return rtf.format(0, "second");
+    const min = Math.round(sec / 60);
+    if (Math.abs(min) < 60) return rtf.format(min, "minute");
+    const hr = Math.round(min / 60);
+    if (Math.abs(hr) < 24) return rtf.format(hr, "hour");
+    const day = Math.round(hr / 24);
+    if (Math.abs(day) < 30) return rtf.format(day, "day");
+    return new Date(time).toLocaleDateString(lang);
+}
+
 export default function Sessions() {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
     const { addAlert, addError } = useAlerts();
@@ -65,47 +72,73 @@ export default function Sessions() {
     const confirm = setConfirmOpts;
 
     const [filter, setFilter] = useState("ALL");
+    const [query, setQuery] = useState("");
     const [search, setSearch] = useState("");
     const [rows, setRows] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+    const rowsRef = useRef(rows);
+    rowsRef.current = rows;
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
+    const [loadingMore, setLoadingMore] = useState(false);
     const [more, setMore] = useState(false);
     const [busy, setBusy] = useState<string | null>(null);
-
-    const load = useCallback(
-        async (reset = true) => {
-            setLoading(reset);
-            try {
-                const first = reset ? 0 : rows.length;
-                const data = await adminFetch(adminClient, realm, "ui-ext/sessions", {
-                    first,
-                    max: PAGE,
-                    type: filter,
-                    search
-                });
-                const list = Array.isArray(data) ? data : [];
-                setRows(reset ? list : [...rows, ...list]);
-                setMore(list.length === PAGE);
-            } catch (err) {
-                addError("Oturumlar yüklenemedi.", err);
-                setRows([]);
-                setMore(false);
-            } finally {
-                setLoading(false);
-            }
-        },
-        [adminClient, realm, filter, search, rows, addError]
-    );
+    const [attempt, setAttempt] = useState(0);
 
     useEffect(() => {
-        load(true);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [load]);
+        const id = setTimeout(() => setSearch(query.trim()), 300);
+        return () => clearTimeout(id);
+    }, [query]);
+
+    const fetchPage = (first: number) =>
+        adminFetch(adminClient, realm, "ui-ext/sessions", {
+            first,
+            max: PAGE,
+            type: filter,
+            search
+        });
+
+    useEffect(() => {
+        let alive = true;
+        setStatus("loading");
+        fetchPage(0)
+            .then((data: any) => {
+                if (!alive) return;
+                const list = Array.isArray(data) ? data : [];
+                setRows(list);
+                setMore(list.length === PAGE);
+                setStatus("ready");
+            })
+            .catch(() => {
+                if (!alive) return;
+                setRows([]);
+                setMore(false);
+                setStatus("error");
+            });
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, realm, filter, search, attempt]);
+
+    const loadMore = async () => {
+        setLoadingMore(true);
+        try {
+            const data = await fetchPage(rowsRef.current.length);
+            const list = Array.isArray(data) ? data : [];
+            setRows(prev => [...prev, ...list]);
+            setMore(list.length === PAGE);
+        } catch (err) {
+            addError(t("sxSessionsLoadMoreError"), err);
+        } finally {
+            setLoadingMore(false);
+        }
+    };
 
     const signOut = (s: any) =>
         confirm({
-            title: "Oturumu kapat",
-            message: `${s.username || "Kullanıcı"} oturumu sonlandırılacak.`,
-            confirmLabel: "Kapat",
+            title: t("sxSessionsSignOutTitle"),
+            message: s.username
+                ? t("sxSessionsSignOutMessage", { name: s.username })
+                : t("sxSessionsSignOutMessageUnknown"),
+            confirmLabel: t("sxSessionsSignOut"),
             danger: true,
             onConfirm: async () => {
                 setBusy(s.id);
@@ -115,10 +148,10 @@ export default function Sessions() {
                         session: s.id,
                         isOffline: (s.type || "").toUpperCase() === "OFFLINE"
                     });
-                    addAlert("Oturum kapatıldı.", AlertVariant.success);
-                    setRows(rows.filter(r => r.id !== s.id));
+                    addAlert(t("sxSessionsSignedOut"), AlertVariant.success);
+                    setRows(prev => prev.filter(r => r.id !== s.id));
                 } catch (err) {
-                    addError("Oturum kapatılamadı.", err);
+                    addError(t("sxSessionsSignOutError"), err);
                 } finally {
                     setBusy(null);
                 }
@@ -127,115 +160,98 @@ export default function Sessions() {
 
     const logoutAll = () =>
         confirm({
-            title: "Tüm oturumları kapat",
-            message:
-                "Bu realm'deki tüm aktif kullanıcı oturumları sonlandırılacak. Kullanıcılar yeniden giriş yapmak zorunda kalır.",
-            confirmLabel: "Tümünü kapat",
+            title: t("sxSessionsSignOutAllTitle"),
+            message: t("sxSessionsSignOutAllMessage"),
+            confirmLabel: t("sxSessionsSignOutAll"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.realms.logoutAll({ realm });
-                    addAlert("Tüm oturumlar kapatıldı.", AlertVariant.success);
-                    load(true);
+                    addAlert(t("sxSessionsSignedOutAll"), AlertVariant.success);
+                    setAttempt(n => n + 1);
                 } catch (err) {
-                    addError("Oturumlar kapatılamadı.", err);
+                    addError(t("sxSessionsSignOutAllError"), err);
                 }
             }
         });
 
     return (
-        <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-            <div className="mb-5 flex flex-wrap items-center gap-3">
-                <SegmentPicker value={filter} onValueChange={setFilter}>
-                    {FILTERS.map(f => (
-                        <SegmentPickerItem key={f.value} value={f.value} label={f.label} />
-                    ))}
-                </SegmentPicker>
-                <InputGroup className="min-w-50 flex-1">
-                    <InputGroupAddon>
-                        <MagnifyingGlassIcon />
-                    </InputGroupAddon>
-                    <InputGroupInput
-                        value={search}
-                        onChange={(e: any) => setSearch(e.target.value)}
-                        onKeyDown={(e: any) => e.key === "Enter" && load(true)}
-                        placeholder="Kullanıcı veya IP ara…"
-                    />
-                </InputGroup>
+        <AdminPage
+            title={t("sxNavSessions")}
+            description={t("sxSessionsDescription")}
+            actions={
                 <Button type="button" variant="destructive" onClick={logoutAll}>
                     <SignOutIcon weight="bold" data-icon="inline-start" />
-                    Tümünü kapat
+                    {t("sxSessionsSignOutAll")}
                 </Button>
+            }
+        >
+            <div className="flex flex-col gap-3">
+                <SegmentTabs
+                    ariaLabel={t("sxSessionsTypeLabel")}
+                    value={filter}
+                    onChange={setFilter}
+                    items={FILTERS.map(f => ({ value: f.value, label: t(f.label) }))}
+                />
+                <SearchField
+                    value={query}
+                    onChange={setQuery}
+                    onEnter={() => setSearch(query.trim())}
+                    placeholder={t("sxSessionsSearch")}
+                />
             </div>
 
-            {loading ? (
-                <div className="grid place-items-center py-16">
-                    <Spinner />
-                </div>
-            ) : rows.length === 0 ? (
-                <Empty>
-                    <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                            <UsersThreeIcon />
-                        </EmptyMedia>
-                        <EmptyTitle>Aktif oturum yok</EmptyTitle>
-                        <EmptyDescription>
-                            {search
-                                ? "Aramanızla eşleşen oturum bulunamadı."
-                                : "Şu anda bu realm'de açık kullanıcı oturumu bulunmuyor."}
-                        </EmptyDescription>
-                    </EmptyHeader>
-                </Empty>
-            ) : (
-                <>
-                    <h3 className="mb-2 ms-1 text-sm font-medium text-muted-foreground">
-                        {rows.length}+ oturum
-                    </h3>
-                    <ItemGroup variant="inset">
-                        {rows.map((s, i) => (
-                            <Fragment key={s.id}>
-                                {i > 0 && <ItemSeparator />}
-                                <SessionRow
-                                    s={s}
-                                    busy={busy === s.id}
-                                    onSignOut={() => signOut(s)}
-                                />
-                            </Fragment>
-                        ))}
-                        {more && (
-                            <>
-                                <ItemSeparator />
-                                <Item size="sm" asChild>
-                                    <button type="button" onClick={() => load(false)}>
-                                        <ItemContent>
-                                            <ItemTitle className="text-primary">
-                                                Daha fazla yükle
-                                            </ItemTitle>
-                                        </ItemContent>
-                                    </button>
-                                </Item>
-                            </>
-                        )}
-                    </ItemGroup>
-                    <p className="mt-2 ms-1 text-sm text-muted-foreground">
-                        Bir oturumu kapatmak kullanıcının o cihazdaki erişimini anında
-                        sonlandırır.
-                    </p>
-                </>
-            )}
-            <Confirm
-                open={!!confirmOpts}
-                onOpenChange={o => !o && setConfirmOpts(null)}
+            <Section
+                label={
+                    status === "ready" && rows.length > 0
+                        ? t("sxSessionsCount", { total: `${rows.length}${more ? "+" : ""}` })
+                        : t("sxNavSessions")
+                }
             >
+                {status === "loading" && <ListSkeleton />}
+                {status === "error" && (
+                    <Notice
+                        title={t("sxSessionsLoadError")}
+                        description={t("sxLoadErrorDescription")}
+                        onRetry={() => setAttempt(n => n + 1)}
+                    />
+                )}
+                {status === "ready" && rows.length === 0 && (
+                    <Notice
+                        title={search ? t("sxSessionsNoMatchTitle") : t("sxSessionsEmptyTitle")}
+                        description={search ? t("sxSessionsNoMatchDescription") : t("sxSessionsEmptyDescription")}
+                    />
+                )}
+                {status === "ready" && rows.length > 0 && (
+                    <>
+                        <Group>
+                            {rows.map(s => (
+                                <SessionRow key={s.id} s={s} busy={busy === s.id} onSignOut={() => signOut(s)} />
+                            ))}
+                        </Group>
+                        {more && (
+                            <div className="mt-3 flex justify-center">
+                                <Button type="button" variant="plain" onClick={loadMore} disabled={loadingMore}>
+                                    {loadingMore && <Spinner data-icon="inline-start" />}
+                                    {t("sxSessionsLoadMore")}
+                                </Button>
+                            </div>
+                        )}
+                        <p className="mt-2 px-0.5 text-[13px] text-muted-foreground">
+                            {t("sxSessionsFootnote")}
+                        </p>
+                    </>
+                )}
+            </Section>
+
+            <Confirm open={!!confirmOpts} onOpenChange={o => !o && setConfirmOpts(null)}>
                 <ConfirmContent>
                     <ConfirmHeader>
                         <ConfirmTitle>{confirmOpts?.title}</ConfirmTitle>
-                        {confirmOpts?.message && (
-                            <ConfirmDescription>{confirmOpts.message}</ConfirmDescription>
-                        )}
+                        {confirmOpts?.message && <ConfirmDescription>{confirmOpts.message}</ConfirmDescription>}
                     </ConfirmHeader>
                     <ConfirmFooter>
-                        <ConfirmCancel>Vazgeç</ConfirmCancel>
+                        <ConfirmCancel>{t("sxSessionsCancel")}</ConfirmCancel>
                         <ConfirmAction
                             variant={confirmOpts?.danger ? "destructive" : "default"}
                             onClick={() => {
@@ -244,67 +260,59 @@ export default function Sessions() {
                                 fn?.();
                             }}
                         >
-                            {confirmOpts?.confirmLabel ?? "Onayla"}
+                            {confirmOpts?.confirmLabel ?? t("sxSessionsConfirm")}
                         </ConfirmAction>
                     </ConfirmFooter>
                 </ConfirmContent>
             </Confirm>
-        </div>
+        </AdminPage>
     );
 }
 
 function SessionRow({ s, busy, onSignOut }: any) {
+    const t = useT();
+    const { i18n } = useTranslation();
+    const lang = i18n.language;
     const offline = (s.type || "").toUpperCase() === "OFFLINE";
     const clients = Object.values(s.clients || {}) as string[];
+    const where = [
+        s.ipAddress,
+        clients.length > 0 ? `${clients.slice(0, 3).join(", ")}${clients.length > 3 ? ` +${clients.length - 3}` : ""}` : null
+    ]
+        .filter(Boolean)
+        .join(" · ");
     return (
-        <Item size="sm">
-            <ItemMedia>
-                <Avatar>
-                    <AvatarFallback>{initials(s.username)}</AvatarFallback>
-                </Avatar>
-            </ItemMedia>
-            <ItemContent className="min-w-0">
-                <ItemTitle>
-                    <span className="truncate">{s.username || "Bilinmiyor"}</span>
-                    <Badge variant="outline">
-                        {offline ? (
-                            <DeviceMobileIcon data-icon="inline-start" />
-                        ) : (
-                            <MonitorIcon data-icon="inline-start" />
-                        )}
-                        {offline ? "Çevrimdışı" : "Aktif"}
-                    </Badge>
-                </ItemTitle>
-                <ItemDescription className="truncate">
-                    {s.ipAddress && <span className="font-mono">{s.ipAddress}</span>}
-                    {clients.length > 0 && (
-                        <>
-                            {" "}
-                            · {clients.slice(0, 3).join(", ")}
-                            {clients.length > 3 ? ` +${clients.length - 3}` : ""}
-                        </>
-                    )}
-                </ItemDescription>
-            </ItemContent>
-            <ItemActions>
-                <div className="hidden text-end sm:block">
-                    <p className="text-sm tabular-nums">{fmtRelative(s.lastAccess)}</p>
-                    <p className="text-xs text-muted-foreground tabular-nums">
-                        Başl. {fmtDate(s.start)}
-                    </p>
-                </div>
-                <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={onSignOut}
-                    disabled={busy}
-                    title="Oturumu kapat"
-                    aria-label="Oturumu kapat"
-                >
-                    <SignOutIcon />
-                </Button>
-            </ItemActions>
-        </Item>
+        <Row
+            leading={
+                <span className="grid size-8 place-items-center rounded-full bg-[#6e6e73] text-[11px] font-semibold text-white dark:bg-[#48484a]">
+                    {initials(s.username)}
+                </span>
+            }
+            title={s.username || t("sxSessionsUnknownUser")}
+            subtitle={
+                <>
+                    {where && <span className="block">{where}</span>}
+                    <span className="block tabular-nums">
+                        {formatRelative(s.lastAccess, lang)} · {t("sxSessionsStarted", { date: formatDate(s.start, lang) })}
+                        <span className="sm:hidden"> · {offline ? t("sxSessionsOffline") : t("sxSessionsActive")}</span>
+                    </span>
+                </>
+            }
+            trailing={
+                <>
+                    <span className="hidden sm:flex">
+                        <Chip tone={offline ? "neutral" : "success"}>
+                            <span className="flex items-center gap-1 [&_svg]:size-3.5">
+                                {offline ? <DeviceMobileIcon /> : <MonitorIcon />}
+                                {offline ? t("sxSessionsOffline") : t("sxSessionsActive")}
+                            </span>
+                        </Chip>
+                    </span>
+                    <TextAction tone="danger" onClick={onSignOut} disabled={busy} aria-label={t("sxSessionsSignOutTitle")}>
+                        {busy ? <Spinner /> : t("sxSessionsSignOut")}
+                    </TextAction>
+                </>
+            }
+        />
     );
 }

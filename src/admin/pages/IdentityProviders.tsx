@@ -1,20 +1,8 @@
 // @ts-nocheck
-import { ShareNetworkIcon } from "@phosphor-icons/react";
-import { Badge } from "@ui/components/badge";
 import { Button } from "@ui/components/button";
-import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@ui/components/empty";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@ui/components/field";
 import { Input } from "@ui/components/input";
 import { NativeSelect, NativeSelectOption } from "@ui/components/native-select";
-import { Spinner } from "@ui/components/spinner";
-import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow
-} from "@ui/components/table";
 import {
     Confirm,
     ConfirmAction,
@@ -37,6 +25,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AlertVariant, useAlerts } from "../../shared/keycloak-ui-shared";
 import { useAdminClient } from "../admin-client";
+import { AdminPage, Chip, Group, ListSkeleton, Notice, Section, TextAction } from "../ui/kit";
+import { useT } from "../ui/i18n";
 import { useRealm } from "../ui/realm";
 
 const PROVIDER_TYPES = [
@@ -52,7 +42,31 @@ const PROVIDER_TYPES = [
 
 const SOCIAL = new Set(["google", "github", "facebook", "microsoft", "apple"]);
 
+function OpenRow({ title, subtitle, onOpen, trailing, testId }: any) {
+    return (
+        <li
+            data-testid={testId}
+            className="flex items-center gap-3 pe-4 transition-colors hover:bg-black/3 dark:hover:bg-white/4"
+        >
+            <button
+                type="button"
+                onClick={onOpen}
+                className="flex min-h-16 min-w-0 flex-1 flex-col justify-center py-3 ps-4 text-left outline-none focus-visible:bg-black/5 dark:focus-visible:bg-white/6"
+            >
+                <span className="w-full truncate text-base font-medium">{title}</span>
+                {subtitle && (
+                    <span className="mt-0.5 w-full text-[13px] text-muted-foreground [overflow-wrap:anywhere]">
+                        {subtitle}
+                    </span>
+                )}
+            </button>
+            {trailing && <div className="flex shrink-0 items-center gap-3">{trailing}</div>}
+        </li>
+    );
+}
+
 export default function IdentityProviders() {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
     const navigate = useNavigate();
@@ -60,42 +74,41 @@ export default function IdentityProviders() {
     const [confirmOpts, setConfirmOpts] = useState<any>(null);
     const confirm = setConfirmOpts;
 
-    const [loading, setLoading] = useState(true);
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
+    const [attempt, setAttempt] = useState(0);
     const [providers, setProviders] = useState<any[]>([]);
     const [addOpen, setAddOpen] = useState(false);
 
-    // add-form state
     const [providerId, setProviderId] = useState("oidc");
     const [alias, setAlias] = useState("");
     const [displayName, setDisplayName] = useState("");
     const [saving, setSaving] = useState(false);
 
     const load = async () => {
-        setLoading(true);
         try {
-            const list = await adminClient.identityProviders.find().catch(() => []);
+            const list = await adminClient.identityProviders.find();
             setProviders(Array.isArray(list) ? list : []);
-        } finally {
-            setLoading(false);
+            setStatus("ready");
+        } catch {
+            setStatus("error");
         }
     };
 
     useEffect(() => {
         let alive = true;
-        (async () => {
-            setLoading(true);
-            try {
-                const list = await adminClient.identityProviders.find().catch(() => []);
+        setStatus("loading");
+        adminClient.identityProviders
+            .find()
+            .then(list => {
                 if (!alive) return;
                 setProviders(Array.isArray(list) ? list : []);
-            } finally {
-                if (alive) setLoading(false);
-            }
-        })();
+                setStatus("ready");
+            })
+            .catch(() => alive && setStatus("error"));
         return () => {
             alive = false;
         };
-    }, [adminClient]);
+    }, [adminClient, attempt]);
 
     const openAdd = () => {
         setProviderId("oidc");
@@ -106,17 +119,17 @@ export default function IdentityProviders() {
 
     const remove = (idp: any) => {
         confirm({
-            title: "Kimlik sağlayıcı silinsin mi?",
-            message: `“${idp.displayName || idp.alias}” sağlayıcısı kalıcı olarak silinecek.`,
-            confirmLabel: "Sil",
+            title: t("sxIdpsDeleteTitle"),
+            message: t("sxIdpsDeleteMessage", { name: idp.displayName || idp.alias }),
+            confirmLabel: t("sxCommonDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.identityProviders.del({ alias: idp.alias });
-                    addAlert("Kimlik sağlayıcı silindi.", AlertVariant.success);
+                    addAlert(t("sxIdpsDeleted"), AlertVariant.success);
                     await load();
                 } catch (e) {
-                    addError("Kimlik sağlayıcı silinemedi.", e);
+                    addError(t("sxIdpsDeleteError"), e);
                 }
             }
         });
@@ -125,7 +138,7 @@ export default function IdentityProviders() {
     const submit = async () => {
         const a = alias.trim();
         if (!a) {
-            addAlert("Alias zorunludur.", AlertVariant.warning);
+            addAlert(t("sxIdpsAliasRequired"), AlertVariant.warning);
             return;
         }
         setSaving(true);
@@ -137,21 +150,21 @@ export default function IdentityProviders() {
                 enabled: true,
                 config: { clientId: "", clientSecret: "" }
             });
-            addAlert("Kimlik sağlayıcı oluşturuldu.", AlertVariant.success);
+            addAlert(t("sxIdpsCreated"), AlertVariant.success);
             if (
                 SOCIAL.has(providerId) ||
                 providerId === "oidc" ||
                 providerId === "saml"
             ) {
                 addAlert(
-                    "Sağlayıcıyı kullanabilmek için clientId / clientSecret bilgilerini düzenlemeyi unutmayın.",
+                    t("sxIdpsCredentialsReminder"),
                     AlertVariant.warning
                 );
             }
             setAddOpen(false);
             await load();
         } catch (e) {
-            addError("Kimlik sağlayıcı oluşturulamadı.", e);
+            addError(t("sxIdpsCreateError"), e);
         } finally {
             setSaving(false);
         }
@@ -163,127 +176,106 @@ export default function IdentityProviders() {
     );
 
     return (
-        <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-            <div className="mb-6 flex flex-wrap items-center justify-end gap-2">
-                <Button onClick={openAdd}>Yeni sağlayıcı</Button>
-            </div>
-
-            {loading ? (
-                <div className="grid place-items-center py-16">
-                    <Spinner />
-                </div>
-            ) : providers.length === 0 ? (
-                <Empty>
-                    <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                            <ShareNetworkIcon />
-                        </EmptyMedia>
-                        <EmptyTitle>Henüz kimlik sağlayıcı yok.</EmptyTitle>
-                    </EmptyHeader>
-                </Empty>
-            ) : (
-                <Table>
-                    <TableHeader>
-                        <TableRow>
-                            <TableHead>Sağlayıcı</TableHead>
-                            <TableHead>Alias</TableHead>
-                            <TableHead>Tür</TableHead>
-                            <TableHead>Durum</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
+        <AdminPage
+            title={t("sxNavIdentityProviders")}
+            description={t("sxIdpsDescription")}
+            actions={<Button onClick={openAdd}>{t("sxIdpsNew")}</Button>}
+        >
+            <Section label={t("sxIdpsListLabel")}>
+                {status === "loading" && <ListSkeleton />}
+                {status === "error" && (
+                    <Notice
+                        title={t("sxIdpsLoadError")}
+                        description={t("sxLoadErrorDescription")}
+                        onRetry={() => setAttempt(n => n + 1)}
+                    />
+                )}
+                {status === "ready" && providers.length === 0 && (
+                    <Notice
+                        title={t("sxIdpsEmpty")}
+                        description={t("sxIdpsEmptyDescription")}
+                        action={<Button size="sm" onClick={openAdd}>{t("sxIdpsNew")}</Button>}
+                    />
+                )}
+                {status === "ready" && providers.length > 0 && (
+                    <Group>
                         {sorted.map(idp => (
-                            <TableRow key={idp.alias}>
-                                <TableCell>
-                                    <Button
-                                        type="button"
-                                        variant="link"
-                                        size="sm"
-                                        className="px-0"
-                                        onClick={() =>
-                                            navigate(
-                                                `/${realm}/identity-providers/${idp.alias}`
-                                            )
-                                        }
-                                    >
-                                        {idp.displayName || idp.alias}
-                                    </Button>
-                                </TableCell>
-                                <TableCell className="font-mono">{idp.alias}</TableCell>
-                                <TableCell>
-                                    <Badge variant="secondary">{idp.providerId}</Badge>
-                                </TableCell>
-                                <TableCell>
-                                    <div className="flex items-center justify-between gap-3">
-                                        <Badge
-                                            variant={
-                                                idp.enabled ? "outline" : "secondary"
-                                            }
-                                        >
-                                            {idp.enabled ? "Etkin" : "Kapalı"}
-                                        </Badge>
-                                        <Button
-                                            type="button"
-                                            variant="destructive"
-                                            size="xs"
-                                            onClick={() => remove(idp)}
-                                        >
-                                            Sil
-                                        </Button>
-                                    </div>
-                                </TableCell>
-                            </TableRow>
+                            <OpenRow
+                                key={idp.alias}
+                                testId={`idp-${idp.alias}`}
+                                onOpen={() => navigate(`/${realm}/identity-providers/${idp.alias}`)}
+                                title={idp.displayName || idp.alias}
+                                subtitle={
+                                    <>
+                                        <span className="font-mono">{idp.alias}</span>
+                                        {" · "}
+                                        {idp.providerId}
+                                    </>
+                                }
+                                trailing={
+                                    <>
+                                        <span className="hidden sm:inline-flex">
+                                            <Chip tone={idp.enabled ? "success" : "neutral"}>
+                                                {idp.enabled ? t("sxCommonEnabled") : t("sxCommonDisabled")}
+                                            </Chip>
+                                        </span>
+                                        <TextAction tone="danger" onClick={() => remove(idp)}>
+                                            {t("sxCommonDelete")}
+                                        </TextAction>
+                                    </>
+                                }
+                            />
                         ))}
-                    </TableBody>
-                </Table>
-            )}
+                    </Group>
+                )}
+            </Section>
 
             <Modal open={addOpen} onOpenChange={o => !o && setAddOpen(false)}>
                 <ModalContent>
                     <ModalHeader>
-                        <ModalTitle>Yeni kimlik sağlayıcı</ModalTitle>
+                        <ModalTitle>{t("sxIdpsNewTitle")}</ModalTitle>
                     </ModalHeader>
                     <ModalBody>
                         <FieldGroup>
                             <Field>
-                                <FieldLabel>Tür</FieldLabel>
+                                <FieldLabel>{t("sxCommonType")}</FieldLabel>
                                 <NativeSelect
                                     className="w-full"
                                     value={providerId}
                                     onChange={e => setProviderId(e.target.value)}
                                 >
-                                    {PROVIDER_TYPES.map(t => (
-                                        <NativeSelectOption key={t} value={t}>
-                                            {t}
+                                    {PROVIDER_TYPES.map(type => (
+                                        <NativeSelectOption key={type} value={type}>
+                                            {type}
                                         </NativeSelectOption>
                                     ))}
                                 </NativeSelect>
                             </Field>
                             <Field>
                                 <FieldLabel>
-                                    Alias <span className="text-destructive">*</span>
+                                    {t("sxCommonAlias")} <span className="text-destructive">*</span>
                                 </FieldLabel>
                                 <Input
                                     value={alias}
                                     onChange={e => setAlias(e.target.value)}
-                                    placeholder="örn. google"
+                                    placeholder={t("sxIdpsAliasPlaceholder")}
                                 />
                             </Field>
                             <Field>
-                                <FieldLabel>Görünen ad</FieldLabel>
+                                <FieldLabel>{t("sxCommonDisplayName")}</FieldLabel>
                                 <Input
                                     value={displayName}
                                     onChange={e => setDisplayName(e.target.value)}
                                 />
                                 <FieldDescription>
-                                    Boş bırakılırsa alias kullanılır.
+                                    {t("sxIdpsDisplayNameHelp")}
                                 </FieldDescription>
                             </Field>
                         </FieldGroup>
                     </ModalBody>
                     <ModalFooter>
                         <Button type="button" disabled={saving} onClick={submit}>
-                            Ekle
+                            {t("sxCommonAdd")}
                         </Button>
                     </ModalFooter>
                 </ModalContent>
@@ -298,7 +290,7 @@ export default function IdentityProviders() {
                         )}
                     </ConfirmHeader>
                     <ConfirmFooter>
-                        <ConfirmCancel>Vazgeç</ConfirmCancel>
+                        <ConfirmCancel>{t("sxCommonCancel")}</ConfirmCancel>
                         <ConfirmAction
                             variant={confirmOpts?.danger ? "destructive" : "default"}
                             onClick={() => {
@@ -307,11 +299,11 @@ export default function IdentityProviders() {
                                 fn?.();
                             }}
                         >
-                            {confirmOpts?.confirmLabel ?? "Onayla"}
+                            {confirmOpts?.confirmLabel ?? t("sxCommonConfirm")}
                         </ConfirmAction>
                     </ConfirmFooter>
                 </ConfirmContent>
             </Confirm>
-        </div>
+        </AdminPage>
     );
 }

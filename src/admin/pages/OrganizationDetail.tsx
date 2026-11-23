@@ -1,57 +1,9 @@
 // @ts-nocheck
 
-import {
-    BuildingsIcon,
-    CaretLeftIcon,
-    MagnifyingGlassIcon,
-    PlusIcon,
-    ShareNetworkIcon,
-    TrashIcon,
-    UserPlusIcon,
-    UsersThreeIcon
-} from "@phosphor-icons/react";
-import { Avatar, AvatarFallback } from "@ui/components/avatar";
-import { Badge } from "@ui/components/badge";
 import { Button } from "@ui/components/button";
-import {
-    Empty,
-    EmptyDescription,
-    EmptyHeader,
-    EmptyMedia,
-    EmptyTitle
-} from "@ui/components/empty";
-import {
-    Field,
-    FieldDescription,
-    FieldGroup,
-    FieldLabel,
-    FieldLegend,
-    FieldSet
-} from "@ui/components/field";
+import { Field, FieldDescription, FieldLabel } from "@ui/components/field";
 import { Input } from "@ui/components/input";
-import {
-    InputGroup,
-    InputGroupAddon,
-    InputGroupInput
-} from "@ui/components/input-group";
-import {
-    Item,
-    ItemActions,
-    ItemContent,
-    ItemDescription,
-    ItemGroup,
-    ItemMedia,
-    ItemSeparator,
-    ItemTitle
-} from "@ui/components/item";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue
-} from "@ui/components/select";
-import { Spinner } from "@ui/components/spinner";
+import { NativeSelect, NativeSelectOption } from "@ui/components/native-select";
 import { Switch } from "@ui/components/switch";
 import { Textarea } from "@ui/components/textarea";
 import {
@@ -72,20 +24,37 @@ import {
     ModalHeader,
     ModalTitle
 } from "@ui/patterns/modal";
-import { SegmentPicker, SegmentPickerItem } from "@ui/patterns/segment-picker";
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AlertVariant, useAlerts } from "../../shared/keycloak-ui-shared";
 import { useAdminClient } from "../admin-client";
+import { useT } from "../ui/i18n";
+import {
+    AdminPage,
+    Chip,
+    GROUP,
+    Group,
+    ListSkeleton,
+    Notice,
+    Row,
+    SEPARATOR,
+    SearchField,
+    Section,
+    SegmentTabs,
+    TextAction
+} from "../ui/kit";
 import { useRealm } from "../ui/realm";
 import { initials } from "../ui/util";
 
 const TABS = [
-    { value: "settings", label: "Ayarlar" },
-    { value: "attributes", label: "Öznitelikler" },
-    { value: "members", label: "Üyeler" },
-    { value: "idps", label: "Kimlik sağlayıcılar" }
+    { value: "settings", label: "sxOrgDetailTabSettings" },
+    { value: "attributes", label: "sxOrgDetailTabAttributes" },
+    { value: "members", label: "sxOrgDetailTabMembers" },
+    { value: "idps", label: "sxOrgDetailTabIdps" }
 ];
+
+const DANGER_BUTTON =
+    "bg-[#d70015] text-white hover:bg-[#d70015]/90 dark:bg-[#ff453a] dark:hover:bg-[#ff453a]/90";
 
 const lines = (s: string) =>
     s
@@ -93,90 +62,157 @@ const lines = (s: string) =>
         .map(x => x.trim())
         .filter(Boolean);
 const domainNames = (org: any) =>
-    (org?.domains || [])
-        .map((d: any) => (typeof d === "string" ? d : d?.name))
-        .filter(Boolean);
+    (org?.domains || []).map((d: any) => (typeof d === "string" ? d : d?.name)).filter(Boolean);
+const asList = (value: any) => (Array.isArray(value) ? value : []);
+
+function useResource(fetcher: () => Promise<any>, deps: any[]) {
+    const [state, setState] = useState<{ status: "loading" | "error" | "ready"; data: any }>({
+        status: "loading",
+        data: null
+    });
+    const [attempt, setAttempt] = useState(0);
+    useEffect(() => {
+        let alive = true;
+        setState(s => (s.status === "ready" ? s : { status: "loading", data: null }));
+        fetcher()
+            .then(data => alive && setState({ status: "ready", data }))
+            .catch(() => alive && setState({ status: "error", data: null }));
+        return () => {
+            alive = false;
+        };
+    }, [...deps, attempt]);
+    const setData = (updater: any) =>
+        setState(s => ({ ...s, data: typeof updater === "function" ? updater(s.data) : updater }));
+    const reload = () => setAttempt(n => n + 1);
+    return { status: state.status, data: state.data, setData, reload };
+}
+
+function Monogram({ name }: { name: string }) {
+    return (
+        <span className="grid size-8 place-items-center rounded-full bg-[#6e6e73] text-[11px] font-semibold text-white dark:bg-[#48484a]">
+            {initials(name)}
+        </span>
+    );
+}
+
+function Footnote({ children }: { children: ReactNode }) {
+    return <p className="mt-2 px-0.5 text-[13px] leading-[1.4] text-muted-foreground">{children}</p>;
+}
+
+function SaveBar({ children }: { children: ReactNode }) {
+    return <div className="flex justify-end">{children}</div>;
+}
+
+function ListState({
+    status,
+    count,
+    onRetry,
+    errorTitle,
+    emptyTitle,
+    emptyDescription,
+    emptyAction,
+    children
+}: {
+    status: string;
+    count: number;
+    onRetry: () => void;
+    errorTitle: string;
+    emptyTitle: string;
+    emptyDescription?: string;
+    emptyAction?: ReactNode;
+    children: ReactNode;
+}) {
+    const t = useT();
+    if (status === "loading") return <ListSkeleton />;
+    if (status === "error")
+        return (
+            <Notice title={errorTitle} description={t("sxLoadErrorDescription")} onRetry={onRetry} />
+        );
+    if (count === 0) return <Notice title={emptyTitle} description={emptyDescription} action={emptyAction} />;
+    return <>{children}</>;
+}
+
+function ConfirmDialog({ opts, onClose }: { opts: any; onClose: () => void }) {
+    const t = useT();
+    return (
+        <Confirm open={!!opts} onOpenChange={o => !o && onClose()}>
+            <ConfirmContent>
+                <ConfirmHeader>
+                    <ConfirmTitle>{opts?.title}</ConfirmTitle>
+                    {opts?.message && <ConfirmDescription>{opts.message}</ConfirmDescription>}
+                </ConfirmHeader>
+                <ConfirmFooter>
+                    <ConfirmCancel>{t("sxCommonCancel")}</ConfirmCancel>
+                    <ConfirmAction
+                        variant={opts?.danger ? "destructive" : "default"}
+                        onClick={() => {
+                            const fn = opts?.onConfirm;
+                            onClose();
+                            fn?.();
+                        }}
+                    >
+                        {opts?.confirmLabel ?? t("sxCommonConfirm")}
+                    </ConfirmAction>
+                </ConfirmFooter>
+            </ConfirmContent>
+        </Confirm>
+    );
+}
 
 export default function OrganizationDetail() {
+    const { id } = useParams();
+    return <OrganizationView key={id} id={id} />;
+}
+
+function OrganizationView({ id }: { id: string }) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
-    const { id } = useParams();
     const navigate = useNavigate();
-    const { addError } = useAlerts();
-
-    const [org, setOrg] = useState<any>(null);
-    const [loading, setLoading] = useState(true);
     const [tab, setTab] = useState("settings");
+    const { status, data: org, reload } = useResource(
+        () => adminClient.organizations.findOne({ id }),
+        [adminClient, id]
+    );
 
-    const reload = useCallback(async () => {
-        try {
-            const o = await adminClient.organizations.findOne({ id });
-            setOrg(o);
-        } catch (e) {
-            addError("Organizasyon yüklenemedi.", e);
-        } finally {
-            setLoading(false);
-        }
-    }, [adminClient, id, addError]);
+    const back = { label: t("sxOrgsTitle"), to: `/${realm}/organizations` };
 
-    useEffect(() => {
-        setLoading(true);
-        reload();
-    }, [reload]);
-
-    if (loading)
+    if (status !== "ready" || !org)
         return (
-            <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-                <div className="grid place-items-center py-16">
-                    <Spinner />
-                </div>
-            </div>
-        );
-    if (!org)
-        return (
-            <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-                <Empty>
-                    <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                            <BuildingsIcon />
-                        </EmptyMedia>
-                        <EmptyTitle>Organizasyon bulunamadı</EmptyTitle>
-                    </EmptyHeader>
-                </Empty>
-            </div>
+            <AdminPage title={t("sxOrgDetailTitle")} back={back}>
+                {status === "loading" && <ListSkeleton rows={4} />}
+                {status === "error" && (
+                    <Notice
+                        title={t("sxOrgDetailLoadError")}
+                        description={t("sxLoadErrorDescription")}
+                        onRetry={reload}
+                    />
+                )}
+                {status === "ready" && (
+                    <Notice
+                        title={t("sxOrgDetailNotFound")}
+                        description={t("sxOrgDetailNotFoundDescription")}
+                        action={
+                            <Button size="sm" className="h-8.5 px-4 font-medium" onClick={() => navigate(back.to)}>
+                                {t("sxOrgDetailBackToList")}
+                            </Button>
+                        }
+                    />
+                )}
+            </AdminPage>
         );
 
     const domains = domainNames(org);
 
     return (
-        <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-            {/* iOS nav-bar header */}
-            <div className="relative mb-7 flex items-center">
-                <Button
-                    type="button"
-                    variant="secondary"
-                    size="icon"
-                    onClick={() => navigate(`/${realm}/organizations`)}
-                    aria-label="Geri"
-                >
-                    <CaretLeftIcon weight="bold" />
-                </Button>
-                <div className="absolute left-1/2 -translate-x-1/2 text-center">
-                    <p className="font-semibold text-foreground">{org.name}</p>
-                    <p className="font-mono text-xs text-muted-foreground">
-                        {org.alias || org.id}
-                    </p>
-                </div>
-            </div>
-
-            <div className="mb-5 flex justify-center">
-                <SegmentPicker value={tab} onValueChange={setTab}>
-                    {TABS.map(t => (
-                        <SegmentPickerItem key={t.value} value={t.value} label={t.label} />
-                    ))}
-                </SegmentPicker>
-            </div>
-
+        <AdminPage
+            back={back}
+            title={org.name}
+            description={<span className="font-mono text-[15px] [overflow-wrap:anywhere]">{org.alias || org.id}</span>}
+        >
+            <SegmentTabs value={tab} onChange={setTab} items={TABS.map(item => ({ value: item.value, label: t(item.label) }))}
+                ariaLabel={t("sxOrgDetailSections")}
+            />
             {tab === "settings" && (
                 <SettingsTab
                     org={org}
@@ -188,12 +224,12 @@ export default function OrganizationDetail() {
             {tab === "attributes" && <AttributesTab org={org} reload={reload} />}
             {tab === "members" && <MembersTab org={org} />}
             {tab === "idps" && <IdpTab org={org} />}
-        </div>
+        </AdminPage>
     );
 }
 
-/* ── Settings ─────────────────────────────────────────────────────────── */
 function SettingsTab({ org, domains, reload, onDeleted }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [confirmOpts, setConfirmOpts] = useState<any>(null);
@@ -225,10 +261,10 @@ function SettingsTab({ org, domains, reload, onDeleted }: any) {
                 }))
             };
             await adminClient.organizations.updateById({ id: org.id }, rep);
-            addAlert("Organizasyon güncellendi.", AlertVariant.success);
+            addAlert(t("sxOrgDetailUpdated"), AlertVariant.success);
             reload();
         } catch (e) {
-            addError("Güncellenemedi.", e);
+            addError(t("sxCommonUpdateError"), e);
         } finally {
             setSaving(false);
         }
@@ -236,125 +272,94 @@ function SettingsTab({ org, domains, reload, onDeleted }: any) {
 
     const remove = () =>
         confirm({
-            title: "Organizasyonu sil",
-            message: `“${org.name}” kalıcı olarak silinecek.`,
-            confirmLabel: "Sil",
+            title: t("sxOrgDetailDelete"),
+            message: t("sxOrgDetailDeleteConfirm", { name: org.name }),
+            confirmLabel: t("sxCommonDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.organizations.delById({ id: org.id });
-                    addAlert("Organizasyon silindi.", AlertVariant.success);
+                    addAlert(t("sxOrgDetailDeleted"), AlertVariant.success);
                     onDeleted();
                 } catch (e) {
-                    addError("Silinemedi.", e);
+                    addError(t("sxCommonDeleteError"), e);
                 }
             }
         });
 
     return (
-        <div className="space-y-6">
-            <div>
-                <FieldSet>
-                    <FieldLegend variant="label">Genel</FieldLegend>
-                    <FieldGroup>
-                        <Field>
-                            <FieldLabel htmlFor="org-name">Ad</FieldLabel>
-                            <Input
-                                id="org-name"
-                                value={name}
-                                onChange={(e: any) => setName(e.target.value)}
-                            />
-                        </Field>
-                        <Field orientation="horizontal">
-                            <FieldLabel>Takma ad</FieldLabel>
-                            <span className="font-mono text-sm text-muted-foreground">
-                                {org.alias || "—"}
-                            </span>
-                        </Field>
-                        <Field>
-                            <FieldLabel htmlFor="org-domains">Alan adları</FieldLabel>
-                            <Textarea
-                                id="org-domains"
-                                rows={3}
-                                value={domainsText}
-                                onChange={(e: any) => setDomainsText(e.target.value)}
-                                placeholder={"acme.com\nacme.org"}
-                            />
-                            <FieldDescription>Her satıra bir alan adı.</FieldDescription>
-                        </Field>
-                        <Field>
-                            <FieldLabel htmlFor="org-description">Açıklama</FieldLabel>
-                            <Textarea
-                                id="org-description"
-                                rows={2}
-                                value={description}
-                                onChange={(e: any) => setDescription(e.target.value)}
-                                placeholder="Kısa açıklama"
-                            />
-                        </Field>
-                        <Field orientation="horizontal">
-                            <FieldLabel>Organizasyon ID</FieldLabel>
-                            <span className="font-mono text-xs text-muted-foreground">
-                                {org.id}
-                            </span>
-                        </Field>
-                    </FieldGroup>
-                </FieldSet>
-                <div className="mt-3 flex justify-end">
-                    <Button disabled={saving || !name.trim()} onClick={save}>
-                        {saving ? "Kaydediliyor…" : "Kaydet"}
-                    </Button>
+        <>
+            <Section label={t("sxOrgDetailGeneral")}>
+                <div className="flex flex-col gap-4">
+                    <Field size="lg">
+                        <FieldLabel htmlFor="org-name">{t("sxCommonName")}</FieldLabel>
+                        <Input size="lg" id="org-name" value={name} onChange={(e: any) => setName(e.target.value)} />
+                    </Field>
+                    <Field size="lg">
+                        <FieldLabel htmlFor="org-alias">{t("sxOrgsAlias")}</FieldLabel>
+                        <Input
+                            size="lg"
+                            id="org-alias"
+                            readOnly
+                            value={org.alias || "—"}
+                            className="font-mono text-muted-foreground"
+                        />
+                    </Field>
+                    <Field size="lg">
+                        <FieldLabel htmlFor="org-domains">{t("sxOrgsDomains")}</FieldLabel>
+                        <Textarea
+                            size="lg"
+                            id="org-domains"
+                            rows={3}
+                            value={domainsText}
+                            onChange={(e: any) => setDomainsText(e.target.value)}
+                            placeholder={"acme.com\nacme.org"}
+                        />
+                        <FieldDescription>{t("sxOrgsDomainsHelp")}</FieldDescription>
+                    </Field>
+                    <Field size="lg">
+                        <FieldLabel htmlFor="org-description">{t("sxCommonDescription")}</FieldLabel>
+                        <Textarea
+                            size="lg"
+                            id="org-description"
+                            rows={2}
+                            value={description}
+                            onChange={(e: any) => setDescription(e.target.value)}
+                            placeholder={t("sxOrgsDescriptionPlaceholder")}
+                        />
+                    </Field>
+                    <Field size="lg">
+                        <FieldLabel htmlFor="org-id">{t("sxOrgDetailId")}</FieldLabel>
+                        <Input
+                            size="lg"
+                            id="org-id"
+                            readOnly
+                            value={org.id}
+                            className="font-mono text-[15px] text-muted-foreground"
+                        />
+                    </Field>
                 </div>
-            </div>
-
-            <div>
-                <h3 className="mb-2 ms-1 text-sm font-medium text-muted-foreground">
-                    Tehlikeli bölge
-                </h3>
-                <ItemGroup variant="inset">
-                    <Item size="sm" asChild>
-                        <button type="button" onClick={remove}>
-                            <ItemContent>
-                                <ItemTitle className="text-destructive">
-                                    Organizasyonu sil
-                                </ItemTitle>
-                            </ItemContent>
-                        </button>
-                    </Item>
-                </ItemGroup>
-                <p className="mt-2 ms-1 text-sm text-muted-foreground">
-                    Organizasyon ve üyelik bağları kalıcı olarak silinir.
+            </Section>
+            <SaveBar>
+                <Button size="form" disabled={saving || !name.trim()} onClick={save}>
+                    {saving ? t("sxCommonSaving") : t("sxCommonSave")}
+                </Button>
+            </SaveBar>
+            <section className="border-t border-[#e5e5ea] pt-6 dark:border-[#38383a]">
+                <p className="mb-3 text-[13px] leading-[1.4] text-muted-foreground">
+                    {t("sxOrgDetailDeleteHelp")}
                 </p>
-            </div>
-            <Confirm open={!!confirmOpts} onOpenChange={o => !o && setConfirmOpts(null)}>
-                <ConfirmContent>
-                    <ConfirmHeader>
-                        <ConfirmTitle>{confirmOpts?.title}</ConfirmTitle>
-                        {confirmOpts?.message && (
-                            <ConfirmDescription>{confirmOpts.message}</ConfirmDescription>
-                        )}
-                    </ConfirmHeader>
-                    <ConfirmFooter>
-                        <ConfirmCancel>Vazgeç</ConfirmCancel>
-                        <ConfirmAction
-                            variant={confirmOpts?.danger ? "destructive" : "default"}
-                            onClick={() => {
-                                const fn = confirmOpts?.onConfirm;
-                                setConfirmOpts(null);
-                                fn?.();
-                            }}
-                        >
-                            {confirmOpts?.confirmLabel ?? "Onayla"}
-                        </ConfirmAction>
-                    </ConfirmFooter>
-                </ConfirmContent>
-            </Confirm>
-        </div>
+                <Button size="form" className={DANGER_BUTTON} onClick={remove}>
+                    {t("sxOrgDetailDelete")}
+                </Button>
+            </section>
+            <ConfirmDialog opts={confirmOpts} onClose={() => setConfirmOpts(null)} />
+        </>
     );
 }
 
-/* ── Attributes ───────────────────────────────────────────────────────── */
 function AttributesTab({ org, reload }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const toRows = (attrs: any) =>
@@ -382,124 +387,92 @@ function AttributesTab({ org, reload }: any) {
                         .map((s: string) => s.trim())
                         .filter(Boolean);
             });
-            await adminClient.organizations.updateById(
-                { id: org.id },
-                { ...org, attributes }
-            );
-            addAlert("Öznitelikler kaydedildi.", AlertVariant.success);
+            await adminClient.organizations.updateById({ id: org.id }, { ...org, attributes });
+            addAlert(t("sxOrgDetailAttributesSaved"), AlertVariant.success);
             reload();
         } catch (e) {
-            addError("Kaydedilemedi.", e);
+            addError(t("sxCommonSaveError"), e);
         } finally {
             setSaving(false);
         }
     };
 
     return (
-        <div className="space-y-3">
-            <h3 className="mb-2 ms-1 text-sm font-medium text-muted-foreground">
-                Öznitelikler
-            </h3>
-            <ItemGroup variant="inset">
+        <>
+            <Section
+                label={t("sxOrgDetailTabAttributes")}
+                action={<TextAction onClick={addRow}>{t("sxOrgDetailAddAttribute")}</TextAction>}
+            >
                 {rows.length === 0 ? (
-                    <Item size="sm">
-                        <ItemContent>
-                            <ItemDescription className="text-center">
-                                Öznitelik yok.
-                            </ItemDescription>
-                        </ItemContent>
-                    </Item>
+                    <Notice
+                        title={t("sxOrgDetailNoAttributes")}
+                        description={t("sxOrgDetailNoAttributesDescription")}
+                        action={
+                            <Button size="sm" className="h-8.5 px-4 font-medium" onClick={addRow}>
+                                {t("sxOrgDetailAddAttribute")}
+                            </Button>
+                        }
+                    />
                 ) : (
-                    rows.map((r, i) => (
-                        <Fragment key={i}>
-                            {i > 0 && <ItemSeparator />}
-                            <Item size="sm" className="flex-nowrap gap-2">
-                                <Input
-                                    size="sm"
-                                    value={r.k}
-                                    onChange={(e: any) => setRow(i, "k", e.target.value)}
-                                    placeholder="anahtar"
-                                    className="w-2/5 min-w-0 font-medium"
-                                />
-                                <span className="text-muted-foreground">:</span>
-                                <Input
-                                    size="sm"
-                                    value={r.v}
-                                    onChange={(e: any) => setRow(i, "v", e.target.value)}
-                                    placeholder="değer (virgülle ayır)"
-                                    className="min-w-0 flex-1"
-                                />
-                                <ItemActions>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        title="Sil"
-                                        aria-label="Sil"
+                    <ul className={GROUP}>
+                        {rows.map((r, i) => (
+                            <li key={i}>
+                                {i > 0 && <div className={SEPARATOR} />}
+                                <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:gap-3">
+                                    <Input
+                                        className="font-medium sm:w-2/5"
+                                        aria-label={t("sxCommonKey")}
+                                        value={r.k}
+                                        onChange={(e: any) => setRow(i, "k", e.target.value)}
+                                        placeholder={t("sxCommonKeyPlaceholder")}
+                                    />
+                                    <Input
+                                        className="sm:flex-1"
+                                        aria-label={t("sxCommonValue")}
+                                        value={r.v}
+                                        onChange={(e: any) => setRow(i, "v", e.target.value)}
+                                        placeholder={t("sxOrgDetailValuePlaceholder")}
+                                    />
+                                    <TextAction
+                                        tone="danger"
+                                        className="self-end sm:self-auto"
                                         onClick={() => delRow(i)}
                                     >
-                                        <TrashIcon />
-                                    </Button>
-                                </ItemActions>
-                            </Item>
-                        </Fragment>
-                    ))
+                                        {t("sxCommonDelete")}
+                                    </TextAction>
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
                 )}
-                <ItemSeparator />
-                <Item size="sm" asChild>
-                    <button type="button" onClick={addRow}>
-                        <ItemMedia variant="icon" className="text-primary">
-                            <PlusIcon />
-                        </ItemMedia>
-                        <ItemContent>
-                            <ItemTitle className="text-primary">Öznitelik ekle</ItemTitle>
-                        </ItemContent>
-                    </button>
-                </Item>
-            </ItemGroup>
-            <div className="flex justify-end">
-                <Button disabled={saving} onClick={save}>
-                    {saving ? "Kaydediliyor…" : "Kaydet"}
+            </Section>
+            <SaveBar>
+                <Button size="form" disabled={saving} onClick={save}>
+                    {saving ? t("sxCommonSaving") : t("sxCommonSave")}
                 </Button>
-            </div>
-        </div>
+            </SaveBar>
+        </>
     );
 }
 
-/* ── Members ──────────────────────────────────────────────────────────── */
 function MembersTab({ org }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [confirmOpts, setConfirmOpts] = useState<any>(null);
     const confirm = setConfirmOpts;
-    const [members, setMembers] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+    const res = useResource(
+        () => adminClient.organizations.listMembers({ orgId: org.id, max: 200 }).then(asList),
+        [adminClient, org.id]
+    );
+    const members = res.data || [];
     const [adding, setAdding] = useState(false);
-
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            const m = await adminClient.organizations.listMembers({
-                orgId: org.id,
-                max: 200
-            });
-            setMembers(Array.isArray(m) ? m : []);
-        } catch (e) {
-            addError("Üyeler yüklenemedi.", e);
-        } finally {
-            setLoading(false);
-        }
-    }, [adminClient, org.id, addError]);
-
-    useEffect(() => {
-        load();
-    }, [load]);
 
     const removeMember = (u: any) =>
         confirm({
-            title: "Üyeyi çıkar",
-            message: `${u.username} bu organizasyondan çıkarılacak.`,
-            confirmLabel: "Çıkar",
+            title: t("sxOrgDetailRemoveMember"),
+            message: t("sxOrgDetailRemoveMemberConfirm", { username: u.username }),
+            confirmLabel: t("sxCommonRemoveFrom"),
             danger: true,
             onConfirm: async () => {
                 try {
@@ -507,85 +480,55 @@ function MembersTab({ org }: any) {
                         orgId: org.id,
                         userId: u.id
                     });
-                    addAlert("Üye çıkarıldı.", AlertVariant.success);
-                    setMembers(members.filter(m => m.id !== u.id));
+                    addAlert(t("sxOrgDetailMemberRemoved"), AlertVariant.success);
+                    res.setData((list: any[]) => (list || []).filter(m => m.id !== u.id));
                 } catch (e) {
-                    addError("Üye çıkarılamadı.", e);
+                    addError(t("sxOrgDetailMemberRemoveError"), e);
                 }
             }
         });
 
-    if (loading)
-        return (
-            <div className="grid place-items-center py-16">
-                <Spinner />
-            </div>
-        );
-
     return (
-        <div className="space-y-3">
-            <div className="flex items-center justify-between">
-                <h3 className="ms-1 text-sm font-medium text-muted-foreground">
-                    {members.length} üye
-                </h3>
-                <Button
-                    type="button"
-                    variant="plain"
-                    size="sm"
-                    onClick={() => setAdding(true)}
-                >
-                    <UserPlusIcon data-icon="inline-start" /> Üye ekle
-                </Button>
-            </div>
-            {members.length === 0 ? (
-                <Empty>
-                    <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                            <UsersThreeIcon />
-                        </EmptyMedia>
-                        <EmptyTitle>Üye yok</EmptyTitle>
-                        <EmptyDescription>
-                            Bu organizasyona henüz kullanıcı eklenmemiş.
-                        </EmptyDescription>
-                    </EmptyHeader>
-                </Empty>
-            ) : (
-                <ItemGroup variant="inset">
-                    {members.map((u, i) => (
-                        <Fragment key={u.id}>
-                            {i > 0 && <ItemSeparator />}
-                            <Item size="sm">
-                                <ItemMedia>
-                                    <Avatar>
-                                        <AvatarFallback>{initials(u.username)}</AvatarFallback>
-                                    </Avatar>
-                                </ItemMedia>
-                                <ItemContent className="min-w-0">
-                                    <ItemTitle>{u.username}</ItemTitle>
-                                    <ItemDescription className="truncate">
-                                        {u.email || "—"}
-                                    </ItemDescription>
-                                </ItemContent>
-                                <ItemActions>
+        <Section
+            label={res.status === "ready" ? t("sxOrgDetailMemberCount", { total: members.length }) : t("sxOrgDetailTabMembers")}
+            action={res.status === "ready" && <TextAction onClick={() => setAdding(true)}>{t("sxOrgDetailAddMember")}</TextAction>}
+        >
+            <ListState
+                status={res.status}
+                count={members.length}
+                onRetry={res.reload}
+                errorTitle={t("sxOrgDetailMembersLoadError")}
+                emptyTitle={t("sxOrgDetailNoMembers")}
+                emptyDescription={t("sxOrgDetailNoMembersDescription")}
+                emptyAction={
+                    <Button size="sm" className="h-8.5 px-4 font-medium" onClick={() => setAdding(true)}>
+                        {t("sxOrgDetailAddMember")}
+                    </Button>
+                }
+            >
+                <Group>
+                    {members.map(u => (
+                        <Row
+                            key={u.id}
+                            leading={<Monogram name={u.username} />}
+                            title={u.username}
+                            subtitle={u.email || "—"}
+                            trailing={
+                                <>
                                     {u.membershipType && (
-                                        <Badge variant="secondary">{u.membershipType}</Badge>
+                                        <span className="hidden sm:inline-flex">
+                                            <Chip>{u.membershipType}</Chip>
+                                        </span>
                                     )}
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        title="Organizasyondan çıkar"
-                                        aria-label="Organizasyondan çıkar"
-                                        onClick={() => removeMember(u)}
-                                    >
-                                        <TrashIcon />
-                                    </Button>
-                                </ItemActions>
-                            </Item>
-                        </Fragment>
+                                    <TextAction tone="danger" onClick={() => removeMember(u)}>
+                                        {t("sxCommonRemoveFrom")}
+                                    </TextAction>
+                                </>
+                            }
+                        />
                     ))}
-                </ItemGroup>
-            )}
+                </Group>
+            </ListState>
             {adding && (
                 <AddMemberModal
                     org={org}
@@ -593,149 +536,109 @@ function MembersTab({ org }: any) {
                     onClose={() => setAdding(false)}
                     onAdded={() => {
                         setAdding(false);
-                        load();
+                        res.reload();
                     }}
                 />
             )}
-            <Confirm open={!!confirmOpts} onOpenChange={o => !o && setConfirmOpts(null)}>
-                <ConfirmContent>
-                    <ConfirmHeader>
-                        <ConfirmTitle>{confirmOpts?.title}</ConfirmTitle>
-                        {confirmOpts?.message && (
-                            <ConfirmDescription>{confirmOpts.message}</ConfirmDescription>
-                        )}
-                    </ConfirmHeader>
-                    <ConfirmFooter>
-                        <ConfirmCancel>Vazgeç</ConfirmCancel>
-                        <ConfirmAction
-                            variant={confirmOpts?.danger ? "destructive" : "default"}
-                            onClick={() => {
-                                const fn = confirmOpts?.onConfirm;
-                                setConfirmOpts(null);
-                                fn?.();
-                            }}
-                        >
-                            {confirmOpts?.confirmLabel ?? "Onayla"}
-                        </ConfirmAction>
-                    </ConfirmFooter>
-                </ConfirmContent>
-            </Confirm>
-        </div>
+            <ConfirmDialog opts={confirmOpts} onClose={() => setConfirmOpts(null)} />
+        </Section>
     );
 }
 
 function AddMemberModal({ org, existing, onClose, onAdded }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [q, setQ] = useState("");
+    const [term, setTerm] = useState("");
+    const [attempt, setAttempt] = useState(0);
     const [results, setResults] = useState<any[]>([]);
-    const [loading, setLoading] = useState(false);
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
     const [busy, setBusy] = useState<string | null>(null);
 
-    const search = async () => {
-        setLoading(true);
-        try {
-            const r = await adminClient.users.find({
-                search: q.trim() || undefined,
-                max: 20
-            });
-            setResults(Array.isArray(r) ? r : []);
-        } catch (e) {
-            addError("Arama başarısız.", e);
-        } finally {
-            setLoading(false);
-        }
-    };
-
     useEffect(() => {
-        search();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [search]);
+        let alive = true;
+        setStatus("loading");
+        adminClient.users
+            .find({ search: term || undefined, max: 20 })
+            .then(r => {
+                if (!alive) return;
+                setResults(Array.isArray(r) ? r : []);
+                setStatus("ready");
+            })
+            .catch(() => alive && setStatus("error"));
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, term, attempt]);
+
+    const search = () => {
+        setTerm(q.trim());
+        setAttempt(n => n + 1);
+    };
 
     const add = async (u: any) => {
         setBusy(u.id);
         try {
             await adminClient.organizations.addMember({ orgId: org.id, userId: u.id });
-            addAlert(`${u.username} eklendi.`, AlertVariant.success);
+            addAlert(t("sxOrgDetailMemberAdded", { username: u.username }), AlertVariant.success);
             onAdded();
         } catch (e) {
-            addError("Eklenemedi.", e);
+            addError(t("sxOrgDetailMemberAddError"), e);
             setBusy(null);
         }
     };
 
     return (
         <Modal open onOpenChange={o => !o && onClose()}>
-            <ModalContent className="sm:max-w-2xl">
+            <ModalContent className="sm:max-w-lg">
                 <ModalHeader>
-                    <ModalTitle>Üye ekle</ModalTitle>
+                    <ModalTitle>{t("sxOrgDetailAddMember")}</ModalTitle>
                 </ModalHeader>
                 <ModalBody>
-                    <div className="space-y-3">
-                        <InputGroup>
-                            <InputGroupAddon>
-                                <MagnifyingGlassIcon />
-                            </InputGroupAddon>
-                            <InputGroupInput
-                                autoFocus
-                                value={q}
-                                onChange={(e: any) => setQ(e.target.value)}
-                                onKeyDown={(e: any) => e.key === "Enter" && search()}
-                                placeholder="Kullanıcı ara…"
-                            />
-                        </InputGroup>
-                        {loading ? (
-                            <div className="grid place-items-center py-16">
-                                <Spinner />
-                            </div>
-                        ) : (
-                            <ItemGroup variant="inset">
-                                {results.length === 0 ? (
-                                    <Item size="sm">
-                                        <ItemContent>
-                                            <ItemDescription className="text-center">
-                                                Kullanıcı bulunamadı.
-                                            </ItemDescription>
-                                        </ItemContent>
-                                    </Item>
-                                ) : (
-                                    results.map((u, i) => {
+                    <div className="flex flex-col gap-3">
+                        <SearchField value={q} onChange={setQ} onEnter={search} placeholder={t("sxOrgDetailSearchUsers")} />
+                        <div className="max-h-[50svh] overflow-y-auto">
+                            {status === "loading" ? (
+                                <ListSkeleton />
+                            ) : status === "error" ? (
+                                <Notice
+                                    title={t("sxOrgDetailUserSearchError")}
+                                    description={t("sxLoadErrorDescription")}
+                                    onRetry={() => setAttempt(n => n + 1)}
+                                />
+                            ) : results.length === 0 ? (
+                                <Notice
+                                    title={t("sxOrgDetailNoUsersFound")}
+                                    description={
+                                        term ? t("sxOrgDetailNoUsersFoundSearch") : t("sxOrgDetailNoUsersFoundDescription")
+                                    }
+                                />
+                            ) : (
+                                <Group>
+                                    {results.map(u => {
                                         const inOrg = existing.has(u.id);
                                         return (
-                                            <Fragment key={u.id}>
-                                                {i > 0 && <ItemSeparator />}
-                                                <Item size="sm">
-                                                    <ItemMedia>
-                                                        <Avatar size="sm">
-                                                            <AvatarFallback>
-                                                                {initials(u.username)}
-                                                            </AvatarFallback>
-                                                        </Avatar>
-                                                    </ItemMedia>
-                                                    <ItemContent className="min-w-0">
-                                                        <ItemTitle>{u.username}</ItemTitle>
-                                                        <ItemDescription className="truncate">
-                                                            {u.email || "—"}
-                                                        </ItemDescription>
-                                                    </ItemContent>
-                                                    <ItemActions>
-                                                        <Button
-                                                            type="button"
-                                                            size="sm"
-                                                            variant={inOrg ? "ghost" : "tinted"}
-                                                            disabled={inOrg || busy === u.id}
-                                                            onClick={() => add(u)}
-                                                        >
-                                                            {inOrg ? "Üye" : "Ekle"}
-                                                        </Button>
-                                                    </ItemActions>
-                                                </Item>
-                                            </Fragment>
+                                            <Row
+                                                key={u.id}
+                                                leading={<Monogram name={u.username} />}
+                                                title={u.username}
+                                                subtitle={u.email || "—"}
+                                                trailing={
+                                                    inOrg ? (
+                                                        <Chip>{t("sxOrgDetailMemberChip")}</Chip>
+                                                    ) : (
+                                                        <TextAction disabled={busy === u.id} onClick={() => add(u)}>
+                                                            {t("sxCommonAdd")}
+                                                        </TextAction>
+                                                    )
+                                                }
+                                            />
                                         );
-                                    })
-                                )}
-                            </ItemGroup>
-                        )}
+                                    })}
+                                </Group>
+                            )}
+                        </div>
                     </div>
                 </ModalBody>
             </ModalContent>
@@ -743,59 +646,41 @@ function AddMemberModal({ org, existing, onClose, onAdded }: any) {
     );
 }
 
-/* ── Identity providers ───────────────────────────────────────────────── */
+const SHOWN_KEY = "kc.org.broker.public";
+
 function IdpTab({ org }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [confirmOpts, setConfirmOpts] = useState<any>(null);
     const confirm = setConfirmOpts;
-    const [linked, setLinked] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+    const res = useResource(
+        () => adminClient.organizations.listIdentityProviders({ orgId: org.id }).then(asList),
+        [adminClient, org.id]
+    );
+    const linked = res.data || [];
     const [linking, setLinking] = useState(false);
-
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            const list = await adminClient.organizations.listIdentityProviders({
-                orgId: org.id
-            });
-            setLinked(Array.isArray(list) ? list : []);
-        } catch (e) {
-            addError("Kimlik sağlayıcılar yüklenemedi.", e);
-        } finally {
-            setLoading(false);
-        }
-    }, [adminClient, org.id, addError]);
-
-    useEffect(() => {
-        load();
-    }, [load]);
-
-    const SHOWN_KEY = "kc.org.broker.public";
 
     const toggleShown = async (idp: any) => {
         const cfg = { ...(idp.config || {}) };
         const next = cfg[SHOWN_KEY] === "true" ? "false" : "true";
         cfg[SHOWN_KEY] = next;
         try {
-            await adminClient.identityProviders.update(
-                { alias: idp.alias },
-                { ...idp, config: cfg }
-            );
-            addAlert("Güncellendi.", AlertVariant.success);
-            setLinked(
-                linked.map(x => (x.alias === idp.alias ? { ...x, config: cfg } : x))
+            await adminClient.identityProviders.update({ alias: idp.alias }, { ...idp, config: cfg });
+            addAlert(t("sxCommonUpdated"), AlertVariant.success);
+            res.setData((list: any[]) =>
+                (list || []).map(x => (x.alias === idp.alias ? { ...x, config: cfg } : x))
             );
         } catch (e) {
-            addError("Güncellenemedi.", e);
+            addError(t("sxCommonUpdateError"), e);
         }
     };
 
     const unlink = (idp: any) =>
         confirm({
-            title: "Bağlantıyı kaldır",
-            message: `“${idp.displayName || idp.alias}” bu organizasyondan ayrılacak.`,
-            confirmLabel: "Kaldır",
+            title: t("sxOrgDetailUnlinkIdp"),
+            message: t("sxOrgDetailUnlinkIdpConfirm", { name: idp.displayName || idp.alias }),
+            confirmLabel: t("sxCommonRemove"),
             danger: true,
             onConfirm: async () => {
                 try {
@@ -803,103 +688,73 @@ function IdpTab({ org }: any) {
                         orgId: org.id,
                         alias: idp.alias
                     });
-                    addAlert("Bağlantı kaldırıldı.", AlertVariant.success);
-                    setLinked(linked.filter(x => x.alias !== idp.alias));
+                    addAlert(t("sxOrgDetailIdpUnlinked"), AlertVariant.success);
+                    res.setData((list: any[]) => (list || []).filter(x => x.alias !== idp.alias));
                 } catch (e) {
-                    addError("Kaldırılamadı.", e);
+                    addError(t("sxCommonRemoveError"), e);
                 }
             }
         });
 
-    if (loading)
-        return (
-            <div className="grid place-items-center py-16">
-                <Spinner />
-            </div>
-        );
-
     return (
-        <div className="space-y-3">
-            <div className="flex items-center justify-between">
-                <h3 className="ms-1 text-sm font-medium text-muted-foreground">
-                    {linked.length} kimlik sağlayıcı
-                </h3>
-                <Button
-                    type="button"
-                    variant="plain"
-                    size="sm"
-                    onClick={() => setLinking(true)}
+        <>
+            <Section
+                label={res.status === "ready" ? t("sxOrgDetailIdpCount", { total: linked.length }) : t("sxOrgDetailTabIdps")}
+                action={res.status === "ready" && <TextAction onClick={() => setLinking(true)}>{t("sxOrgDetailLink")}</TextAction>}
+            >
+                <ListState
+                    status={res.status}
+                    count={linked.length}
+                    onRetry={res.reload}
+                    errorTitle={t("sxOrgDetailIdpsLoadError")}
+                    emptyTitle={t("sxOrgDetailNoIdps")}
+                    emptyDescription={t("sxOrgDetailNoIdpsDescription")}
+                    emptyAction={
+                        <Button size="sm" className="h-8.5 px-4 font-medium" onClick={() => setLinking(true)}>
+                            {t("sxOrgDetailLinkIdp")}
+                        </Button>
+                    }
                 >
-                    <PlusIcon data-icon="inline-start" /> Bağla
-                </Button>
-            </div>
-            {linked.length === 0 ? (
-                <Empty>
-                    <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                            <ShareNetworkIcon />
-                        </EmptyMedia>
-                        <EmptyTitle>Kimlik sağlayıcı yok</EmptyTitle>
-                        <EmptyDescription>
-                            Bu organizasyon için kullanıcıları bir kimlik sağlayıcıyla doğrula.
-                        </EmptyDescription>
-                    </EmptyHeader>
-                </Empty>
-            ) : (
-                <ItemGroup variant="inset">
-                    {linked.map((idp, i) => {
-                        const _shown = idp.config?.[SHOWN_KEY] === "true";
-                        return (
-                            <Fragment key={idp.alias}>
-                                {i > 0 && <ItemSeparator />}
-                                <Item size="sm">
-                                    <ItemMedia variant="icon">
-                                        <ShareNetworkIcon />
-                                    </ItemMedia>
-                                    <ItemContent className="min-w-0">
-                                        <ItemTitle>{idp.displayName || idp.alias}</ItemTitle>
-                                        <ItemDescription className="truncate font-mono">
-                                            {idp.alias} · {idp.providerId}
-                                        </ItemDescription>
-                                    </ItemContent>
-                                    <ItemActions>
-                                        <Button
-                                            type="button"
-                                            variant="ghost"
-                                            size="icon-sm"
-                                            title="Bağlantıyı kaldır"
-                                            aria-label="Bağlantıyı kaldır"
-                                            onClick={() => unlink(idp)}
-                                        >
-                                            <TrashIcon />
-                                        </Button>
-                                    </ItemActions>
-                                </Item>
-                            </Fragment>
-                        );
-                    })}
-                </ItemGroup>
-            )}
-            {linked.length > 0 && (
-                <ItemGroup variant="inset">
-                    {linked.map((idp, i) => (
-                        <Fragment key={idp.alias}>
-                            {i > 0 && <ItemSeparator />}
-                            <Item size="sm">
-                                <ItemContent>
-                                    <ItemTitle>{idp.displayName || idp.alias}</ItemTitle>
-                                    <ItemDescription>Giriş ekranında göster</ItemDescription>
-                                </ItemContent>
-                                <ItemActions>
+                    <Group>
+                        {linked.map(idp => (
+                            <Row
+                                key={idp.alias}
+                                title={idp.displayName || idp.alias}
+                                subtitle={
+                                    <span className="font-mono">
+                                        {idp.alias} · {idp.providerId}
+                                    </span>
+                                }
+                                trailing={
+                                    <TextAction tone="danger" onClick={() => unlink(idp)}>
+                                        {t("sxCommonRemove")}
+                                    </TextAction>
+                                }
+                            />
+                        ))}
+                    </Group>
+                </ListState>
+            </Section>
+            {res.status === "ready" && linked.length > 0 && (
+                <Section label={t("sxOrgDetailShowOnLogin")}>
+                    <Group>
+                        {linked.map(idp => (
+                            <Row
+                                key={idp.alias}
+                                className="min-h-13"
+                                title={idp.displayName || idp.alias}
+                                subtitle={t("sxOrgDetailShowOnLogin")}
+                                trailing={
                                     <Switch
+                                        aria-label={t("sxOrgDetailShowOnLoginAria", { name: idp.displayName || idp.alias })}
                                         checked={idp.config?.[SHOWN_KEY] === "true"}
                                         onCheckedChange={() => toggleShown(idp)}
                                     />
-                                </ItemActions>
-                            </Item>
-                        </Fragment>
-                    ))}
-                </ItemGroup>
+                                }
+                            />
+                        ))}
+                    </Group>
+                </Section>
             )}
             {linking && (
                 <LinkIdpModal
@@ -908,72 +763,50 @@ function IdpTab({ org }: any) {
                     onClose={() => setLinking(false)}
                     onLinked={() => {
                         setLinking(false);
-                        load();
+                        res.reload();
                     }}
                 />
             )}
-            <Confirm open={!!confirmOpts} onOpenChange={o => !o && setConfirmOpts(null)}>
-                <ConfirmContent>
-                    <ConfirmHeader>
-                        <ConfirmTitle>{confirmOpts?.title}</ConfirmTitle>
-                        {confirmOpts?.message && (
-                            <ConfirmDescription>{confirmOpts.message}</ConfirmDescription>
-                        )}
-                    </ConfirmHeader>
-                    <ConfirmFooter>
-                        <ConfirmCancel>Vazgeç</ConfirmCancel>
-                        <ConfirmAction
-                            variant={confirmOpts?.danger ? "destructive" : "default"}
-                            onClick={() => {
-                                const fn = confirmOpts?.onConfirm;
-                                setConfirmOpts(null);
-                                fn?.();
-                            }}
-                        >
-                            {confirmOpts?.confirmLabel ?? "Onayla"}
-                        </ConfirmAction>
-                    </ConfirmFooter>
-                </ConfirmContent>
-            </Confirm>
-        </div>
+            <ConfirmDialog opts={confirmOpts} onClose={() => setConfirmOpts(null)} />
+        </>
     );
 }
 
 function LinkIdpModal({ org, linked, onClose, onLinked }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [all, setAll] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
+    const [attempt, setAttempt] = useState(0);
     const [alias, setAlias] = useState("");
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
-        (async () => {
-            try {
-                const list = await adminClient.identityProviders.find();
-                setAll(
-                    Array.isArray(list)
-                        ? list.filter((i: any) => !linked.has(i.alias))
-                        : []
-                );
-            } catch (e) {
-                addError("Kimlik sağlayıcılar yüklenemedi.", e);
-            } finally {
-                setLoading(false);
-            }
-        })();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [linked.has, adminClient.identityProviders.find, addError]);
+        let alive = true;
+        setStatus("loading");
+        adminClient.identityProviders
+            .find()
+            .then(list => {
+                if (!alive) return;
+                setAll(Array.isArray(list) ? list.filter((i: any) => !linked.has(i.alias)) : []);
+                setStatus("ready");
+            })
+            .catch(() => alive && setStatus("error"));
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, attempt]);
 
     const link = async () => {
         if (!alias) return;
         setSaving(true);
         try {
             await adminClient.organizations.linkIdp({ orgId: org.id, alias });
-            addAlert("Kimlik sağlayıcı bağlandı.", AlertVariant.success);
+            addAlert(t("sxOrgDetailIdpLinked"), AlertVariant.success);
             onLinked();
         } catch (e) {
-            addError("Bağlanamadı.", e);
+            addError(t("sxOrgDetailIdpLinkError"), e);
             setSaving(false);
         }
     };
@@ -982,54 +815,42 @@ function LinkIdpModal({ org, linked, onClose, onLinked }: any) {
         <Modal open onOpenChange={o => !o && onClose()}>
             <ModalContent>
                 <ModalHeader>
-                    <ModalTitle>Kimlik sağlayıcı bağla</ModalTitle>
+                    <ModalTitle>{t("sxOrgDetailLinkIdp")}</ModalTitle>
                 </ModalHeader>
                 <ModalBody>
-                    {loading ? (
-                        <div className="grid place-items-center py-16">
-                            <Spinner />
-                        </div>
+                    {status === "loading" ? (
+                        <ListSkeleton rows={1} />
+                    ) : status === "error" ? (
+                        <Notice
+                            title={t("sxOrgDetailIdpsLoadError")}
+                            description={t("sxLoadErrorDescription")}
+                            onRetry={() => setAttempt(n => n + 1)}
+                        />
                     ) : all.length === 0 ? (
-                        <Empty>
-                            <EmptyHeader>
-                                <EmptyDescription>
-                                    Bağlanabilecek kimlik sağlayıcı yok.
-                                </EmptyDescription>
-                            </EmptyHeader>
-                        </Empty>
+                        <Notice title={t("sxOrgDetailNoLinkableIdps")} description={t("sxOrgDetailNoLinkableIdpsDescription")} />
                     ) : (
-                        <Field>
-                            <FieldLabel>Kimlik sağlayıcı</FieldLabel>
-                            <Select
-                                value={alias || "__none__"}
-                                onValueChange={(v: string) =>
-                                    setAlias(v === "__none__" ? "" : v)
-                                }
+                        <Field size="lg">
+                            <FieldLabel htmlFor="org-link-idp">{t("sxOrgDetailIdp")}</FieldLabel>
+                            <NativeSelect
+                                id="org-link-idp"
+                                size="lg"
+                                className="w-full"
+                                value={alias}
+                                onChange={(e: any) => setAlias(e.target.value)}
                             >
-                                <SelectTrigger size="sm" className="flex-1">
-                                    <SelectValue placeholder="Kimlik sağlayıcı seç…" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="__none__">
-                                        Kimlik sağlayıcı seç…
-                                    </SelectItem>
-                                    {all.map(i => (
-                                        <SelectItem key={i.alias} value={i.alias}>
-                                            {i.displayName || i.alias} ({i.providerId})
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                                <NativeSelectOption value="">{t("sxOrgDetailSelectIdp")}</NativeSelectOption>
+                                {all.map(i => (
+                                    <NativeSelectOption key={i.alias} value={i.alias}>
+                                        {i.displayName || i.alias} ({i.providerId})
+                                    </NativeSelectOption>
+                                ))}
+                            </NativeSelect>
                         </Field>
                     )}
                 </ModalBody>
                 <ModalFooter>
-                    <Button
-                        type="button"
-                        disabled={saving || !alias}
-                        onClick={link}
-                    >
-                        {saving ? "Bağlanıyor…" : "Bağla"}
+                    <Button size="form" block disabled={saving || !alias} onClick={link}>
+                        {saving ? t("sxOrgDetailLinking") : t("sxOrgDetailLink")}
                     </Button>
                 </ModalFooter>
             </ModalContent>

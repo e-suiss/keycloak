@@ -1,37 +1,10 @@
 // @ts-nocheck
 
-import {
-    AppWindowIcon,
-    CaretRightIcon,
-    CheckCircleIcon,
-    DownloadSimpleIcon,
-    KeyIcon,
-    MagnifyingGlassIcon,
-    TrashIcon,
-    WarningIcon,
-    XCircleIcon
-} from "@phosphor-icons/react";
+import { CheckCircleIcon, DownloadSimpleIcon, WarningIcon, XCircleIcon } from "@phosphor-icons/react";
 import { Alert, AlertTitle } from "@ui/components/alert";
-import { Avatar, AvatarFallback } from "@ui/components/avatar";
-import { Badge } from "@ui/components/badge";
 import { Button } from "@ui/components/button";
-import {
-    Card,
-    CardAction,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle
-} from "@ui/components/card";
 import { Checkbox } from "@ui/components/checkbox";
-import {
-    Empty,
-    EmptyContent,
-    EmptyDescription,
-    EmptyHeader,
-    EmptyMedia,
-    EmptyTitle
-} from "@ui/components/empty";
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@ui/components/empty";
 import {
     Field,
     FieldContent,
@@ -42,22 +15,10 @@ import {
     FieldSet
 } from "@ui/components/field";
 import { Input } from "@ui/components/input";
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@ui/components/input-group";
-import {
-    Item,
-    ItemActions,
-    ItemContent,
-    ItemDescription,
-    ItemGroup,
-    ItemMedia,
-    ItemSeparator,
-    ItemTitle
-} from "@ui/components/item";
+import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@ui/components/item";
 import { NativeSelect, NativeSelectOption } from "@ui/components/native-select";
 import { Progress } from "@ui/components/progress";
-import { Spinner } from "@ui/components/spinner";
 import { Switch } from "@ui/components/switch";
-import { Tabs, TabsList, TabsTrigger } from "@ui/components/tabs";
 import { Textarea } from "@ui/components/textarea";
 import { cn } from "@ui/lib/utils";
 import {
@@ -78,12 +39,27 @@ import {
     ModalHeader,
     ModalTitle
 } from "@ui/patterns/modal";
-import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AlertVariant, useAlerts } from "../../shared/keycloak-ui-shared";
 import { useAdminClient } from "../admin-client";
 import { ConfigForm } from "../components/ConfigForm";
 import { MultiLineInput } from "../components/MultiLineInput";
+import {
+    AdminPage,
+    Chip,
+    Group,
+    ListSkeleton,
+    Notice,
+    Pager,
+    Row,
+    SearchField,
+    Section,
+    SegmentTabs,
+    TextAction
+} from "../ui/kit";
+import { i18n } from "../i18n/i18n";
+import { useT } from "../ui/i18n";
 import { useRealm } from "../ui/realm";
 
 const PAGE = 20;
@@ -93,50 +69,84 @@ const _lines = (s: string) =>
         .map(x => x.trim())
         .filter(Boolean);
 
+const TABS = [
+    { value: "list", label: "sxClientsTabList" },
+    { value: "iat", label: "sxClientsTabIat" },
+    { value: "registration", label: "sxClientsTabRegistration" }
+];
+
 export default function Clients() {
+    const t = useT();
     const { realm } = useRealm();
+    const navigate = useNavigate();
     const [tab, setTab] = useState("list");
+    const [createOpen, setCreateOpen] = useState(false);
+    const [importOpen, setImportOpen] = useState(false);
 
     return (
-        <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-            <div className="mb-7">
-                <h1 className="text-3xl font-semibold tracking-tight">İstemciler</h1>
-                <p className="mt-1 text-sm text-muted-foreground">
-                    Realm’inize bağlı uygulamalar ve servisler.
-                </p>
-            </div>
-            <Tabs value={tab} onValueChange={setTab} className="mb-5">
-                <TabsList variant="line">
-                    <TabsTrigger value="list">İstemci listesi</TabsTrigger>
-                    <TabsTrigger value="iat">İlk Erişim Token'ı</TabsTrigger>
-                    <TabsTrigger value="registration">İstemci Kaydı</TabsTrigger>
-                </TabsList>
-            </Tabs>
-            {tab === "list" && <ClientList />}
+        <AdminPage
+            title={t("sxNavClients")}
+            description={t("sxClientsDescription")}
+            actions={
+                tab === "list" ? (
+                    <>
+                        <Button variant="plain" onClick={() => setImportOpen(true)}>
+                            {t("sxClientsImport")}
+                        </Button>
+                        <Button onClick={() => setCreateOpen(true)}>{t("sxClientsCreate")}</Button>
+                    </>
+                ) : undefined
+            }
+        >
+            <SegmentTabs
+                value={tab}
+                onChange={setTab}
+                items={TABS.map(item => ({ value: item.value, label: t(item.label) }))}
+                ariaLabel={t("sxClientsSections")}
+            />
+            {tab === "list" && <ClientList onCreate={() => setCreateOpen(true)} />}
             {tab === "iat" && <InitialAccessTokens key={realm} />}
             {tab === "registration" && <ClientRegistration key={realm} />}
-        </div>
+
+            {createOpen && (
+                <CreateClient
+                    onClose={() => setCreateOpen(false)}
+                    onCreated={id => {
+                        setCreateOpen(false);
+                        navigate(`/${realm}/clients/${id}`);
+                    }}
+                />
+            )}
+            {importOpen && (
+                <ImportClient
+                    onClose={() => setImportOpen(false)}
+                    onImported={id => {
+                        setImportOpen(false);
+                        navigate(`/${realm}/clients/${id}`);
+                    }}
+                />
+            )}
+        </AdminPage>
     );
 }
 
-function ClientList() {
+function ClientList({ onCreate }: { onCreate: () => void }) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
     const navigate = useNavigate();
     const { addAlert, addError } = useAlerts();
     const [confirm, confirmNode] = useConfirmDialog();
 
-    const [loading, setLoading] = useState(true);
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
     const [clients, setClients] = useState<any[]>([]);
     const [first, setFirst] = useState(0);
     const [hasMore, setHasMore] = useState(false);
     const [searchInput, setSearchInput] = useState("");
     const [query, setQuery] = useState("");
-    const [createOpen, setCreateOpen] = useState(false);
-    const [importOpen, setImportOpen] = useState(false);
 
     const load = async (firstArg = first, q = query) => {
-        setLoading(true);
+        setStatus("loading");
         try {
             const params: any = { first: firstArg, max: PAGE + 1 };
             if (q.trim()) {
@@ -146,20 +156,17 @@ function ClientList() {
             const list = (await adminClient.clients.find(params)) ?? [];
             setHasMore(list.length > PAGE);
             setClients(list.slice(0, PAGE));
-        } catch (e) {
-            addError("İstemciler yüklenemedi", e as Error);
-        } finally {
-            setLoading(false);
+            setStatus("ready");
+        } catch {
+            setStatus("error");
         }
     };
 
     useEffect(() => {
         setFirst(0);
         load(0, query);
-        // eslint-disable-next-line
-    }, [query, load]);
+    }, [query]);
 
-    // Live, debounced search — no separate "Ara" button.
     useEffect(() => {
         const id = setTimeout(() => setQuery(searchInput.trim()), 300);
         return () => clearTimeout(id);
@@ -173,17 +180,17 @@ function ClientList() {
 
     const _remove = (c: any) =>
         confirm({
-            title: "İstemciyi sil",
-            message: `“${c.clientId}” kalıcı olarak silinecek. Emin misiniz?`,
-            confirmLabel: "Sil",
+            title: t("sxClientsDeleteTitle"),
+            message: t("sxClientsDeleteMessage", { name: c.clientId }),
+            confirmLabel: t("sxCommonDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.clients.del({ id: c.id });
-                    addAlert(`“${c.clientId}” silindi.`, AlertVariant.success);
+                    addAlert(t("sxClientsDeleted", { name: c.clientId }), AlertVariant.success);
                     load();
                 } catch (e) {
-                    addError("Silme başarısız", e as Error);
+                    addError(t("sxCommonDeleteFailed"), e as Error);
                 }
             }
         });
@@ -204,175 +211,99 @@ function ClientList() {
             a.click();
             URL.revokeObjectURL(a.href);
         } catch (e) {
-            addError("Dışa aktarılamadı", e as Error);
+            addError(t("sxClientsExportError"), e as Error);
         }
     };
 
     return (
-        <div className="space-y-6">
-            {/* Toolbar — calm search on the left, a single emphasized action on the right */}
-            <div className="flex flex-wrap items-center gap-3">
-                <InputGroup className="w-full sm:w-80">
-                    <InputGroupAddon>
-                        <MagnifyingGlassIcon />
-                    </InputGroupAddon>
-                    <InputGroupInput
-                        type="text"
-                        value={searchInput}
-                        onChange={e => setSearchInput(e.target.value)}
-                        placeholder="İstemci ID ara"
-                    />
-                </InputGroup>
-                <div className="flex gap-2 sm:ml-auto">
-                    <Button
-                        variant="ghost"
-                        onClick={() => setImportOpen(true)}
-                    >
-                        İçe aktar
-                    </Button>
-                    <Button
-                        onClick={() => setCreateOpen(true)}
-                    >
-                        İstemci oluştur
-                    </Button>
-                </div>
-            </div>
+        <>
+            <SearchField value={searchInput} onChange={setSearchInput} placeholder={t("sxClientsSearch")} />
 
-            {loading ? (
-                <div className="flex justify-center py-16">
-                    <Spinner className="size-6" />
-                </div>
-            ) : clients.length === 0 ? (
-                <Empty>
-                    <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                            <AppWindowIcon />
-                        </EmptyMedia>
-                        <EmptyTitle>
-                            {query ? "Sonuç bulunamadı" : "Henüz istemci yok"}
-                        </EmptyTitle>
-                        <EmptyDescription>
-                            {query
-                                ? `“${query}” ile eşleşen bir istemci yok.`
-                                : "İlk uygulamanı bağlamak için bir istemci oluştur."}
-                        </EmptyDescription>
-                    </EmptyHeader>
-                    {!query && (
-                        <EmptyContent>
-                            <Button onClick={() => setCreateOpen(true)}>İstemci oluştur</Button>
-                        </EmptyContent>
-                    )}
-                </Empty>
-            ) : (
-                <div className="space-y-4">
-                    <ItemGroup variant="inset">
-                        {clients.map((c, i) => {
+            <Section label={t("sxNavClients")}>
+                {status === "loading" && <ListSkeleton />}
+                {status === "error" && (
+                    <Notice
+                        title={t("sxClientsLoadError")}
+                        description={t("sxLoadErrorDescription")}
+                        onRetry={() => load(first, query)}
+                    />
+                )}
+                {status === "ready" && clients.length === 0 && (
+                    <Notice
+                        title={query ? t("sxClientsNoResults") : t("sxClientsEmpty")}
+                        description={
+                            query
+                                ? t("sxClientsNoResultsDescription", { query })
+                                : t("sxClientsEmptyDescription")
+                        }
+                        action={
+                            !query && (
+                                <Button size="sm" className="h-8.5 px-4 font-medium" onClick={onCreate}>
+                                    {t("sxClientsCreate")}
+                                </Button>
+                            )
+                        }
+                    />
+                )}
+                {status === "ready" && clients.length > 0 && (
+                    <Group>
+                        {clients.map(c => {
                             const home = homeUrl(c);
-                            const sub =
-                                c.name ||
-                                (home && /^https?:\/\//.test(home) ? home : "");
-                            const go = () => navigate(`/${realm}/clients/${c.id}`);
+                            const sub = (c.name && !/^\$\{.*\}$/.test(c.name) ? c.name : "") || (home && /^https?:\/\//.test(home) ? home : "");
                             return (
-                                <Fragment key={c.id}>
-                                    {i > 0 && <ItemSeparator />}
-                                    <Item
-                                        size="sm"
-                                        role="button"
-                                        tabIndex={0}
-                                        className="cursor-pointer"
-                                        onClick={go}
-                                        onKeyDown={e =>
-                                            e.target === e.currentTarget &&
-                                            (e.key === "Enter" || e.key === " ") &&
-                                            go()
-                                        }
+                                <li
+                                    key={c.id}
+                                    data-testid={`client-${c.clientId}`}
+                                    className="flex items-center gap-3 pe-4 transition-colors hover:bg-black/3 dark:hover:bg-white/4"
+                                >
+                                    <button
+                                        type="button"
+                                        onClick={() => navigate(`/${realm}/clients/${c.id}`)}
+                                        className="flex min-h-16 min-w-0 flex-1 items-center gap-3 py-3 ps-4 text-left outline-none focus-visible:bg-black/5 dark:focus-visible:bg-white/6"
                                     >
-                                        <ItemMedia>
-                                            <Monogram
-                                                text={c.clientId}
-                                                saml={c.protocol === "saml"}
-                                            />
-                                        </ItemMedia>
-                                        <ItemContent className="min-w-0">
-                                            <ItemTitle>
-                                                <span className="truncate font-mono">
-                                                    {c.clientId}
-                                                </span>
-                                                <Badge variant="secondary">
-                                                    {protocolName(c.protocol)}
-                                                </Badge>
-                                            </ItemTitle>
-                                            <ItemDescription className="truncate">
-                                                {sub || "—"}
-                                            </ItemDescription>
-                                        </ItemContent>
-                                        <ItemActions>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon-sm"
-                                                title="Dışa aktar"
-                                                aria-label="Dışa aktar"
-                                                onClick={e => {
-                                                    e.stopPropagation();
-                                                    exportClient(c);
-                                                }}
-                                            >
-                                                <DownloadSimpleIcon />
-                                            </Button>
-                                            <CaretRightIcon
-                                                className="text-muted-foreground rtl:rotate-180"
-                                                weight="bold"
-                                            />
-                                        </ItemActions>
-                                    </Item>
-                                </Fragment>
+                                        <span className="grid size-10 shrink-0 place-items-center">
+                                            <Monogram text={c.clientId} saml={c.protocol === "saml"} />
+                                        </span>
+                                        <span className="min-w-0 flex-1">
+                                            <span className="block truncate font-mono text-[15px] font-medium">
+                                                {c.clientId}
+                                            </span>
+                                            <span className="mt-0.5 block truncate text-[13px] text-muted-foreground">
+                                                {[protocolName(c.protocol), sub].filter(Boolean).join(" · ")}
+                                            </span>
+                                        </span>
+                                    </button>
+                                    <TextAction className="hidden sm:inline-flex" onClick={() => exportClient(c)}>
+                                        {t("sxClientsExport")}
+                                    </TextAction>
+                                    <button
+                                        type="button"
+                                        title={t("sxClientsExport")}
+                                        aria-label={t("sxClientsExport")}
+                                        onClick={() => exportClient(c)}
+                                        className="grid size-8 shrink-0 place-items-center rounded-md text-primary outline-none hover:opacity-70 focus-visible:ring-2 focus-visible:ring-ring/50 sm:hidden"
+                                    >
+                                        <DownloadSimpleIcon className="size-4.5" />
+                                    </button>
+                                </li>
                             );
                         })}
-                    </ItemGroup>
-                    <div className="flex items-center justify-between px-1">
-                        <span className="text-sm text-muted-foreground tabular-nums">
-                            {`${first + 1}–${first + clients.length}`}
-                        </span>
-                        <div className="flex gap-1.5">
-                            <Button
-                                variant="ghost"
-                                disabled={first === 0}
-                                onClick={() => page(-1)}
-                            >
-                                Önceki
-                            </Button>
-                            <Button
-                                variant="ghost"
-                                disabled={!hasMore}
-                                onClick={() => page(1)}
-                            >
-                                Sonraki
-                            </Button>
-                        </div>
+                    </Group>
+                )}
+                {status === "ready" && (
+                    <div className="mt-3">
+                        <Pager
+                            page={Math.floor(first / PAGE) + 1}
+                            hasPrev={first > 0}
+                            hasNext={hasMore}
+                            onPrev={() => page(-1)}
+                            onNext={() => page(1)}
+                        />
                     </div>
-                </div>
-            )}
-
-            {createOpen && (
-                <CreateClient
-                    onClose={() => setCreateOpen(false)}
-                    onCreated={id => {
-                        setCreateOpen(false);
-                        navigate(`/${realm}/clients/${id}`);
-                    }}
-                />
-            )}
-            {importOpen && (
-                <ImportClient
-                    onClose={() => setImportOpen(false)}
-                    onImported={id => {
-                        setImportOpen(false);
-                        navigate(`/${realm}/clients/${id}`);
-                    }}
-                />
-            )}
+                )}
+            </Section>
             {confirmNode}
-        </div>
+        </>
     );
 }
 
@@ -385,6 +316,7 @@ function ImportClient({
     onClose: () => void;
     onImported: (id: string) => void;
 }) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
     const { addAlert, addError } = useAlerts();
@@ -442,7 +374,7 @@ function ImportClient({
             setAlwaysDisplay(!!parsed.alwaysDisplayInConsole);
             setProtocol(parsed.protocol ?? "openid-connect");
         } catch (e) {
-            addError("Dosya ayrıştırılamadı", e as Error);
+            addError(t("sxClientsParseError"), e as Error);
         }
     };
 
@@ -464,7 +396,7 @@ function ImportClient({
         } catch (e) {
             setResult({
                 ok: false,
-                message: (e as Error)?.message || "Bilinmeyen bir hata oluştu."
+                message: (e as Error)?.message || t("sxCommonUnknownError")
             });
         } finally {
             setSaving(false);
@@ -475,7 +407,7 @@ function ImportClient({
         <Modal open onOpenChange={o => !o && onClose()}>
             <ModalContent>
                 <ModalHeader>
-                    <ModalTitle>İstemci içe aktar</ModalTitle>
+                    <ModalTitle>{t("sxClientsImportTitle")}</ModalTitle>
                 </ModalHeader>
                 <ModalBody>
                     {/* Single hidden picker, shared by the dropzone and the "Değiştir" action. */}
@@ -506,11 +438,11 @@ function ImportClient({
                             )}
                             <p className="text-base font-medium">
                                 {result.ok
-                                    ? `“${result.clientId}” içe aktarıldı`
-                                    : "İçe aktarma başarısız"}
+                                    ? t("sxClientsImportedName", { name: result.clientId })
+                                    : t("sxClientsImportFailed")}
                             </p>
                             <p className="text-sm text-muted-foreground">
-                                {result.ok ? "İstemci başarıyla içe aktarıldı." : result.message}
+                                {result.ok ? t("sxClientsImportedDescription") : result.message}
                             </p>
                         </div>
                     ) : !imported ? (
@@ -540,9 +472,9 @@ function ImportClient({
                                 <EmptyMedia variant="icon">
                                     <DownloadSimpleIcon className="rotate-180" />
                                 </EmptyMedia>
-                                <EmptyTitle>Dosyayı buraya bırakın</EmptyTitle>
+                                <EmptyTitle>{t("sxClientsDropFile")}</EmptyTitle>
                                 <EmptyDescription>
-                                    veya seçmek için tıklayın · JSON veya XML
+                                    {t("sxClientsDropFileHint")}
                                 </EmptyDescription>
                             </EmptyHeader>
                         </Empty>
@@ -556,8 +488,9 @@ function ImportClient({
                                 <ItemContent className="min-w-0">
                                     <ItemTitle>{fileName}</ItemTitle>
                                     <ItemDescription>
-                                        {protocol === "saml" ? "SAML" : "OpenID Connect"}{" "}
-                                        istemcisi algılandı
+                                        {t("sxClientsDetected", {
+                                            protocol: protocol === "saml" ? "SAML" : "OpenID Connect"
+                                        })}
                                     </ItemDescription>
                                 </ItemContent>
                                 <ItemActions>
@@ -566,13 +499,13 @@ function ImportClient({
                                         size="sm"
                                         onClick={() => fileInputRef.current?.click()}
                                     >
-                                        Değiştir
+                                        {t("sxClientsChangeFile")}
                                     </Button>
                                 </ItemActions>
                             </Item>
 
                             <Field>
-                                <FieldLabel>İstemci ID <span className="text-destructive">*</span></FieldLabel>
+                                <FieldLabel>{t("sxClientsClientId")} <span className="text-destructive">*</span></FieldLabel>
                                 <Input
                                     value={clientId}
                                     onChange={e => setClientId(e.target.value)}
@@ -580,27 +513,27 @@ function ImportClient({
                                 />
                             </Field>
                             <Field>
-                                <FieldLabel>Ad</FieldLabel>
+                                <FieldLabel>{t("sxCommonName")}</FieldLabel>
                                 <Input value={name} onChange={e => setName(e.target.value)} />
                             </Field>
                             <Field>
-                                <FieldLabel>Açıklama</FieldLabel>
+                                <FieldLabel>{t("sxCommonDescription")}</FieldLabel>
                                 <Textarea
                                     value={description}
                                     onChange={e => setDescription(e.target.value)}
                                 />
                             </Field>
                             <SwitchRow
-                                label="Kullanıcı arayüzünde her zaman göster"
+                                label={t("sxClientsAlwaysDisplay")}
                                 checked={alwaysDisplay}
                                 onChange={setAlwaysDisplay}
                             />
                             <Field>
-                                <FieldLabel>Tür</FieldLabel>
+                                <FieldLabel>{t("sxCommonType")}</FieldLabel>
                                 <div>
-                                    <Badge variant={protocol === "saml" ? "outline" : "default"}>
+                                    <Chip tone={protocol === "saml" ? "neutral" : "info"}>
                                         {protocol === "saml" ? "SAML" : "OpenID Connect"}
-                                    </Badge>
+                                    </Chip>
                                 </div>
                             </Field>
                         </div>
@@ -612,13 +545,13 @@ function ImportClient({
                             <Button
                                 onClick={() => onImported(result.id)}
                             >
-                                İstemciye git
+                                {t("sxClientsGoToClient")}
                             </Button>
                         ) : (
                             <Button
                                 onClick={() => setResult(null)}
                             >
-                                Geri dön
+                                {t("sxClientsGoBack")}
                             </Button>
                         )
                     ) : (
@@ -626,7 +559,7 @@ function ImportClient({
                             disabled={!imported || !clientId.trim() || saving}
                             onClick={doImport}
                         >
-                            {saving ? "İçe aktarılıyor…" : "İçe aktar"}
+                            {saving ? t("sxClientsImporting") : t("sxClientsImport")}
                         </Button>
                     )}
                 </ModalFooter>
@@ -636,133 +569,118 @@ function ImportClient({
 }
 
 function InitialAccessTokens() {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
     const { addAlert, addError } = useAlerts();
     const [confirm, confirmNode] = useConfirmDialog();
 
-    const [loading, setLoading] = useState(true);
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
+    const [attempt, setAttempt] = useState(0);
     const [tokens, setTokens] = useState<any[]>([]);
     const [createOpen, setCreateOpen] = useState(false);
     const [created, setCreated] = useState<any>(null);
 
     const load = async () => {
-        setLoading(true);
         try {
             const list = await adminClient.realms.getClientsInitialAccess({ realm });
             setTokens(Array.isArray(list) ? list : []);
-        } catch (e) {
-            addError("Token'lar yüklenemedi", e as Error);
-            setTokens([]);
-        } finally {
-            setLoading(false);
+            setStatus("ready");
+        } catch {
+            setStatus("error");
         }
     };
 
     useEffect(() => {
         let alive = true;
-        (async () => {
-            setLoading(true);
-            try {
-                const list = await adminClient.realms.getClientsInitialAccess({ realm });
-                if (alive) setTokens(Array.isArray(list) ? list : []);
-            } catch (e) {
-                if (alive) {
-                    addError("Token'lar yüklenemedi", e as Error);
-                    setTokens([]);
-                }
-            } finally {
-                if (alive) setLoading(false);
-            }
-        })();
+        setStatus("loading");
+        adminClient.realms
+            .getClientsInitialAccess({ realm })
+            .then(list => {
+                if (!alive) return;
+                setTokens(Array.isArray(list) ? list : []);
+                setStatus("ready");
+            })
+            .catch(() => alive && setStatus("error"));
         return () => {
             alive = false;
         };
-        // eslint-disable-next-line
-    }, [adminClient, realm, addError]);
+    }, [adminClient, realm, attempt]);
 
-    const remove = (t: any) =>
+    const remove = (token: any) =>
         confirm({
-            title: "Token'ı sil",
-            message: "Bu ilk erişim token'ı kalıcı olarak silinecek. Emin misiniz?",
-            confirmLabel: "Sil",
+            title: t("sxClientsIatDeleteTitle"),
+            message: t("sxClientsIatDeleteMessage"),
+            confirmLabel: t("sxCommonDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
-                    await adminClient.realms.delClientsInitialAccess({ realm, id: t.id });
-                    addAlert("Token silindi.", AlertVariant.success);
+                    await adminClient.realms.delClientsInitialAccess({ realm, id: token.id });
+                    addAlert(t("sxClientsIatDeleted"), AlertVariant.success);
                     load();
                 } catch (e) {
-                    addError("Silme başarısız", e as Error);
+                    addError(t("sxCommonDeleteFailed"), e as Error);
                 }
             }
         });
 
-    const fmt = (ts: number) => (ts ? new Date(ts * 1000).toLocaleString("tr-TR") : "—");
+    const fmt = (ts: number) => (ts ? new Date(ts * 1000).toLocaleString(i18n.language) : "—");
 
     return (
-        <div className="space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-sm text-muted-foreground">
-                    Yeni istemcileri kaydetmek için kullanılan tek seferlik token'lar.
-                </p>
-                <Button
-                    onClick={() => setCreateOpen(true)}
-                >
-                    Token oluştur
-                </Button>
-            </div>
-
-            {loading ? (
-                <div className="flex justify-center py-16">
-                    <Spinner className="size-6" />
-                </div>
-            ) : tokens.length === 0 ? (
-                <Empty>
-                    <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                            <KeyIcon />
-                        </EmptyMedia>
-                        <EmptyTitle>Token yok</EmptyTitle>
-                        <EmptyDescription>
-                            İlk erişim token'ı oluşturarak istemci kaydına izin ver.
-                        </EmptyDescription>
-                    </EmptyHeader>
-                    <EmptyContent>
-                        <Button onClick={() => setCreateOpen(true)}>Token oluştur</Button>
-                    </EmptyContent>
-                </Empty>
-            ) : (
-                <ItemGroup variant="inset">
-                    {tokens.map((t, i) => (
-                        <Fragment key={t.id}>
-                            {i > 0 && <ItemSeparator />}
-                            <Item size="sm">
-                                <ItemContent className="min-w-0">
-                                    <ItemTitle className="font-mono">{t.id}</ItemTitle>
-                                    <ItemDescription className="truncate">
-                                        Kalan {t.remainingCount ?? 0}/{t.count ?? 0} ·
-                                        Oluşturma {fmt(t.timestamp)}
-                                        {t.expiration
-                                            ? ` · Sona erme ${fmt(t.timestamp + t.expiration)}`
-                                            : ""}
-                                    </ItemDescription>
-                                </ItemContent>
-                                <ItemActions>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        title="Sil"
-                                        aria-label="Sil"
-                                        onClick={() => remove(t)}
-                                    >
-                                        <TrashIcon />
-                                    </Button>
-                                </ItemActions>
-                            </Item>
-                        </Fragment>
+        <Section
+            label={t("sxClientsIatLabel")}
+            action={<TextAction onClick={() => setCreateOpen(true)}>{t("sxClientsIatCreate")}</TextAction>}
+        >
+            <p className="-mt-1 mb-3 px-0.5 text-[13px] text-muted-foreground">
+                {t("sxClientsIatHint")}
+            </p>
+            {status === "loading" && <ListSkeleton />}
+            {status === "error" && (
+                <Notice
+                    title={t("sxClientsIatLoadError")}
+                    description={t("sxLoadErrorDescription")}
+                    onRetry={() => setAttempt(n => n + 1)}
+                />
+            )}
+            {status === "ready" && tokens.length === 0 && (
+                <Notice
+                    title={t("sxClientsIatEmpty")}
+                    description={t("sxClientsIatEmptyDescription")}
+                    action={
+                        <Button size="sm" className="h-8.5 px-4 font-medium" onClick={() => setCreateOpen(true)}>
+                            {t("sxClientsIatCreate")}
+                        </Button>
+                    }
+                />
+            )}
+            {status === "ready" && tokens.length > 0 && (
+                <Group>
+                    {tokens.map(token => (
+                        <Row
+                            key={token.id}
+                            title={<span className="font-mono text-[15px]">{token.id}</span>}
+                            subtitle={
+                                token.expiration
+                                    ? t("sxClientsIatMetaWithExpiry", {
+                                          remaining: token.remainingCount ?? 0,
+                                          total: token.count ?? 0,
+                                          created: fmt(token.timestamp),
+                                          expires: fmt(token.timestamp + token.expiration)
+                                      })
+                                    : t("sxClientsIatMeta", {
+                                          remaining: token.remainingCount ?? 0,
+                                          total: token.count ?? 0,
+                                          created: fmt(token.timestamp)
+                                      })
+                            }
+                            trailing={
+                                <TextAction tone="danger" onClick={() => remove(token)}>
+                                    {t("sxCommonDelete")}
+                                </TextAction>
+                            }
+                        />
                     ))}
-                </ItemGroup>
+                </Group>
             )}
 
             {createOpen && (
@@ -776,14 +694,9 @@ function InitialAccessTokens() {
                 />
             )}
 
-            {created && (
-                <ShowInitialAccessToken
-                    token={created}
-                    onClose={() => setCreated(null)}
-                />
-            )}
+            {created && <ShowInitialAccessToken token={created} onClose={() => setCreated(null)} />}
             {confirmNode}
-        </div>
+        </Section>
     );
 }
 
@@ -792,8 +705,9 @@ function CreateInitialAccessToken({
     onCreated
 }: {
     onClose: () => void;
-    onCreated: (t: any) => void;
+    onCreated: (token: any) => void;
 }) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
     const { addAlert, addError } = useAlerts();
@@ -808,10 +722,10 @@ function CreateInitialAccessToken({
                 { realm },
                 { count: Number(count) || 1, expiration: Number(expiration) || 0 }
             );
-            addAlert("İlk erişim token'ı oluşturuldu.", AlertVariant.success);
+            addAlert(t("sxClientsIatCreated"), AlertVariant.success);
             onCreated(tok);
         } catch (e) {
-            addError("Token oluşturulamadı", e as Error);
+            addError(t("sxClientsIatCreateError"), e as Error);
         } finally {
             setSaving(false);
         }
@@ -821,12 +735,12 @@ function CreateInitialAccessToken({
         <Modal open onOpenChange={o => !o && onClose()}>
             <ModalContent>
                 <ModalHeader>
-                    <ModalTitle>İlk erişim token'ı oluştur</ModalTitle>
+                    <ModalTitle>{t("sxClientsIatCreateTitle")}</ModalTitle>
                 </ModalHeader>
                 <ModalBody>
                     <div className="space-y-4">
                         <Field>
-                            <FieldLabel>Sona erme (saniye)</FieldLabel>
+                            <FieldLabel>{t("sxClientsIatExpiration")}</FieldLabel>
                             <Input
                                 type="number"
                                 value={expiration}
@@ -834,7 +748,7 @@ function CreateInitialAccessToken({
                             />
                         </Field>
                         <Field>
-                            <FieldLabel>Sayı</FieldLabel>
+                            <FieldLabel>{t("sxClientsIatCount")}</FieldLabel>
                             <Input
                                 type="number"
                                 value={count}
@@ -848,7 +762,7 @@ function CreateInitialAccessToken({
                         disabled={saving}
                         onClick={create}
                     >
-                        Oluştur
+                        {t("sxCommonCreate")}
                     </Button>
                 </ModalFooter>
             </ModalContent>
@@ -857,21 +771,22 @@ function CreateInitialAccessToken({
 }
 
 function ShowInitialAccessToken({ token, onClose }: { token: any; onClose: () => void }) {
+    const t = useT();
     const { addAlert } = useAlerts();
     return (
         <Modal open onOpenChange={o => !o && onClose()}>
             <ModalContent className="sm:max-w-2xl">
                 <ModalHeader>
-                    <ModalTitle>İlk erişim token'ı</ModalTitle>
+                    <ModalTitle>{t("sxClientsIatShowTitle")}</ModalTitle>
                 </ModalHeader>
                 <ModalBody>
                     <div className="space-y-4">
                         <Alert variant="destructive">
                             <WarningIcon />
-                            <AlertTitle>Bu token bir daha gösterilmeyecek.</AlertTitle>
+                            <AlertTitle>{t("sxClientsIatShownOnce")}</AlertTitle>
                         </Alert>
                         <Field>
-                            <FieldLabel>Token</FieldLabel>
+                            <FieldLabel>{t("sxClientsIatToken")}</FieldLabel>
                             <div className="flex gap-2">
                                 <Input
                                     readOnly
@@ -882,10 +797,10 @@ function ShowInitialAccessToken({ token, onClose }: { token: any; onClose: () =>
                                     variant="secondary"
                                     onClick={() => {
                                         navigator.clipboard?.writeText(token?.token ?? "");
-                                        addAlert("Token kopyalandı.", AlertVariant.success);
+                                        addAlert(t("sxClientsIatCopied"), AlertVariant.success);
                                     }}
                                 >
-                                    Kopyala
+                                    {t("sxCommonCopy")}
                                 </Button>
                             </div>
                         </Field>
@@ -900,12 +815,14 @@ const POLICY_TYPE =
     "org.keycloak.services.clientregistration.policy.ClientRegistrationPolicy";
 
 function ClientRegistration() {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
     const { addAlert, addError } = useAlerts();
     const [confirm, confirmNode] = useConfirmDialog();
 
-    const [loading, setLoading] = useState(true);
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
+    const [attempt, setAttempt] = useState(0);
     const [parentId, setParentId] = useState<string | undefined>(undefined);
     const [providers, setProviders] = useState<any[]>([]);
     const [policies, setPolicies] = useState<any[]>([]);
@@ -913,37 +830,15 @@ function ClientRegistration() {
     const [createSubType, setCreateSubType] = useState<string | null>(null);
     const [editPolicy, setEditPolicy] = useState<any>(null);
 
-    const load = async () => {
-        setLoading(true);
-        try {
-            const rr = await adminClient.realms.findOne({ realm });
-            const pid = rr?.id;
-            setParentId(pid);
-            const list = await adminClient.components.find({
-                type: POLICY_TYPE,
-                parent: pid
-            });
-            setPolicies(Array.isArray(list) ? list : []);
-        } catch (e) {
-            addError("Politikalar yüklenemedi", e as Error);
-            setPolicies([]);
-        } finally {
-            setLoading(false);
-        }
-    };
+    const load = () => setAttempt(n => n + 1);
 
     useEffect(() => {
         let alive = true;
         (async () => {
-            setLoading(true);
+            setStatus("loading");
             try {
-                let provs: any[] = [];
-                try {
-                    const info = await adminClient.serverInfo.find();
-                    provs = info?.componentTypes?.[POLICY_TYPE] ?? [];
-                } catch {
-                    provs = [];
-                }
+                const info = await adminClient.serverInfo.find();
+                const provs = info?.componentTypes?.[POLICY_TYPE] ?? [];
                 const rr = await adminClient.realms.findOne({ realm });
                 const pid = rr?.id;
                 const list = await adminClient.components.find({
@@ -954,35 +849,30 @@ function ClientRegistration() {
                     setProviders(Array.isArray(provs) ? provs : []);
                     setParentId(pid);
                     setPolicies(Array.isArray(list) ? list : []);
+                    setStatus("ready");
                 }
-            } catch (e) {
-                if (alive) {
-                    addError("Politikalar yüklenemedi", e as Error);
-                    setPolicies([]);
-                }
-            } finally {
-                if (alive) setLoading(false);
+            } catch {
+                if (alive) setStatus("error");
             }
         })();
         return () => {
             alive = false;
         };
-        // eslint-disable-next-line
-    }, [adminClient, realm, addError]);
+    }, [adminClient, realm, attempt]);
 
     const remove = (p: any) =>
         confirm({
-            title: "Politikayı sil",
-            message: `“${p.name}” kalıcı olarak silinecek. Emin misiniz?`,
-            confirmLabel: "Sil",
+            title: t("sxClientsPolicyDeleteTitle"),
+            message: t("sxClientsDeleteMessage", { name: p.name }),
+            confirmLabel: t("sxCommonDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.components.del({ id: p.id });
-                    addAlert("Politika silindi.", AlertVariant.success);
+                    addAlert(t("sxClientsPolicyDeleted"), AlertVariant.success);
                     load();
                 } catch (e) {
-                    addError("Silme başarısız", e as Error);
+                    addError(t("sxCommonDeleteFailed"), e as Error);
                 }
             }
         });
@@ -991,92 +881,75 @@ function ClientRegistration() {
         const list = policies.filter(p => p.subType === subType);
         if (list.length === 0) {
             return (
-                <p className="py-6 text-center text-sm text-muted-foreground">
-                    Politika yok.
-                </p>
+                <Notice
+                    title={t("sxClientsPolicyEmpty")}
+                    description={t("sxClientsPolicyEmptyDescription")}
+                    action={
+                        <Button size="sm" className="h-8.5 px-4 font-medium" onClick={() => setCreateSubType(subType)}>
+                            {t("sxClientsPolicyCreate")}
+                        </Button>
+                    }
+                />
             );
         }
         return (
-            <ItemGroup variant="inset">
-                {list.map((p, i) => (
-                    <Fragment key={p.id}>
-                        {i > 0 && <ItemSeparator />}
-                        <Item size="sm">
-                            <ItemContent
-                                className="min-w-0 cursor-pointer"
-                                onClick={() => setEditPolicy(p)}
-                            >
-                                <ItemTitle>{p.name}</ItemTitle>
-                            </ItemContent>
-                            <ItemActions>
-                                <Badge variant="secondary">{p.providerId}</Badge>
-                                <Button
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    title="Sil"
-                                    aria-label="Sil"
-                                    onClick={() => remove(p)}
-                                >
-                                    <TrashIcon />
-                                </Button>
-                                <Button
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    aria-label="Düzenle"
-                                    onClick={() => setEditPolicy(p)}
-                                >
-                                    <CaretRightIcon weight="bold" className="rtl:rotate-180" />
-                                </Button>
-                            </ItemActions>
-                        </Item>
-                    </Fragment>
+            <Group>
+                {list.map(p => (
+                    <li
+                        key={p.id}
+                        className="flex items-center gap-3 pe-4 transition-colors hover:bg-black/3 dark:hover:bg-white/4"
+                    >
+                        <button
+                            type="button"
+                            onClick={() => setEditPolicy(p)}
+                            className="flex min-h-16 min-w-0 flex-1 flex-col justify-center py-3 ps-4 text-left outline-none focus-visible:bg-black/5 dark:focus-visible:bg-white/6"
+                        >
+                            <span className="w-full truncate text-base font-medium">{p.name}</span>
+                            <span className="mt-0.5 w-full truncate text-[13px] text-muted-foreground">
+                                {p.providerId}
+                            </span>
+                        </button>
+                        <TextAction tone="danger" onClick={() => remove(p)}>
+                            {t("sxCommonDelete")}
+                        </TextAction>
+                    </li>
                 ))}
-            </ItemGroup>
+            </Group>
         );
     };
 
-    if (loading) return (
-            <div className="flex justify-center py-16">
-                <Spinner className="size-6" />
-            </div>
+    if (status === "loading") return <ListSkeleton />;
+    if (status === "error")
+        return (
+            <Notice
+                title={t("sxClientsPolicyLoadError")}
+                description={t("sxLoadErrorDescription")}
+                onRetry={() => setAttempt(n => n + 1)}
+            />
         );
 
     return (
-        <div className="space-y-4">
-            <Card>
-                <CardHeader>
-                    <CardTitle>Anonim erişim politikaları</CardTitle>
-                    <CardDescription>Anonim istemci kaydında uygulanan politikalar.</CardDescription>
-                    <CardAction>
-                        <Button
-                            variant="ghost"
-                            onClick={() => setCreateSubType("anonymous")}
-                        >
-                            Politika oluştur
-                        </Button>
-                    </CardAction>
-                </CardHeader>
-                <CardContent>
-                    {renderPolicies("anonymous")}
-                </CardContent>
-            </Card>
-            <Card>
-                <CardHeader>
-                    <CardTitle>Kimliği doğrulanmış erişim politikaları</CardTitle>
-                    <CardDescription>Kimliği doğrulanmış istemci kaydında uygulanan politikalar.</CardDescription>
-                    <CardAction>
-                        <Button
-                            variant="ghost"
-                            onClick={() => setCreateSubType("authenticated")}
-                        >
-                            Politika oluştur
-                        </Button>
-                    </CardAction>
-                </CardHeader>
-                <CardContent>
-                    {renderPolicies("authenticated")}
-                </CardContent>
-            </Card>
+        <>
+            <Section
+                label={t("sxClientsPolicyAnonymous")}
+                action={<TextAction onClick={() => setCreateSubType("anonymous")}>{t("sxClientsPolicyCreate")}</TextAction>}
+            >
+                <p className="-mt-1 mb-3 px-0.5 text-[13px] text-muted-foreground">
+                    {t("sxClientsPolicyAnonymousHint")}
+                </p>
+                {renderPolicies("anonymous")}
+            </Section>
+            <Section
+                label={t("sxClientsPolicyAuthenticated")}
+                action={
+                    <TextAction onClick={() => setCreateSubType("authenticated")}>{t("sxClientsPolicyCreate")}</TextAction>
+                }
+            >
+                <p className="-mt-1 mb-3 px-0.5 text-[13px] text-muted-foreground">
+                    {t("sxClientsPolicyAuthenticatedHint")}
+                </p>
+                {renderPolicies("authenticated")}
+            </Section>
 
             {createSubType && (
                 <CreatePolicy
@@ -1102,11 +975,12 @@ function ClientRegistration() {
                 />
             )}
             {confirmNode}
-        </div>
+        </>
     );
 }
 
 function CreatePolicy({ subType, parentId, providers, onClose, onCreated }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [providerId, setProviderId] = useState<string>(providers?.[0]?.id ?? "");
@@ -1124,7 +998,7 @@ function CreatePolicy({ subType, parentId, providers, onClose, onCreated }: any)
 
     const submit = async () => {
         if (!providerId) {
-            addAlert("Sağlayıcı seçin.", AlertVariant.danger);
+            addAlert(t("sxClientsPolicySelectProvider"), AlertVariant.danger);
             return;
         }
         setBusy(true);
@@ -1137,10 +1011,10 @@ function CreatePolicy({ subType, parentId, providers, onClose, onCreated }: any)
                 subType,
                 config
             });
-            addAlert("Politika oluşturuldu.", AlertVariant.success);
+            addAlert(t("sxClientsPolicyCreated"), AlertVariant.success);
             onCreated();
         } catch (e) {
-            addError("Oluşturma başarısız", e as Error);
+            addError(t("sxCommonCreateFailed"), e as Error);
         } finally {
             setBusy(false);
         }
@@ -1150,12 +1024,12 @@ function CreatePolicy({ subType, parentId, providers, onClose, onCreated }: any)
         <Modal open onOpenChange={o => !o && onClose()}>
             <ModalContent className="sm:max-w-2xl">
                 <ModalHeader>
-                    <ModalTitle>Politika oluştur</ModalTitle>
+                    <ModalTitle>{t("sxClientsPolicyCreate")}</ModalTitle>
                 </ModalHeader>
                 <ModalBody>
                     <div className="space-y-4">
                         <Field>
-                            <FieldLabel>Sağlayıcı</FieldLabel>
+                            <FieldLabel>{t("sxClientsPolicyProvider")}</FieldLabel>
                             <NativeSelect
                                 className="w-full"
                                 value={providerId}
@@ -1169,7 +1043,7 @@ function CreatePolicy({ subType, parentId, providers, onClose, onCreated }: any)
                             </NativeSelect>
                         </Field>
                         <Field>
-                            <FieldLabel>Ad</FieldLabel>
+                            <FieldLabel>{t("sxCommonName")}</FieldLabel>
                             <Input value={name} onChange={(e: any) => setName(e.target.value)} />
                         </Field>
                         {selectedProvider && (
@@ -1188,7 +1062,7 @@ function CreatePolicy({ subType, parentId, providers, onClose, onCreated }: any)
                         disabled={busy}
                         onClick={submit}
                     >
-                        Oluştur
+                        {t("sxCommonCreate")}
                     </Button>
                 </ModalFooter>
             </ModalContent>
@@ -1197,9 +1071,12 @@ function CreatePolicy({ subType, parentId, providers, onClose, onCreated }: any)
 }
 
 function EditPolicy({ policy, providers, onClose, onSaved }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState(false);
+    const [attempt, setAttempt] = useState(0);
     const [component, setComponent] = useState<any>(null);
     const [name, setName] = useState<string>(policy?.name ?? "");
     const [config, setConfig] = useState<any>({});
@@ -1211,6 +1088,7 @@ function EditPolicy({ policy, providers, onClose, onSaved }: any) {
         let alive = true;
         (async () => {
             setLoading(true);
+            setLoadError(false);
             try {
                 const comp = await adminClient.components.findOne({ id: policy.id });
                 if (alive) {
@@ -1218,8 +1096,8 @@ function EditPolicy({ policy, providers, onClose, onSaved }: any) {
                     setName(comp?.name ?? policy.name ?? "");
                     setConfig(comp?.config ?? {});
                 }
-            } catch (e) {
-                if (alive) addError("Politika yüklenemedi", e as Error);
+            } catch {
+                if (alive) setLoadError(true);
             } finally {
                 if (alive) setLoading(false);
             }
@@ -1228,7 +1106,7 @@ function EditPolicy({ policy, providers, onClose, onSaved }: any) {
             alive = false;
         };
         // eslint-disable-next-line
-    }, [policy?.id, policy.name, adminClient.components.findOne, addError]);
+    }, [adminClient, policy?.id, policy?.name, attempt]);
 
     const submit = async () => {
         setBusy(true);
@@ -1237,10 +1115,10 @@ function EditPolicy({ policy, providers, onClose, onSaved }: any) {
                 { id: policy.id },
                 { ...(component || policy), name, config }
             );
-            addAlert("Politika kaydedildi.", AlertVariant.success);
+            addAlert(t("sxClientsPolicySaved"), AlertVariant.success);
             onSaved();
         } catch (e) {
-            addError("Kaydetme başarısız", e as Error);
+            addError(t("sxCommonSaveFailed"), e as Error);
         } finally {
             setBusy(false);
         }
@@ -1254,13 +1132,17 @@ function EditPolicy({ policy, providers, onClose, onSaved }: any) {
                 </ModalHeader>
                 <ModalBody>
                     {loading ? (
-                        <div className="flex justify-center py-16">
-                            <Spinner className="size-6" />
-                        </div>
+                        <ListSkeleton rows={2} />
+                    ) : loadError ? (
+                        <Notice
+                            title={t("sxClientsPolicyLoadOneError")}
+                            description={t("sxLoadErrorDescription")}
+                            onRetry={() => setAttempt(n => n + 1)}
+                        />
                     ) : (
                         <div className="space-y-4">
                             <Field>
-                                <FieldLabel>Ad</FieldLabel>
+                                <FieldLabel>{t("sxCommonName")}</FieldLabel>
                                 <Input
                                     value={name}
                                     onChange={(e: any) => setName(e.target.value)}
@@ -1278,10 +1160,10 @@ function EditPolicy({ policy, providers, onClose, onSaved }: any) {
                 </ModalBody>
                 <ModalFooter>
                     <Button
-                        disabled={busy || loading}
+                        disabled={busy || loading || loadError}
                         onClick={submit}
                     >
-                        Kaydet
+                        {t("sxCommonSave")}
                     </Button>
                 </ModalFooter>
             </ModalContent>
@@ -1296,6 +1178,7 @@ function CreateClient({
     onClose: () => void;
     onCreated: (id: string) => void;
 }) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [saving, setSaving] = useState(false);
@@ -1337,26 +1220,26 @@ function CreateClient({
     const stepMeta = oidc
         ? [
               {
-                  title: "Genel ayarlar",
-                  desc: "İstemcinin kimliğini ve temel bilgilerini tanımlayın."
+                  title: t("sxClientsStepGeneral"),
+                  desc: t("sxClientsStepGeneralDescription")
               },
               {
-                  title: "Yetenek yapılandırması",
-                  desc: "Kimlik doğrulama akışlarını ve yeteneklerini seçin."
+                  title: t("sxClientsStepCapability"),
+                  desc: t("sxClientsStepCapabilityDescription")
               },
               {
-                  title: "Giriş ayarları",
-                  desc: "Yönlendirme URL'lerini ve origin'leri yapılandırın."
+                  title: t("sxClientsStepLogin"),
+                  desc: t("sxClientsStepLoginDescription")
               }
           ]
         : [
               {
-                  title: "Genel ayarlar",
-                  desc: "İstemcinin kimliğini ve temel bilgilerini tanımlayın."
+                  title: t("sxClientsStepGeneral"),
+                  desc: t("sxClientsStepGeneralDescription")
               },
               {
-                  title: "Giriş ayarları",
-                  desc: "SAML uç noktalarını ve yönlendirmeleri yapılandırın."
+                  title: t("sxClientsStepLogin"),
+                  desc: t("sxClientsStepLoginSamlDescription")
               }
           ];
     const lastStep = stepMeta.length - 1;
@@ -1422,7 +1305,7 @@ function CreateClient({
         } catch (e) {
             setResult({
                 ok: false,
-                message: (e as Error)?.message || "Bilinmeyen bir hata oluştu."
+                message: (e as Error)?.message || t("sxCommonUnknownError")
             });
         } finally {
             setSaving(false);
@@ -1435,7 +1318,7 @@ function CreateClient({
         <Modal open onOpenChange={o => !o && onClose()}>
             <ModalContent>
                 <ModalHeader>
-                    <ModalTitle>İstemci oluştur</ModalTitle>
+                    <ModalTitle>{t("sxClientsCreate")}</ModalTitle>
                 </ModalHeader>
                 <ModalBody>
                     {result ? (
@@ -1453,11 +1336,11 @@ function CreateClient({
                             )}
                             <p className="text-base font-medium">
                                 {result.ok
-                                    ? `“${result.clientId}” oluşturuldu`
-                                    : "İstemci oluşturulamadı"}
+                                    ? t("sxClientsCreatedName", { name: result.clientId })
+                                    : t("sxClientsCreateError")}
                             </p>
                             <p className="text-sm text-muted-foreground">
-                                {result.ok ? "İstemci başarıyla oluşturuldu." : result.message}
+                                {result.ok ? t("sxClientsCreatedDescription") : result.message}
                             </p>
                         </div>
                     ) : (
@@ -1465,11 +1348,11 @@ function CreateClient({
                             <div className="space-y-2.5">
                                 <Progress
                                     value={((step + 1) / stepMeta.length) * 100}
-                                    aria-label={`Adım ${step + 1} / ${stepMeta.length}`}
+                                    aria-label={t("sxClientsStepOf", { step: step + 1, total: stepMeta.length })}
                                 />
                                 <div>
                                     <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                                        Adım {step + 1} / {stepMeta.length}
+                                        {t("sxClientsStepOf", { step: step + 1, total: stepMeta.length })}
                                     </p>
                                     <p className="text-base font-semibold tracking-tight">
                                         {stepMeta[step].title}
@@ -1483,7 +1366,7 @@ function CreateClient({
                             {step === 0 && (
                                 <div className="space-y-3">
                                     <Field>
-                                        <FieldLabel>İstemci türü</FieldLabel>
+                                        <FieldLabel>{t("sxClientsClientType")}</FieldLabel>
                                         <NativeSelect
                                             className="w-full"
                                             value={protocol}
@@ -1494,7 +1377,7 @@ function CreateClient({
                                         </NativeSelect>
                                     </Field>
                                     <Field>
-                                        <FieldLabel>İstemci ID <span className="text-destructive">*</span></FieldLabel>
+                                        <FieldLabel>{t("sxClientsClientId")} <span className="text-destructive">*</span></FieldLabel>
                                         <Input
                                             value={clientId}
                                             onChange={e => setClientId(e.target.value)}
@@ -1502,21 +1385,21 @@ function CreateClient({
                                         />
                                     </Field>
                                     <Field>
-                                        <FieldLabel>Ad</FieldLabel>
+                                        <FieldLabel>{t("sxCommonName")}</FieldLabel>
                                         <Input
                                             value={name}
                                             onChange={e => setName(e.target.value)}
                                         />
                                     </Field>
                                     <Field>
-                                        <FieldLabel>Açıklama</FieldLabel>
+                                        <FieldLabel>{t("sxCommonDescription")}</FieldLabel>
                                         <Textarea
                                             value={description}
                                             onChange={e => setDescription(e.target.value)}
                                         />
                                     </Field>
                                     <SwitchRow
-                                        label="Kullanıcı arayüzünde her zaman göster"
+                                        label={t("sxClientsAlwaysDisplay")}
                                         checked={alwaysDisplay}
                                         onChange={setAlwaysDisplay}
                                     />
@@ -1527,12 +1410,12 @@ function CreateClient({
                                 <div className="space-y-4">
                                     <FieldGroup variant="inset">
                                         <SwitchRow
-                                            label="İstemci kimlik doğrulama"
+                                            label={t("sxClientsClientAuth")}
                                             checked={clientAuth}
                                             onChange={onClientAuthChange}
                                         />
                                         <SwitchRow
-                                            label="Yetkilendirme"
+                                            label={t("sxClientsAuthorization")}
                                             checked={authz && clientAuth}
                                             disabled={!clientAuth}
                                             onChange={onAuthzChange}
@@ -1541,49 +1424,49 @@ function CreateClient({
 
                                     <FieldSet>
                                         <FieldLegend variant="label">
-                                            Kimlik doğrulama akışı
+                                            {t("sxClientsAuthFlow")}
                                         </FieldLegend>
                                         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                                             <CheckRow
-                                                label="Standart akış"
+                                                label={t("sxClientsStandardFlow")}
                                                 checked={standardFlow}
                                                 onChange={setStandardFlow}
                                             />
                                             <CheckRow
-                                                label="Doğrudan erişim izinleri"
+                                                label={t("sxClientsDirectAccess")}
                                                 checked={directAccess}
                                                 onChange={setDirectAccess}
                                             />
                                             <CheckRow
-                                                label="Implicit akış"
+                                                label={t("sxClientsImplicitFlow")}
                                                 checked={implicitFlow}
                                                 onChange={setImplicitFlow}
                                             />
                                             <CheckRow
-                                                label="Servis hesabı rolleri"
+                                                label={t("sxClientsServiceAccounts")}
                                                 checked={serviceAccounts}
                                                 disabled={!clientAuth || authz}
                                                 onChange={setServiceAccounts}
                                             />
                                             <CheckRow
-                                                label="Standart Token Değişimi"
+                                                label={t("sxClientsTokenExchange")}
                                                 checked={standardTokenExchange && clientAuth}
                                                 disabled={!clientAuth}
                                                 onChange={setStandardTokenExchange}
                                             />
                                             <CheckRow
-                                                label="JWT Authorization Grant"
+                                                label={t("sxClientsJwtGrant")}
                                                 checked={jwtGrant && clientAuth}
                                                 disabled={!clientAuth}
                                                 onChange={setJwtGrant}
                                             />
                                             <CheckRow
-                                                label="OAuth 2.0 Device Authorization Grant"
+                                                label={t("sxClientsDeviceGrant")}
                                                 checked={deviceGrant}
                                                 onChange={setDeviceGrant}
                                             />
                                             <CheckRow
-                                                label="OIDC CIBA Grant"
+                                                label={t("sxClientsCibaGrant")}
                                                 checked={cibaGrant}
                                                 disabled={!clientAuth}
                                                 onChange={setCibaGrant}
@@ -1593,12 +1476,12 @@ function CreateClient({
 
                                     <FieldGroup variant="inset">
                                         <SwitchRow
-                                            label="PKCE zorunlu"
+                                            label={t("sxClientsRequirePkce")}
                                             checked={requirePkce}
                                             onChange={setRequirePkce}
                                         />
                                         <SwitchRow
-                                            label="DPoP bağlı token zorunlu"
+                                            label={t("sxClientsRequireDpop")}
                                             checked={dpop}
                                             onChange={setDpop}
                                         />
@@ -1609,7 +1492,7 @@ function CreateClient({
                             {step === loginStep && (
                                 <div className="space-y-3">
                                     <Field>
-                                        <FieldLabel>Kök URL</FieldLabel>
+                                        <FieldLabel>{t("sxClientsRootUrl")}</FieldLabel>
                                         <Input
                                             value={rootUrl}
                                             onChange={e => setRootUrl(e.target.value)}
@@ -1617,68 +1500,68 @@ function CreateClient({
                                         />
                                     </Field>
                                     <Field>
-                                        <FieldLabel>Ana URL</FieldLabel>
+                                        <FieldLabel>{t("sxClientsHomeUrl")}</FieldLabel>
                                         <Input
                                             value={baseUrl}
                                             onChange={e => setBaseUrl(e.target.value)}
                                         />
                                     </Field>
                                     <Field>
-                                        <FieldLabel>Geçerli yönlendirme URI'leri</FieldLabel>
+                                        <FieldLabel>{t("sxClientsRedirectUris")}</FieldLabel>
                                         <MultiLineInput
                                             value={redirectUris}
                                             onChange={setRedirectUris}
-                                            addLabel="Yönlendirme URI ekle"
+                                            addLabel={t("sxClientsAddRedirectUri")}
                                             placeholder="https://app.example.com/*"
                                         />
-                                        <FieldDescription>Başarılı giriş sonrası izin verilen yönlendirme desenleri.</FieldDescription>
+                                        <FieldDescription>{t("sxClientsRedirectUrisHint")}</FieldDescription>
                                     </Field>
                                     <Field>
-                                        <FieldLabel>Geçerli post-logout yönlendirme URI'leri</FieldLabel>
+                                        <FieldLabel>{t("sxClientsPostLogoutUris")}</FieldLabel>
                                         <MultiLineInput
                                             value={postLogout}
                                             onChange={setPostLogout}
-                                            addLabel="Post-logout URI ekle"
+                                            addLabel={t("sxClientsAddPostLogoutUri")}
                                             placeholder="+"
                                         />
-                                        <FieldDescription>Çıkış sonrası izin verilen yönlendirme desenleri.</FieldDescription>
+                                        <FieldDescription>{t("sxClientsPostLogoutUrisHint")}</FieldDescription>
                                     </Field>
                                     {oidc && (
                                         <Field>
-                                            <FieldLabel>Web origins</FieldLabel>
+                                            <FieldLabel>{t("sxClientsWebOrigins")}</FieldLabel>
                                             <MultiLineInput
                                                 value={webOrigins}
                                                 onChange={setWebOrigins}
-                                                addLabel="Web origin ekle"
+                                                addLabel={t("sxClientsAddWebOrigin")}
                                                 placeholder="+"
                                             />
-                                            <FieldDescription>CORS için izin verilen origin'ler.</FieldDescription>
+                                            <FieldDescription>{t("sxClientsWebOriginsHint")}</FieldDescription>
                                         </Field>
                                     )}
                                     {!oidc && (
                                         <>
                                             <Field>
-                                                <FieldLabel>IDP-Initiated SSO URL adı</FieldLabel>
+                                                <FieldLabel>{t("sxClientsIdpSsoUrlName")}</FieldLabel>
                                                 <Input
                                                     value={idpSsoUrlName}
                                                     onChange={e =>
                                                         setIdpSsoUrlName(e.target.value)
                                                     }
                                                 />
-                                                <FieldDescription>IDP başlatımlı SSO için URL parçası.</FieldDescription>
+                                                <FieldDescription>{t("sxClientsIdpSsoUrlNameHint")}</FieldDescription>
                                             </Field>
                                             <Field>
-                                                <FieldLabel>IDP Initiated SSO Relay State</FieldLabel>
+                                                <FieldLabel>{t("sxClientsIdpSsoRelayState")}</FieldLabel>
                                                 <Input
                                                     value={idpSsoRelayState}
                                                     onChange={e =>
                                                         setIdpSsoRelayState(e.target.value)
                                                     }
                                                 />
-                                                <FieldDescription>IDP başlatımlı SSO sırasında gönderilecek relay state.</FieldDescription>
+                                                <FieldDescription>{t("sxClientsIdpSsoRelayStateHint")}</FieldDescription>
                                             </Field>
                                             <Field>
-                                                <FieldLabel>Master SAML Processing URL</FieldLabel>
+                                                <FieldLabel>{t("sxClientsMasterSamlUrl")}</FieldLabel>
                                                 <Input
                                                     value={masterSamlUrl}
                                                     onChange={e =>
@@ -1686,7 +1569,7 @@ function CreateClient({
                                                     }
                                                     placeholder="https://app.example.com/saml"
                                                 />
-                                                <FieldDescription>Tüm SAML istek ve yanıtları için kullanılacak URL.</FieldDescription>
+                                                <FieldDescription>{t("sxClientsMasterSamlUrlHint")}</FieldDescription>
                                             </Field>
                                         </>
                                     )}
@@ -1704,20 +1587,20 @@ function CreateClient({
                                     className="flex-1"
                                     onClick={onClose}
                                 >
-                                    Kapat
+                                    {t("sxCommonClose")}
                                 </Button>
                                 <Button
                                                                         className="flex-1"
                                     onClick={() => onCreated(result.id)}
                                 >
-                                    İstemciye git
+                                    {t("sxClientsGoToClient")}
                                 </Button>
                             </div>
                         ) : (
                             <Button
                                 onClick={() => setResult(null)}
                             >
-                                Geri dön
+                                {t("sxClientsGoBack")}
                             </Button>
                         )
                     ) : (
@@ -1728,7 +1611,7 @@ function CreateClient({
                                     className="flex-1"
                                     onClick={() => setStep(s => s - 1)}
                                 >
-                                    Geri
+                                    {t("sxCommonBack")}
                                 </Button>
                             )}
                             {step < lastStep ? (
@@ -1737,7 +1620,7 @@ function CreateClient({
                                     disabled={!canNext}
                                     onClick={() => setStep(s => s + 1)}
                                 >
-                                    İleri
+                                    {t("sxCommonNext")}
                                 </Button>
                             ) : (
                                 <Button
@@ -1745,7 +1628,7 @@ function CreateClient({
                                     disabled={saving}
                                     onClick={create}
                                 >
-                                    {saving ? "Oluşturuluyor…" : "Oluştur"}
+                                    {saving ? t("sxCommonCreating") : t("sxCommonCreate")}
                                 </Button>
                             )}
                         </div>
@@ -1759,9 +1642,12 @@ function CreateClient({
 function Monogram({ text, saml }: { text?: string; saml?: boolean }) {
     const ch = (text || "?").trim().charAt(0).toUpperCase() || "?";
     return (
-        <Avatar size="lg" data-protocol={saml ? "saml" : "oidc"}>
-            <AvatarFallback>{ch}</AvatarFallback>
-        </Avatar>
+        <span
+            data-protocol={saml ? "saml" : "oidc"}
+            className="grid size-8 place-items-center rounded-full bg-[#6e6e73] text-[13px] font-semibold text-white dark:bg-[#48484a]"
+        >
+            {ch}
+        </span>
     );
 }
 
@@ -1794,8 +1680,8 @@ function SwitchRow({ label, hint, checked, onChange, disabled }: any) {
     );
 }
 
-/** Confirm dialog — returns a [confirm(opts), node] pair (built on @ui/patterns/confirm). */
 function useConfirmDialog() {
+    const t = useT();
     const [open, setOpen] = useState(false);
     const [state, setState] = useState<any>(null);
     const confirm = (opts: {
@@ -1818,7 +1704,7 @@ function useConfirmDialog() {
                     )}
                 </ConfirmHeader>
                 <ConfirmFooter>
-                    <ConfirmCancel>Vazgeç</ConfirmCancel>
+                    <ConfirmCancel>{t("sxCommonCancel")}</ConfirmCancel>
                     <ConfirmAction
                         variant={state?.danger ? "destructive" : "default"}
                         onClick={() => {
@@ -1827,7 +1713,7 @@ function useConfirmDialog() {
                             fn?.();
                         }}
                     >
-                        {state?.confirmLabel ?? "Onayla"}
+                        {state?.confirmLabel ?? t("sxCommonConfirm")}
                     </ConfirmAction>
                 </ConfirmFooter>
             </ConfirmContent>

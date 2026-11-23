@@ -1,56 +1,10 @@
 // @ts-nocheck
-/**
- * Admin Permissions (V2) — realm-level fine-grained admin authorization.
- *
- * Detects availability (feature ADMIN_FINE_GRAINED_AUTHZ_V2 enabled AND
- * realm.adminPermissionsEnabled). When available, the special `admin-permissions`
- * client hosts the resource-server: we list permission configs, authorization
- * policies, and run policy evaluations against it.
- *
- * Sub-tabs (Segmented): İzinler · Politikalar · Değerlendirme.
- */
 
-import {
-    CaretDownIcon,
-    CaretRightIcon,
-    CheckCircleIcon,
-    GavelIcon,
-    MagnifyingGlassIcon,
-    PlusIcon,
-    ScalesIcon,
-    ShieldCheckIcon,
-    TrashIcon,
-    XCircleIcon
-} from "@phosphor-icons/react";
-import { Alert, AlertDescription, AlertTitle } from "@ui/components/alert";
-import { Badge } from "@ui/components/badge";
+import { CaretDownIcon, CaretRightIcon, CheckCircleIcon, PlusIcon, XCircleIcon } from "@phosphor-icons/react";
 import { Button } from "@ui/components/button";
 import { Checkbox } from "@ui/components/checkbox";
-import {
-    Empty,
-    EmptyContent,
-    EmptyDescription,
-    EmptyHeader,
-    EmptyMedia,
-    EmptyTitle
-} from "@ui/components/empty";
-import {
-    Field,
-    FieldDescription,
-    FieldGroup,
-    FieldLabel
-} from "@ui/components/field";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@ui/components/field";
 import { Input } from "@ui/components/input";
-import {
-    Item,
-    ItemActions,
-    ItemContent,
-    ItemDescription,
-    ItemGroup,
-    ItemMedia,
-    ItemSeparator,
-    ItemTitle
-} from "@ui/components/item";
 import {
     Select,
     SelectContent,
@@ -58,7 +12,6 @@ import {
     SelectTrigger,
     SelectValue
 } from "@ui/components/select";
-import { Spinner } from "@ui/components/spinner";
 import { Textarea } from "@ui/components/textarea";
 import {
     Confirm,
@@ -78,31 +31,37 @@ import {
     ModalHeader,
     ModalTitle
 } from "@ui/patterns/modal";
-import { SegmentPicker, SegmentPickerItem } from "@ui/patterns/segment-picker";
-import {
-    Fragment,
-    type ReactNode,
-    useCallback,
-    useEffect,
-    useMemo,
-    useState
-} from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { AlertVariant, useAlerts } from "../../shared/keycloak-ui-shared";
 import { useAdminClient } from "../admin-client";
+import {
+    AdminPage,
+    Chip,
+    Group,
+    ListSkeleton,
+    Notice,
+    Row,
+    Section,
+    SearchField,
+    SegmentTabs,
+    SEPARATOR,
+    TextAction
+} from "../ui/kit";
+import { useT } from "../ui/i18n";
 import { useRealm } from "../ui/realm";
 
 const ADMIN_PERMISSIONS_CLIENT_ID = "admin-permissions";
+const REQUIRED = <span className="text-[#d70015] dark:text-[#ff453a]"> *</span>;
 
-/* ────────────────────────────────────────────────────────────────────────── */
-/*  Root: availability detection + sub-tab shell                              */
-/* ────────────────────────────────────────────────────────────────────────── */
 export default function Permissions() {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
     const { addAlert, addError } = useAlerts();
     const [confirm, confirmNode] = useConfirm();
 
     const [loading, setLoading] = useState(true);
+    const [failed, setFailed] = useState(false);
     const [v2On, setV2On] = useState(false);
     const [realmEnabled, setRealmEnabled] = useState(false);
     const [client, setClient] = useState<any>(null);
@@ -110,14 +69,13 @@ export default function Permissions() {
 
     const detect = useCallback(async () => {
         setLoading(true);
+        setFailed(false);
         try {
             const [serverInfo, realmRep] = await Promise.all([
-                adminClient.serverInfo.find().catch(() => null),
-                adminClient.realms.findOne({ realm }).catch(() => null)
+                adminClient.serverInfo.find(),
+                adminClient.realms.findOne({ realm })
             ]);
-            const features = Array.isArray(serverInfo?.features)
-                ? serverInfo.features
-                : [];
+            const features = Array.isArray(serverInfo?.features) ? serverInfo.features : [];
             const v2 = features.some(
                 (f: any) => f?.name === "ADMIN_FINE_GRAINED_AUTHZ_V2" && f?.enabled
             );
@@ -126,213 +84,215 @@ export default function Permissions() {
             setRealmEnabled(rEnabled);
 
             if (v2 && rEnabled) {
-                const clients = await adminClient.clients
-                    .find({ clientId: ADMIN_PERMISSIONS_CLIENT_ID })
-                    .catch(() => []);
+                const clients = await adminClient.clients.find({
+                    clientId: ADMIN_PERMISSIONS_CLIENT_ID
+                });
                 setClient(Array.isArray(clients) ? (clients[0] ?? null) : null);
+            } else {
+                setClient(null);
             }
-        } catch (err) {
-            addError("Yönetici izinleri yüklenemedi.", err);
+        } catch {
+            setFailed(true);
         } finally {
             setLoading(false);
         }
-    }, [adminClient, realm, addError]);
+    }, [adminClient, realm]);
 
     useEffect(() => {
         detect();
     }, [detect]);
 
-    const header = (
-        <div className="mb-7 flex items-center gap-3">
-            <ShieldCheckIcon weight="fill" className="size-7 shrink-0 text-primary" />
-            <div className="min-w-0">
-                <h1 className="font-semibold text-xl tracking-tight">
-                    Yönetici İzinleri
-                </h1>
-                <p className="text-sm text-muted-foreground">
-                    Realm seviyesinde ince taneli yönetim yetkilendirmesi (V2).
-                </p>
-            </div>
-        </div>
-    );
+    const pageTitle = t("sxPermissionsPageTitle");
+    const pageDescription = t("sxPermissionsPageDescription");
 
     if (loading) {
         return (
-            <PageShell>
-                {header}
-                <Loading />
-            </PageShell>
+            <AdminPage title={pageTitle} description={pageDescription}>
+                <ListSkeleton />
+            </AdminPage>
         );
     }
 
-    // Not available → guide the admin to enable feature + realm setting.
-    if (!v2On || !realmEnabled || !client) {
+    if (failed) {
         return (
-            <PageShell>
-                {header}
-                <Empty>
-                    <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                            <ShieldCheckIcon />
-                        </EmptyMedia>
-                        <EmptyTitle>Admin Permissions (V2) kullanılamıyor</EmptyTitle>
-                        <EmptyDescription>
-                            {!v2On
-                            ? "Sunucuyu admin-fine-grained-authz:v2 özelliğiyle başlatın (--features=admin-fine-grained-authz:v2), ardından Realm Ayarları → Yönetici İzinleri'ni açın."
+            <AdminPage title={pageTitle} description={pageDescription}>
+                <Notice
+                    title={t("sxPermissionsLoadErrorTitle")}
+                    description={t("sxLoadErrorDescription")}
+                    onRetry={detect}
+                />
+            </AdminPage>
+        );
+    }
+
+    if (!v2On || !realmEnabled || !client) {
+        const statusLabel = (on: boolean) =>
+            on ? t("sxPermissionsStatusEnabled") : t("sxPermissionsStatusDisabled");
+        return (
+            <AdminPage title={pageTitle} description={pageDescription}>
+                <Notice
+                    title={t("sxPermissionsUnavailableTitle")}
+                    description={
+                        !v2On
+                            ? t("sxPermissionsUnavailableFeature")
                             : !realmEnabled
-                              ? "Realm Ayarları → Yönetici İzinleri'ni açın; izinler ancak o zaman bu realm için yönetilebilir."
-                              : "admin-permissions istemcisi bulunamadı. Realm Ayarları'ndan Yönetici İzinleri'ni açtığınızdan emin olun."}
-                        </EmptyDescription>
-                    </EmptyHeader>
-                </Empty>
+                              ? t("sxPermissionsUnavailableRealm")
+                              : t("sxPermissionsUnavailableClient")
+                    }
+                />
                 {(!v2On || !realmEnabled) && (
-                    <div className="mx-auto mt-4 max-w-xl">
-                        <ItemGroup variant="inset">
-                            <Item size="sm">
-                                <ItemContent>
-                                    <ItemTitle className="font-normal">
-                                        Özellik bayrağı
-                                    </ItemTitle>
-                                </ItemContent>
-                                <ItemActions>
-                                    <code className="font-mono text-sm text-muted-foreground">
+                    <Section label={t("sxPermissionsRequirements")}>
+                        <Group>
+                            <Row
+                                title={t("sxPermissionsFeatureFlag")}
+                                subtitle={
+                                    <code className="font-mono text-[13px]">
                                         admin-fine-grained-authz:v2
                                     </code>
-                                </ItemActions>
-                            </Item>
-                            <ItemSeparator />
-                            <Item size="sm">
-                                <ItemContent>
-                                    <ItemTitle className="font-normal">Realm Ayarı</ItemTitle>
-                                </ItemContent>
-                                <ItemActions>
-                                    <span className="text-sm text-muted-foreground">
-                                        Realm Settings → Admin Permissions
-                                    </span>
-                                </ItemActions>
-                            </Item>
-                        </ItemGroup>
-                        <p className="mt-2 ms-1 text-sm text-muted-foreground">
-                            Her ikisi de etkin olduğunda izinler, politikalar ve
-                            değerlendirme sekmeleri görünür.
-                        </p>
-                    </div>
+                                }
+                                trailing={
+                                    <Chip tone={v2On ? "success" : "warning"}>
+                                        {statusLabel(v2On)}
+                                    </Chip>
+                                }
+                            />
+                            <Row
+                                title={t("sxPermissionsRealmSetting")}
+                                subtitle={t("sxPermissionsRealmSettingPath")}
+                                trailing={
+                                    <Chip tone={realmEnabled ? "success" : "warning"}>
+                                        {statusLabel(realmEnabled)}
+                                    </Chip>
+                                }
+                            />
+                        </Group>
+                        <Footnote>{t("sxPermissionsRequirementsFootnote")}</Footnote>
+                    </Section>
                 )}
-            </PageShell>
+            </AdminPage>
         );
     }
 
-    const clientPk = client.id; // resource-server id (the client's UUID)
+    const clientPk = client.id;
 
     return (
-        <>
-            <PageShell>
-                {header}
-                <div className="mb-6 flex justify-center">
-                    <SegmentPicker value={tab} onValueChange={setTab}>
-                        <SegmentPickerItem value="permissions" label="İzinler" />
-                        <SegmentPickerItem value="policies" label="Politikalar" />
-                        <SegmentPickerItem value="evaluate" label="Değerlendirme" />
-                    </SegmentPicker>
-                </div>
+        <AdminPage title={pageTitle} description={pageDescription}>
+            <SegmentTabs
+                value={tab}
+                onChange={setTab}
+                ariaLabel={pageTitle}
+                items={[
+                    { value: "permissions", label: t("sxPermissionsTabPermissions") },
+                    { value: "policies", label: t("sxPermissionsTabPolicies") },
+                    { value: "evaluate", label: t("sxPermissionsTabEvaluate") }
+                ]}
+            />
 
-                {tab === "permissions" && (
-                    <PermissionsTab
-                        clientPk={clientPk}
-                        adminClient={adminClient}
-                        realm={realm}
-                        addAlert={addAlert}
-                        addError={addError}
-                        confirm={confirm}
-                    />
-                )}
-                {tab === "policies" && (
-                    <PoliciesTab
-                        clientPk={clientPk}
-                        adminClient={adminClient}
-                        realm={realm}
-                        addAlert={addAlert}
-                        addError={addError}
-                        confirm={confirm}
-                    />
-                )}
-                {tab === "evaluate" && (
-                    <EvaluateTab
-                        clientPk={clientPk}
-                        adminClient={adminClient}
-                        realm={realm}
-                        addError={addError}
-                    />
-                )}
-            </PageShell>
+            {tab === "permissions" && (
+                <PermissionsTab
+                    clientPk={clientPk}
+                    adminClient={adminClient}
+                    realm={realm}
+                    addAlert={addAlert}
+                    addError={addError}
+                    confirm={confirm}
+                />
+            )}
+            {tab === "policies" && (
+                <PoliciesTab
+                    clientPk={clientPk}
+                    adminClient={adminClient}
+                    realm={realm}
+                    addAlert={addAlert}
+                    addError={addError}
+                    confirm={confirm}
+                />
+            )}
+            {tab === "evaluate" && (
+                <EvaluateTab
+                    clientPk={clientPk}
+                    adminClient={adminClient}
+                    realm={realm}
+                    addError={addError}
+                />
+            )}
             {confirmNode}
-        </>
+        </AdminPage>
     );
 }
 
-/** Page layout wrapper (centered content column). */
-function PageShell({ children }: { children?: ReactNode }) {
+function Footnote({ children }: { children?: ReactNode }) {
+    return <p className="mt-2 px-4 text-[13px] leading-[1.4] text-muted-foreground">{children}</p>;
+}
+
+function Caption({ children }: { children?: ReactNode }) {
+    return <h3 className="mb-2 px-0.5 text-sm font-medium text-muted-foreground">{children}</h3>;
+}
+
+function CreateButton({ onClick, children }: any) {
     return (
-        <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
+        <Button size="sm" className="h-8.5 px-4 font-medium" onClick={onClick}>
+            <PlusIcon />
             {children}
-        </div>
+        </Button>
     );
 }
 
-/** Centered loading indicator. */
-function Loading() {
-    return (
-        <div className="flex justify-center py-16">
-            <Spinner className="size-6" />
-        </div>
-    );
-}
-
-/** Caption above an inset group. */
-function GroupCaption({ children }: { children?: ReactNode }) {
-    return (
-        <h3 className="mb-2 ms-1 text-sm font-medium text-muted-foreground">{children}</h3>
-    );
-}
-
-/* ────────────────────────────────────────────────────────────────────────── */
-/*  Shared: resource-type schema (from the admin-permissions resource server) */
-/* ────────────────────────────────────────────────────────────────────────── */
 function useResourceTypes(adminClient: any, clientPk: string) {
     const [types, setTypes] = useState<any[] | null>(null);
+    const [failed, setFailed] = useState(false);
+    const [attempt, setAttempt] = useState(0);
     useEffect(() => {
         let alive = true;
+        setTypes(null);
+        setFailed(false);
         adminClient.clients
             .getResourceServer({ id: clientPk })
             .then((rs: any) => {
-                // Keycloak returns resourceTypes as an object map keyed by type
-                // name (the typings say array — handle both shapes defensively).
                 const raw = rs?.authorizationSchema?.resourceTypes;
                 const list = (Array.isArray(raw) ? raw : Object.values(raw || {})).sort(
                     (a: any, b: any) => (a?.type || "").localeCompare(b?.type || "")
                 );
                 if (alive) setTypes(list);
             })
-            .catch(() => alive && setTypes([]));
+            .catch(() => {
+                if (alive) setFailed(true);
+            });
         return () => {
             alive = false;
         };
-    }, [adminClient, clientPk]);
-    return types;
+    }, [adminClient, clientPk, attempt]);
+    const reload = useCallback(() => setAttempt(a => a + 1), []);
+    return { types, failed, loading: !failed && types === null, reload };
 }
 
-/* ────────────────────────────────────────────────────────────────────────── */
-/*  1. İzinler — permission configs (resource type · scopes · policies)        */
-/* ────────────────────────────────────────────────────────────────────────── */
-function PermissionsTab({
-    clientPk,
-    adminClient,
-    realm,
-    addAlert,
-    addError,
-    confirm
-}: any) {
+function ResourceTypesState({ state }: any) {
+    const t = useT();
+    if (state.loading) return <ListSkeleton rows={1} />;
+    if (state.failed) {
+        return (
+            <Notice
+                title={t("sxPermissionsResourceTypesLoadError")}
+                description={t("sxLoadErrorDescription")}
+                onRetry={state.reload}
+            />
+        );
+    }
+    if ((state.types || []).length === 0) {
+        return (
+            <Notice
+                title={t("sxPermissionsNoResourceTypesTitle")}
+                description={t("sxPermissionsNoResourceTypesDescription")}
+            />
+        );
+    }
+    return null;
+}
+
+function PermissionsTab({ clientPk, adminClient, realm, addAlert, addError, confirm }: any) {
+    const t = useT();
     const [loading, setLoading] = useState(true);
+    const [failed, setFailed] = useState(false);
     const [items, setItems] = useState<any[]>([]);
     const [expanded, setExpanded] = useState<Record<string, boolean>>({});
     const [createOpen, setCreateOpen] = useState(false);
@@ -340,32 +300,41 @@ function PermissionsTab({
 
     const load = useCallback(async () => {
         setLoading(true);
+        setFailed(false);
         try {
             const perms = await adminClient.clients.listPermissionScope({ id: clientPk });
             const list = Array.isArray(perms) ? perms : [];
             const enriched = await Promise.all(
                 list.map(async (p: any) => {
                     const [policies, scopes, resources] = await Promise.all([
-                        adminClient.clients
-                            .getAssociatedPolicies({ id: clientPk, permissionId: p.id })
-                            .catch(() => []),
-                        adminClient.clients
-                            .getAssociatedScopes({ id: clientPk, permissionId: p.id })
-                            .catch(() => []),
-                        adminClient.clients
-                            .getAssociatedResources({ id: clientPk, permissionId: p.id })
-                            .catch(() => [])
+                        adminClient.clients.getAssociatedPolicies({
+                            id: clientPk,
+                            permissionId: p.id
+                        }),
+                        adminClient.clients.getAssociatedScopes({
+                            id: clientPk,
+                            permissionId: p.id
+                        }),
+                        adminClient.clients.getAssociatedResources({
+                            id: clientPk,
+                            permissionId: p.id
+                        })
                     ]);
-                    return { ...p, policies, scopes, resources };
+                    return {
+                        ...p,
+                        policies: Array.isArray(policies) ? policies : [],
+                        scopes: Array.isArray(scopes) ? scopes : [],
+                        resources: Array.isArray(resources) ? resources : []
+                    };
                 })
             );
             setItems(enriched);
-        } catch (err) {
-            addError("İzinler yüklenemedi.", err);
+        } catch {
+            setFailed(true);
         } finally {
             setLoading(false);
         }
-    }, [adminClient, clientPk, addError]);
+    }, [adminClient, clientPk]);
 
     useEffect(() => {
         load();
@@ -373,9 +342,9 @@ function PermissionsTab({
 
     const remove = (p: any) =>
         confirm({
-            title: "İzni sil",
-            message: `“${p.name}” izni kalıcı olarak silinecek. Emin misiniz?`,
-            confirmLabel: "Sil",
+            title: t("sxPermissionsDeletePermissionTitle"),
+            message: t("sxPermissionsDeletePermissionMessage", { name: p.name }),
+            confirmLabel: t("sxPermissionsDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
@@ -384,159 +353,128 @@ function PermissionsTab({
                         type: p.type,
                         permissionId: p.id
                     });
-                    addAlert("İzin silindi.", AlertVariant.success);
+                    addAlert(t("sxPermissionsPermissionDeleted"), AlertVariant.success);
                     await load();
                 } catch (err) {
-                    addError("İzin silinemedi.", err);
+                    addError(t("sxPermissionsPermissionDeleteFailed"), err);
                 }
             }
         });
 
-    if (loading) return <Loading />;
-
-    if (items.length === 0) {
-        return (
-            <>
-                <Empty>
-                    <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                            <ShieldCheckIcon />
-                        </EmptyMedia>
-                        <EmptyTitle>Henüz izin yok</EmptyTitle>
-                        <EmptyDescription>
-                            Bir kaynak türü seçip kapsam bazlı yönetici izinleri
-                            tanımlayın.
-                        </EmptyDescription>
-                    </EmptyHeader>
-                    <EmptyContent>
-                        <Button onClick={() => setCreateOpen(true)}>İzin oluştur</Button>
-                    </EmptyContent>
-                </Empty>
-                {createOpen && (
-                    <PermissionModal
-                        clientPk={clientPk}
-                        adminClient={adminClient}
-                        resourceTypes={resourceTypes}
-                        addAlert={addAlert}
-                        addError={addError}
-                        onClose={() => setCreateOpen(false)}
-                        onSaved={async () => {
-                            setCreateOpen(false);
-                            await load();
-                        }}
-                    />
-                )}
-            </>
-        );
-    }
+    const ready = !loading && !failed;
 
     return (
-        <div className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
-                <div>
-                    <p className="font-semibold tracking-tight">İzinler</p>
-                    <p className="text-sm text-muted-foreground">
-                        Kaynak türü, kapsamlar ve atanan politikalar.
-                    </p>
-                </div>
-                <Button onClick={() => setCreateOpen(true)}>
-                    <PlusIcon /> İzin oluştur
-                </Button>
-            </div>
-
-            <ItemGroup variant="inset">
-                {items.map((p, i) => {
-                    const open = !!expanded[p.id];
-                    return (
-                        <Fragment key={p.id}>
-                            {i > 0 && <ItemSeparator />}
-                            <div className="flex items-center gap-2 pe-3">
-                                <Item size="sm" asChild className="min-w-0 flex-1">
-                                    <button
-                                        type="button"
-                                        aria-expanded={open}
-                                        onClick={() =>
-                                            setExpanded(e => ({ ...e, [p.id]: !e[p.id] }))
-                                        }
-                                    >
-                                        {open ? (
-                                            <CaretDownIcon
-                                                className="size-4 shrink-0 text-muted-foreground"
+        <Section
+            label={t("sxPermissionsTabPermissions")}
+            action={
+                ready &&
+                items.length > 0 && (
+                    <CreateButton onClick={() => setCreateOpen(true)}>
+                        {t("sxPermissionsCreatePermission")}
+                    </CreateButton>
+                )
+            }
+        >
+            {loading && <ListSkeleton />}
+            {!loading && failed && (
+                <Notice
+                    title={t("sxPermissionsPermissionsLoadError")}
+                    description={t("sxLoadErrorDescription")}
+                    onRetry={load}
+                />
+            )}
+            {ready && items.length === 0 && (
+                <Notice
+                    title={t("sxPermissionsNoPermissionsTitle")}
+                    description={t("sxPermissionsNoPermissionsDescription")}
+                    action={
+                        <Button onClick={() => setCreateOpen(true)}>
+                            {t("sxPermissionsCreatePermission")}
+                        </Button>
+                    }
+                />
+            )}
+            {ready && items.length > 0 && (
+                <>
+                    <Group>
+                        {items.map(p => {
+                            const open = !!expanded[p.id];
+                            const Caret = open ? CaretDownIcon : CaretRightIcon;
+                            return (
+                                <li key={p.id}>
+                                    <div className="flex items-center gap-3 pe-4 transition-colors hover:bg-black/3 dark:hover:bg-white/4">
+                                        <button
+                                            type="button"
+                                            aria-expanded={open}
+                                            onClick={() =>
+                                                setExpanded(e => ({ ...e, [p.id]: !e[p.id] }))
+                                            }
+                                            className="flex min-h-16 min-w-0 flex-1 items-center gap-3 py-3 ps-4 text-left outline-none focus-visible:bg-black/5 dark:focus-visible:bg-white/6"
+                                        >
+                                            <Caret
                                                 weight="bold"
+                                                className={`size-3.5 shrink-0 text-muted-foreground ${open ? "" : "rtl:rotate-180"}`}
                                             />
-                                        ) : (
-                                            <CaretRightIcon
-                                                className="size-4 shrink-0 text-muted-foreground rtl:rotate-180"
-                                                weight="bold"
-                                            />
-                                        )}
-                                        <ItemContent className="min-w-0 text-start">
-                                            <ItemTitle className="truncate font-medium text-sm">
-                                                {p.name}
-                                            </ItemTitle>
-                                            <ItemDescription className="truncate">
-                                                {p.resourceType || "—"}
-                                                {p.scopes?.length
-                                                    ? ` · ${p.scopes.map((s: any) => s.name).join(", ")}`
-                                                    : ""}
-                                            </ItemDescription>
-                                        </ItemContent>
-                                    </button>
-                                </Item>
-                                <Button
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    title="Sil"
-                                    aria-label="Sil"
-                                    onClick={() => remove(p)}
-                                >
-                                    <TrashIcon />
-                                </Button>
-                            </div>
-                            {open && (
-                                <>
-                                    <ItemSeparator />
-                                    <Item size="sm">
-                                        <ItemContent className="ps-7 text-sm">
-                                            {p.description && (
-                                                <p className="mb-2 text-muted-foreground">
-                                                    {p.description}
-                                                </p>
-                                            )}
-                                            <DetailLine
-                                                label="Kaynaklar"
-                                                value={
-                                                    p.resources?.length
-                                                        ? p.resources
-                                                              .map((r: any) => r.name)
-                                                              .join(", ")
-                                                        : "Tüm kaynaklar"
-                                                }
-                                            />
-                                            <DetailLine
-                                                label="Kapsamlar"
-                                                value={
-                                                    p.scopes
-                                                        ?.map((s: any) => s.name)
-                                                        .join(", ") || "—"
-                                                }
-                                            />
-                                            <DetailLine
-                                                label="Politikalar"
-                                                value={
-                                                    p.policies
-                                                        ?.map((pol: any) => pol.name)
-                                                        .join(", ") || "—"
-                                                }
-                                            />
-                                        </ItemContent>
-                                    </Item>
-                                </>
-                            )}
-                        </Fragment>
-                    );
-                })}
-            </ItemGroup>
+                                            <span className="min-w-0">
+                                                <span className="block truncate text-base font-medium">
+                                                    {p.name}
+                                                </span>
+                                                <span className="mt-0.5 block text-[13px] text-muted-foreground [overflow-wrap:anywhere]">
+                                                    {p.resourceType || "—"}
+                                                    {p.scopes?.length
+                                                        ? ` · ${p.scopes.map((s: any) => s.name).join(", ")}`
+                                                        : ""}
+                                                </span>
+                                            </span>
+                                        </button>
+                                        <TextAction tone="danger" onClick={() => remove(p)}>
+                                            {t("sxPermissionsDelete")}
+                                        </TextAction>
+                                    </div>
+                                    {open && (
+                                        <>
+                                            <div aria-hidden className={SEPARATOR} />
+                                            <div className="px-4 py-3 ps-10.5 text-sm">
+                                                {p.description && (
+                                                    <p className="mb-2 text-muted-foreground">
+                                                        {p.description}
+                                                    </p>
+                                                )}
+                                                <DetailLine
+                                                    label={t("sxPermissionsResources")}
+                                                    value={
+                                                        p.resources?.length
+                                                            ? p.resources
+                                                                  .map((r: any) => r.name)
+                                                                  .join(", ")
+                                                            : t("sxPermissionsAllResources")
+                                                    }
+                                                />
+                                                <DetailLine
+                                                    label={t("sxPermissionsScopes")}
+                                                    value={
+                                                        p.scopes?.map((s: any) => s.name).join(", ") ||
+                                                        "—"
+                                                    }
+                                                />
+                                                <DetailLine
+                                                    label={t("sxPermissionsTabPolicies")}
+                                                    value={
+                                                        p.policies
+                                                            ?.map((pol: any) => pol.name)
+                                                            .join(", ") || "—"
+                                                    }
+                                                />
+                                            </div>
+                                        </>
+                                    )}
+                                </li>
+                            );
+                        })}
+                    </Group>
+                    <Footnote>{t("sxPermissionsPermissionsFootnote")}</Footnote>
+                </>
+            )}
 
             {createOpen && (
                 <PermissionModal
@@ -552,7 +490,7 @@ function PermissionsTab({
                     }}
                 />
             )}
-        </div>
+        </Section>
     );
 }
 
@@ -560,12 +498,11 @@ function DetailLine({ label, value }: any) {
     return (
         <p className="flex gap-2 py-0.5">
             <span className="w-24 shrink-0 text-muted-foreground">{label}</span>
-            <span className="min-w-0 flex-1">{value}</span>
+            <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{value}</span>
         </p>
     );
 }
 
-/* Create / edit a permission config. */
 function PermissionModal({
     clientPk,
     adminClient,
@@ -575,44 +512,56 @@ function PermissionModal({
     onClose,
     onSaved
 }: any) {
+    const t = useT();
     const [name, setName] = useState("");
     const [description, setDescription] = useState("");
     const [resourceType, setResourceType] = useState("");
     const [selectedScopes, setSelectedScopes] = useState<string[]>([]);
     const [selectedPolicies, setSelectedPolicies] = useState<string[]>([]);
-    const [policies, setPolicies] = useState<any[]>([]);
+    const [policies, setPolicies] = useState<any[] | null>(null);
+    const [policiesFailed, setPoliciesFailed] = useState(false);
+    const [policiesAttempt, setPoliciesAttempt] = useState(0);
     const [saving, setSaving] = useState(false);
 
-    const types = resourceTypes || [];
+    const types = resourceTypes.types || [];
     const current = useMemo(
-        () => types.find((t: any) => t.type === resourceType),
+        () => types.find((rt: any) => rt.type === resourceType),
         [types, resourceType]
     );
     const scopeOptions = current?.scopes || [];
+    const firstType = types[0]?.type || "";
 
-    // Default to the first resource type once schema loads.
     useEffect(() => {
-        if (!resourceType && types.length) setResourceType(types[0].type);
-    }, [types, resourceType]);
+        if (!resourceType && firstType) setResourceType(firstType);
+    }, [firstType, resourceType]);
 
-    // Authorization policies available to assign.
     useEffect(() => {
+        let alive = true;
+        setPolicies(null);
+        setPoliciesFailed(false);
         adminClient.clients
             .listPolicies({ id: clientPk, permission: false })
-            .then((res: any) => setPolicies(Array.isArray(res) ? res : []))
-            .catch(() => setPolicies([]));
-    }, [adminClient, clientPk]);
+            .then((res: any) => {
+                if (alive) setPolicies(Array.isArray(res) ? res : []);
+            })
+            .catch(() => {
+                if (alive) setPoliciesFailed(true);
+            });
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, clientPk, policiesAttempt]);
 
-    const toggle = (arr: string[], setArr: any, v: string) =>
-        setArr(arr.includes(v) ? arr.filter(x => x !== v) : [...arr, v]);
+    const toggle = (list: string[], setList: any, v: string) =>
+        setList(list.includes(v) ? list.filter(x => x !== v) : [...list, v]);
 
     const save = async () => {
         if (!name.trim()) {
-            addError("İzin adı gerekli.", new Error("name"));
+            addError(t("sxPermissionsPermissionNameRequired"), new Error("name"));
             return;
         }
         if (!resourceType) {
-            addError("Kaynak türü seçin.", new Error("resourceType"));
+            addError(t("sxPermissionsResourceTypeRequired"), new Error("resourceType"));
             return;
         }
         setSaving(true);
@@ -627,115 +576,125 @@ function PermissionModal({
                     policies: selectedPolicies
                 }
             );
-            addAlert("İzin oluşturuldu.", AlertVariant.success);
+            addAlert(t("sxPermissionsPermissionCreated"), AlertVariant.success);
             await onSaved();
         } catch (err) {
-            addError("İzin oluşturulamadı.", err);
+            addError(t("sxPermissionsPermissionCreateFailed"), err);
         } finally {
             setSaving(false);
         }
     };
 
+    const typesReady = !resourceTypes.loading && !resourceTypes.failed && types.length > 0;
+
     return (
         <Modal open onOpenChange={o => !o && onClose()}>
             <ModalContent className="sm:max-w-2xl">
                 <ModalHeader>
-                    <ModalTitle>İzin oluştur</ModalTitle>
+                    <ModalTitle>{t("sxPermissionsCreatePermission")}</ModalTitle>
                 </ModalHeader>
                 <ModalBody>
-            <FieldGroup>
-                <Field>
-                    <FieldLabel>
-                        Ad<span className="text-destructive"> *</span>
-                    </FieldLabel>
-                    <Input
-                        value={name}
-                        onChange={e => setName(e.target.value)}
-                        placeholder="manage-users"
-                    />
-                </Field>
-                <Field>
-                    <FieldLabel>Açıklama</FieldLabel>
-                    <Textarea
-                        value={description}
-                        onChange={e => setDescription(e.target.value)}
-                        rows={2}
-                        resizable="inside"
-                    />
-                </Field>
-                <Field>
-                    <FieldLabel>
-                        Kaynak türü<span className="text-destructive"> *</span>
-                    </FieldLabel>
-                    <Select value={resourceType} onValueChange={setResourceType}>
-                        <SelectTrigger className="w-full" aria-label="Kaynak türü">
-                            <SelectValue placeholder="Tür seçin…" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {types.map((t: any) => (
-                                <SelectItem key={t.type} value={t.type}>
-                                    {t.type}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                </Field>
+                    <FieldGroup>
+                        <Field>
+                            <FieldLabel>
+                                {t("sxPermissionsName")}
+                                {REQUIRED}
+                            </FieldLabel>
+                            <Input
+                                value={name}
+                                onChange={e => setName(e.target.value)}
+                                placeholder="manage-users"
+                            />
+                        </Field>
+                        <Field>
+                            <FieldLabel>{t("sxPermissionsDescription")}</FieldLabel>
+                            <Textarea
+                                value={description}
+                                onChange={e => setDescription(e.target.value)}
+                                rows={2}
+                                resizable="inside"
+                            />
+                        </Field>
+                        <Field>
+                            <FieldLabel>
+                                {t("sxPermissionsResourceType")}
+                                {REQUIRED}
+                            </FieldLabel>
+                            {typesReady ? (
+                                <Select value={resourceType} onValueChange={setResourceType}>
+                                    <SelectTrigger
+                                        className="w-full"
+                                        aria-label={t("sxPermissionsResourceType")}
+                                    >
+                                        <SelectValue placeholder={t("sxPermissionsSelectType")} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {types.map((rt: any) => (
+                                            <SelectItem key={rt.type} value={rt.type}>
+                                                {rt.type}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            ) : (
+                                <ResourceTypesState state={resourceTypes} />
+                            )}
+                        </Field>
 
-                {scopeOptions.length > 0 && (
-                    <div>
-                        <GroupCaption>Yetkilendirme kapsamları</GroupCaption>
-                        <ItemGroup variant="inset">
-                            {scopeOptions.map((s: string, i: number) => (
-                                <CheckRow
-                                    key={s}
-                                    first={i === 0}
-                                    label={s}
-                                    checked={selectedScopes.includes(s)}
-                                    onToggle={() =>
-                                        toggle(selectedScopes, setSelectedScopes, s)
-                                    }
-                                />
-                            ))}
-                        </ItemGroup>
-                    </div>
-                )}
-
-                <div>
-                    <GroupCaption>Politikalar</GroupCaption>
-                    <ItemGroup variant="inset">
-                        {policies.length === 0 ? (
-                            <Item size="sm">
-                                <ItemContent>
-                                    <ItemDescription className="text-center">
-                                        Atanabilir politika yok.
-                                    </ItemDescription>
-                                </ItemContent>
-                            </Item>
-                        ) : (
-                            policies.map((pol: any, i: number) => (
-                                <CheckRow
-                                    key={pol.id}
-                                    first={i === 0}
-                                    label={pol.name}
-                                    hint={pol.type}
-                                    checked={selectedPolicies.includes(pol.id)}
-                                    onToggle={() =>
-                                        toggle(
-                                            selectedPolicies,
-                                            setSelectedPolicies,
-                                            pol.id
-                                        )
-                                    }
-                                />
-                            ))
+                        {scopeOptions.length > 0 && (
+                            <div>
+                                <Caption>{t("sxPermissionsAuthorizationScopes")}</Caption>
+                                <Group>
+                                    {scopeOptions.map((s: string) => (
+                                        <CheckRow
+                                            key={s}
+                                            label={s}
+                                            checked={selectedScopes.includes(s)}
+                                            onToggle={() =>
+                                                toggle(selectedScopes, setSelectedScopes, s)
+                                            }
+                                        />
+                                    ))}
+                                </Group>
+                            </div>
                         )}
-                    </ItemGroup>
-                </div>
-            </FieldGroup>
+
+                        <div>
+                            <Caption>{t("sxPermissionsTabPolicies")}</Caption>
+                            {policiesFailed ? (
+                                <Notice
+                                    title={t("sxPermissionsPoliciesLoadError")}
+                                    description={t("sxLoadErrorDescription")}
+                                    onRetry={() => setPoliciesAttempt(a => a + 1)}
+                                />
+                            ) : policies === null ? (
+                                <ListSkeleton rows={2} />
+                            ) : policies.length === 0 ? (
+                                <Notice
+                                    title={t("sxPermissionsNoAssignablePoliciesTitle")}
+                                    description={t("sxPermissionsNoAssignablePoliciesDescription")}
+                                />
+                            ) : (
+                                <Group>
+                                    {policies.map((pol: any) => (
+                                        <CheckRow
+                                            key={pol.id}
+                                            label={pol.name}
+                                            hint={pol.type}
+                                            checked={selectedPolicies.includes(pol.id)}
+                                            onToggle={() =>
+                                                toggle(selectedPolicies, setSelectedPolicies, pol.id)
+                                            }
+                                        />
+                                    ))}
+                                </Group>
+                            )}
+                        </div>
+                    </FieldGroup>
                 </ModalBody>
                 <ModalFooter>
                     <Button disabled={saving} onClick={save}>
-                        {saving ? "Kaydediliyor…" : "Oluştur"}
+                        {saving ? t("sxPermissionsSaving") : t("sxPermissionsCreate")}
                     </Button>
                 </ModalFooter>
             </ModalContent>
@@ -743,58 +702,52 @@ function PermissionModal({
     );
 }
 
-function CheckRow({ label, hint, checked, onToggle, first }: any) {
+function CheckRow({ label, hint, checked, onToggle }: any) {
     return (
-        <>
-            {!first && <ItemSeparator />}
-            <Item size="sm" asChild>
-                <label>
-                    <Checkbox checked={!!checked} onCheckedChange={() => onToggle()} />
-                    <ItemContent className="min-w-0">
-                        <ItemTitle className="truncate font-normal text-sm">
-                            {label}
-                        </ItemTitle>
-                        {hint && (
-                            <ItemDescription className="truncate">{hint}</ItemDescription>
-                        )}
-                    </ItemContent>
-                </label>
-            </Item>
-        </>
+        <li>
+            <label className="flex min-h-13 cursor-pointer items-center gap-3 px-4 py-2.5 transition-colors hover:bg-black/3 dark:hover:bg-white/4">
+                <Checkbox checked={!!checked} onCheckedChange={() => onToggle()} />
+                <span className="min-w-0">
+                    <span className="block truncate text-base">{label}</span>
+                    {hint && (
+                        <span className="block truncate text-[13px] text-muted-foreground">
+                            {hint}
+                        </span>
+                    )}
+                </span>
+            </label>
+        </li>
     );
 }
 
-/* ────────────────────────────────────────────────────────────────────────── */
-/*  2. Politikalar — authorization policies                                    */
-/* ────────────────────────────────────────────────────────────────────────── */
 function PoliciesTab({ clientPk, adminClient, realm, addAlert, addError, confirm }: any) {
+    const t = useT();
     const [loading, setLoading] = useState(true);
+    const [failed, setFailed] = useState(false);
     const [items, setItems] = useState<any[]>([]);
     const [providers, setProviders] = useState<any[]>([]);
     const [createOpen, setCreateOpen] = useState(false);
 
     const load = useCallback(async () => {
         setLoading(true);
+        setFailed(false);
         try {
             const [pols, provs] = await Promise.all([
-                adminClient.clients
-                    .listPolicies({ id: clientPk, permission: false })
-                    .catch(() => []),
-                adminClient.clients.listPolicyProviders({ id: clientPk }).catch(() => [])
+                adminClient.clients.listPolicies({ id: clientPk, permission: false }),
+                adminClient.clients.listPolicyProviders({ id: clientPk })
             ]);
             setItems(Array.isArray(pols) ? pols : []);
-            // Exclude resource/scope/uma — these are permission types, not policies.
             setProviders(
                 (Array.isArray(provs) ? provs : []).filter(
                     (p: any) => !["resource", "scope", "uma"].includes(p.type)
                 )
             );
-        } catch (err) {
-            addError("Politikalar yüklenemedi.", err);
+        } catch {
+            setFailed(true);
         } finally {
             setLoading(false);
         }
-    }, [adminClient, clientPk, addError]);
+    }, [adminClient, clientPk]);
 
     useEffect(() => {
         load();
@@ -802,9 +755,9 @@ function PoliciesTab({ clientPk, adminClient, realm, addAlert, addError, confirm
 
     const remove = (pol: any) =>
         confirm({
-            title: "Politikayı sil",
-            message: `“${pol.name}” politikası silinecek. Emin misiniz?`,
-            confirmLabel: "Sil",
+            title: t("sxPermissionsDeletePolicyTitle"),
+            message: t("sxPermissionsDeletePolicyMessage", { name: pol.name }),
+            confirmLabel: t("sxPermissionsDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
@@ -812,131 +765,105 @@ function PoliciesTab({ clientPk, adminClient, realm, addAlert, addError, confirm
                         id: clientPk,
                         policyId: pol.id
                     });
-                    addAlert("Politika silindi.", AlertVariant.success);
+                    addAlert(t("sxPermissionsPolicyDeleted"), AlertVariant.success);
                     await load();
                 } catch (err) {
-                    addError("Politika silinemedi.", err);
+                    addError(t("sxPermissionsPolicyDeleteFailed"), err);
                 }
             }
         });
 
-    if (loading) return <Loading />;
-
-    if (items.length === 0) {
-        return (
-            <>
-                <Empty>
-                    <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                            <GavelIcon />
-                        </EmptyMedia>
-                        <EmptyTitle>Henüz politika yok</EmptyTitle>
-                        <EmptyDescription>
-                            İzinlere atanmak üzere yetkilendirme politikaları oluşturun
-                            (rol, grup, kullanıcı, istemci…).
-                        </EmptyDescription>
-                    </EmptyHeader>
-                    <EmptyContent>
-                        <Button onClick={() => setCreateOpen(true)}>
-                            Politika oluştur
-                        </Button>
-                    </EmptyContent>
-                </Empty>
-                {createOpen && (
-                    <PolicyModal
-                        clientPk={clientPk}
-                        adminClient={adminClient}
-                        providers={providers}
-                        addAlert={addAlert}
-                        addError={addError}
-                        onClose={() => setCreateOpen(false)}
-                        onSaved={async () => {
-                            setCreateOpen(false);
-                            await load();
-                        }}
-                    />
-                )}
-            </>
-        );
-    }
+    const ready = !loading && !failed;
 
     return (
-        <div className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
-                <div>
-                    <p className="font-semibold tracking-tight">Politikalar</p>
-                    <p className="text-sm text-muted-foreground">
-                        İzinlere atanabilen yetkilendirme politikaları.
-                    </p>
-                </div>
-                <Button onClick={() => setCreateOpen(true)}>
-                    <PlusIcon /> Politika oluştur
-                </Button>
-            </div>
+        <Section
+            label={t("sxPermissionsTabPolicies")}
+            action={
+                ready &&
+                items.length > 0 && (
+                    <CreateButton onClick={() => setCreateOpen(true)}>
+                        {t("sxPermissionsCreatePolicy")}
+                    </CreateButton>
+                )
+            }
+        >
+            {loading && <ListSkeleton />}
+            {!loading && failed && (
+                <Notice
+                    title={t("sxPermissionsPoliciesLoadError")}
+                    description={t("sxLoadErrorDescription")}
+                    onRetry={load}
+                />
+            )}
+            {ready && items.length === 0 && (
+                <Notice
+                    title={t("sxPermissionsNoPoliciesTitle")}
+                    description={t("sxPermissionsNoPoliciesDescription")}
+                    action={
+                        <Button onClick={() => setCreateOpen(true)}>
+                            {t("sxPermissionsCreatePolicy")}
+                        </Button>
+                    }
+                />
+            )}
+            {ready && items.length > 0 && (
+                <>
+                    <Group>
+                        {items.map(pol => (
+                            <Row
+                                key={pol.id}
+                                title={pol.name}
+                                subtitle={`${pol.type}${pol.description ? ` · ${pol.description}` : ""}`}
+                                trailing={
+                                    <TextAction tone="danger" onClick={() => remove(pol)}>
+                                        {t("sxPermissionsDelete")}
+                                    </TextAction>
+                                }
+                            />
+                        ))}
+                    </Group>
+                    <Footnote>{t("sxPermissionsPoliciesFootnote")}</Footnote>
+                </>
+            )}
 
-            <ItemGroup variant="inset">
-                {items.map((pol, i) => (
-                    <Fragment key={pol.id}>
-                        {i > 0 && <ItemSeparator />}
-                        <Item size="sm">
-                            <ItemMedia variant="icon">
-                                <GavelIcon weight="fill" className="size-5" />
-                            </ItemMedia>
-                            <ItemContent className="min-w-0">
-                                <ItemTitle className="truncate font-medium text-sm">
-                                    {pol.name}
-                                </ItemTitle>
-                                <ItemDescription className="truncate">
-                                    {pol.type}
-                                    {pol.description ? ` · ${pol.description}` : ""}
-                                </ItemDescription>
-                            </ItemContent>
-                            <ItemActions>
-                                <Button
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    title="Sil"
-                                    aria-label="Sil"
-                                    onClick={() => remove(pol)}
-                                >
-                                    <TrashIcon />
-                                </Button>
-                            </ItemActions>
-                        </Item>
-                    </Fragment>
-                ))}
-            </ItemGroup>
-        </div>
+            {createOpen && (
+                <PolicyModal
+                    clientPk={clientPk}
+                    adminClient={adminClient}
+                    providers={providers}
+                    addAlert={addAlert}
+                    addError={addError}
+                    onClose={() => setCreateOpen(false)}
+                    onSaved={async () => {
+                        setCreateOpen(false);
+                        await load();
+                    }}
+                />
+            )}
+        </Section>
     );
 }
 
-/* Create a new policy (type picked from the provider list). */
-function PolicyModal({
-    clientPk,
-    adminClient,
-    providers,
-    addAlert,
-    addError,
-    onClose,
-    onSaved
-}: any) {
+function PolicyModal({ clientPk, adminClient, providers, addAlert, addError, onClose, onSaved }: any) {
+    const t = useT();
     const [name, setName] = useState("");
     const [description, setDescription] = useState("");
     const [type, setType] = useState(providers?.[0]?.type || "");
     const [logic, setLogic] = useState("POSITIVE");
     const [saving, setSaving] = useState(false);
+    const firstProvider = providers?.[0]?.type || "";
 
     useEffect(() => {
-        if (!type && providers?.length) setType(providers[0].type);
-    }, [providers, type]);
+        if (!type && firstProvider) setType(firstProvider);
+    }, [firstProvider, type]);
 
     const save = async () => {
         if (!name.trim()) {
-            addError("Politika adı gerekli.", new Error("name"));
+            addError(t("sxPermissionsPolicyNameRequired"), new Error("name"));
             return;
         }
         if (!type) {
-            addError("Politika türü seçin.", new Error("type"));
+            addError(t("sxPermissionsPolicyTypeRequired"), new Error("type"));
             return;
         }
         setSaving(true);
@@ -951,10 +878,10 @@ function PolicyModal({
                     decisionStrategy: "UNANIMOUS"
                 }
             );
-            addAlert("Politika oluşturuldu.", AlertVariant.success);
+            addAlert(t("sxPermissionsPolicyCreated"), AlertVariant.success);
             await onSaved();
         } catch (err) {
-            addError("Politika oluşturulamadı.", err);
+            addError(t("sxPermissionsPolicyCreateFailed"), err);
         } finally {
             setSaving(false);
         }
@@ -964,66 +891,76 @@ function PolicyModal({
         <Modal open onOpenChange={o => !o && onClose()}>
             <ModalContent>
                 <ModalHeader>
-                    <ModalTitle>Politika oluştur</ModalTitle>
+                    <ModalTitle>{t("sxPermissionsCreatePolicy")}</ModalTitle>
                 </ModalHeader>
                 <ModalBody>
-            <FieldGroup>
-                <Field>
-                    <FieldLabel>
-                        Ad<span className="text-destructive"> *</span>
-                    </FieldLabel>
-                    <Input
-                        value={name}
-                        onChange={e => setName(e.target.value)}
-                        placeholder="only-admins"
-                    />
-                </Field>
-                <Field>
-                    <FieldLabel>Açıklama</FieldLabel>
-                    <Textarea
-                        value={description}
-                        onChange={e => setDescription(e.target.value)}
-                        rows={2}
-                        resizable="inside"
-                    />
-                </Field>
-                <Field>
-                    <FieldLabel>
-                        Politika türü<span className="text-destructive"> *</span>
-                    </FieldLabel>
-                    <Select value={type} onValueChange={setType}>
-                        <SelectTrigger className="w-full" aria-label="Politika türü">
-                            <SelectValue placeholder="Tür seçin…" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {(providers || []).map((p: any) => (
-                                <SelectItem key={p.type} value={p.type}>
-                                    {p.name || p.type}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                    <FieldDescription>
-                        Türe özgü detaylar oluşturduktan sonra düzenlenebilir.
-                    </FieldDescription>
-                </Field>
-                <Field>
-                    <FieldLabel>Mantık</FieldLabel>
-                    <Select value={logic} onValueChange={setLogic}>
-                        <SelectTrigger className="w-full" aria-label="Mantık">
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="POSITIVE">Pozitif</SelectItem>
-                            <SelectItem value="NEGATIVE">Negatif</SelectItem>
-                        </SelectContent>
-                    </Select>
-                </Field>
-            </FieldGroup>
+                    <FieldGroup>
+                        <Field>
+                            <FieldLabel>
+                                {t("sxPermissionsName")}
+                                {REQUIRED}
+                            </FieldLabel>
+                            <Input
+                                value={name}
+                                onChange={e => setName(e.target.value)}
+                                placeholder="only-admins"
+                            />
+                        </Field>
+                        <Field>
+                            <FieldLabel>{t("sxPermissionsDescription")}</FieldLabel>
+                            <Textarea
+                                value={description}
+                                onChange={e => setDescription(e.target.value)}
+                                rows={2}
+                                resizable="inside"
+                            />
+                        </Field>
+                        <Field>
+                            <FieldLabel>
+                                {t("sxPermissionsPolicyType")}
+                                {REQUIRED}
+                            </FieldLabel>
+                            {(providers || []).length === 0 ? (
+                                <Notice
+                                    title={t("sxPermissionsNoProvidersTitle")}
+                                    description={t("sxPermissionsNoProvidersDescription")}
+                                />
+                            ) : (
+                                <Select value={type} onValueChange={setType}>
+                                    <SelectTrigger
+                                        className="w-full"
+                                        aria-label={t("sxPermissionsPolicyType")}
+                                    >
+                                        <SelectValue placeholder={t("sxPermissionsSelectType")} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {providers.map((p: any) => (
+                                            <SelectItem key={p.type} value={p.type}>
+                                                {p.name || p.type}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            )}
+                            <FieldDescription>{t("sxPermissionsPolicyTypeHint")}</FieldDescription>
+                        </Field>
+                        <Field>
+                            <FieldLabel>{t("sxPermissionsLogic")}</FieldLabel>
+                            <Select value={logic} onValueChange={setLogic}>
+                                <SelectTrigger className="w-full" aria-label={t("sxPermissionsLogic")}>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="POSITIVE">{t("sxPermissionsLogicPositive")}</SelectItem>
+                                    <SelectItem value="NEGATIVE">{t("sxPermissionsLogicNegative")}</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </Field>
+                    </FieldGroup>
                 </ModalBody>
                 <ModalFooter>
                     <Button disabled={saving} onClick={save}>
-                        {saving ? "Kaydediliyor…" : "Oluştur"}
+                        {saving ? t("sxPermissionsSaving") : t("sxPermissionsCreate")}
                     </Button>
                 </ModalFooter>
             </ModalContent>
@@ -1031,68 +968,78 @@ function PolicyModal({
     );
 }
 
-/* ────────────────────────────────────────────────────────────────────────── */
-/*  3. Değerlendirme — run an evaluation, show permit/deny                      */
-/* ────────────────────────────────────────────────────────────────────────── */
 function EvaluateTab({ clientPk, adminClient, realm, addError }: any) {
+    const t = useT();
     const resourceTypes = useResourceTypes(adminClient, clientPk);
 
     const [userQuery, setUserQuery] = useState("");
     const [users, setUsers] = useState<any[]>([]);
     const [userId, setUserId] = useState("");
     const [userLabel, setUserLabel] = useState("");
+    const [searching, setSearching] = useState(false);
+    const [searchFailed, setSearchFailed] = useState(false);
+    const [searchedEmpty, setSearchedEmpty] = useState(false);
 
     const [resourceType, setResourceType] = useState("");
     const [scopes, setScopes] = useState<string[]>([]);
     const [resourceName, setResourceName] = useState("");
 
-    // Optional subject: roles / groups / clients picked by name.
-    const [roleIds, _setRoleIds] = useState<string[]>([]);
+    const [roleIds] = useState<string[]>([]);
 
     const [running, setRunning] = useState(false);
+    const [evalFailed, setEvalFailed] = useState(false);
     const [result, setResult] = useState<any>(null);
 
-    const types = resourceTypes || [];
+    const types = resourceTypes.types || [];
     const current = useMemo(
-        () => types.find((t: any) => t.type === resourceType),
+        () => types.find((rt: any) => rt.type === resourceType),
         [types, resourceType]
     );
     const scopeOptions = current?.scopes || [];
+    const firstType = types[0]?.type || "";
 
     useEffect(() => {
-        if (!resourceType && types.length) setResourceType(types[0].type);
-    }, [types, resourceType]);
+        if (!resourceType && firstType) setResourceType(firstType);
+    }, [firstType, resourceType]);
 
-    // Reset selected scopes when the resource type changes.
     useEffect(() => {
         setScopes([]);
-    }, []);
+    }, [resourceType]);
 
-    const searchUsers = useCallback(async () => {
+    const searchUsers = async () => {
+        setSearching(true);
+        setSearchFailed(false);
+        setSearchedEmpty(false);
         try {
             const list = await adminClient.users.find({
                 search: userQuery.trim() || undefined,
                 max: 10
             });
-            setUsers(Array.isArray(list) ? list : []);
-        } catch (err) {
-            addError("Kullanıcılar aranamadı.", err);
+            const found = Array.isArray(list) ? list : [];
+            setUsers(found);
+            setSearchedEmpty(found.length === 0);
+        } catch {
+            setUsers([]);
+            setSearchFailed(true);
+        } finally {
+            setSearching(false);
         }
-    }, [adminClient, userQuery, addError]);
+    };
 
     const toggleScope = (s: string) =>
-        setScopes(arr => (arr.includes(s) ? arr.filter(x => x !== s) : [...arr, s]));
+        setScopes(list => (list.includes(s) ? list.filter(x => x !== s) : [...list, s]));
 
     const evaluate = async () => {
         if (!userId) {
-            addError("Bir kullanıcı seçin.", new Error("user"));
+            addError(t("sxPermissionsSelectUserRequired"), new Error("user"));
             return;
         }
         if (!resourceType) {
-            addError("Kaynak türü seçin.", new Error("resourceType"));
+            addError(t("sxPermissionsResourceTypeRequired"), new Error("resourceType"));
             return;
         }
         setRunning(true);
+        setEvalFailed(false);
         setResult(null);
         try {
             const payload = {
@@ -1108,184 +1055,186 @@ function EvaluateTab({ clientPk, adminClient, realm, addError }: any) {
                 entitlements: false,
                 context: { attributes: {} }
             };
-            const res = await adminClient.clients.evaluateResource(
-                { id: clientPk, realm },
-                payload
-            );
+            const res = await adminClient.clients.evaluateResource({ id: clientPk, realm }, payload);
             setResult(res ?? {});
-        } catch (err) {
-            addError("Değerlendirme yapılamadı.", err);
+        } catch {
+            setEvalFailed(true);
         } finally {
             setRunning(false);
         }
     };
 
+    const typesReady = !resourceTypes.loading && !resourceTypes.failed && types.length > 0;
+
     return (
-        <div className="grid gap-6 lg:grid-cols-2">
-            {/* ── Form ── */}
-            <div className="space-y-5">
-                <div>
-                    <GroupCaption>Konu (Subject)</GroupCaption>
-                    <ItemGroup variant="inset">
-                        <Item size="sm">
-                            <ItemContent className="min-w-0">
-                                <ItemTitle className="font-normal text-sm">Kullanıcı</ItemTitle>
-                                <ItemDescription>
-                                    Değerlendirilecek kullanıcıyı arayıp seçin.
-                                </ItemDescription>
-                                <div className="mt-2 flex gap-2">
-                                    <Input
-                                        size="md"
-                                        value={userQuery}
-                                        onChange={e => setUserQuery(e.target.value)}
-                                        onKeyDown={e => e.key === "Enter" && searchUsers()}
-                                        placeholder="kullanıcı adı / e-posta"
-                                    />
-                                    <Button variant="secondary" onClick={searchUsers}>
-                                        <MagnifyingGlassIcon /> Ara
-                                    </Button>
-                                </div>
-                                {users.length > 0 && (
-                                    <ItemGroup className="mt-2 gap-0!">
-                                        {users.map(u => (
-                                            <Item
-                                                key={u.id}
-                                                size="xs"
-                                                variant="outline"
-                                                asChild
-                                            >
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setUserId(u.id);
-                                                        setUserLabel(
-                                                            u.username || u.email || u.id
-                                                        );
-                                                        setUsers([]);
-                                                        setUserQuery(
-                                                            u.username || u.email || ""
-                                                        );
-                                                    }}
-                                                >
-                                                    <ItemContent className="min-w-0">
-                                                        <ItemTitle className="truncate font-medium text-sm">
-                                                            {u.username || u.email || u.id}
-                                                        </ItemTitle>
-                                                    </ItemContent>
-                                                    {u.email && (
-                                                        <ItemActions>
-                                                            <span className="truncate text-xs text-muted-foreground">
-                                                                {u.email}
-                                                            </span>
-                                                        </ItemActions>
-                                                    )}
-                                                </button>
-                                            </Item>
-                                        ))}
-                                    </ItemGroup>
-                                )}
-                                {userId && (
-                                    <p className="mt-2 text-sm text-muted-foreground">
-                                        Seçili:{" "}
-                                        <span className="font-medium text-foreground">
-                                            {userLabel}
-                                        </span>
-                                    </p>
-                                )}
-                            </ItemContent>
-                        </Item>
-                    </ItemGroup>
-                </div>
-
-                <div>
-                    <GroupCaption>Kaynak</GroupCaption>
-                    <ItemGroup variant="inset">
-                        <Item size="sm">
-                            <ItemContent>
-                                <ItemTitle className="font-normal text-sm">Kaynak türü</ItemTitle>
-                            </ItemContent>
-                            <ItemActions>
-                                <Select value={resourceType} onValueChange={setResourceType}>
-                                    <SelectTrigger aria-label="Kaynak türü">
-                                        <SelectValue placeholder="Tür seçin…" />
-                                    </SelectTrigger>
-                                    <SelectContent align="end">
-                                        {types.map((t: any) => (
-                                            <SelectItem key={t.type} value={t.type}>
-                                                {t.type}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </ItemActions>
-                        </Item>
-                        <ItemSeparator />
-                        <Item size="sm">
-                            <ItemContent className="min-w-0">
-                                <ItemTitle className="font-normal text-sm">Kaynak adı</ItemTitle>
-                                <ItemDescription>
-                                    Boş bırakılırsa tür içindeki tüm kaynaklar
-                                    değerlendirilir.
-                                </ItemDescription>
-                                <Input
-                                    size="md"
-                                    className="mt-2"
-                                    value={resourceName}
-                                    onChange={e => setResourceName(e.target.value)}
-                                    placeholder="(opsiyonel)"
-                                />
-                            </ItemContent>
-                        </Item>
-                    </ItemGroup>
-                </div>
-
-                {scopeOptions.length > 0 && (
-                    <div>
-                        <GroupCaption>Kapsamlar</GroupCaption>
-                        <ItemGroup variant="inset">
-                            {scopeOptions.map((s: string, i: number) => (
-                                <CheckRow
-                                    key={s}
-                                    first={i === 0}
-                                    label={s}
-                                    checked={scopes.includes(s)}
-                                    onToggle={() => toggleScope(s)}
-                                />
-                            ))}
-                        </ItemGroup>
+        <>
+            <Section label={t("sxPermissionsSubject")}>
+                <Group>
+                    <li className="px-4 py-3.5">
+                        <div className="text-base font-medium">{t("sxPermissionsUser")}</div>
+                        <p className="mt-0.5 text-[13px] text-muted-foreground">
+                            {t("sxPermissionsUserHint")}
+                        </p>
+                        <div className="mt-3 flex gap-2">
+                            <SearchField
+                                className="min-w-0 flex-1"
+                                value={userQuery}
+                                onChange={setUserQuery}
+                                onEnter={searchUsers}
+                                placeholder={t("sxPermissionsUserSearchPlaceholder")}
+                            />
+                            <Button
+                                variant="secondary"
+                                className="h-13.5 rounded-xl px-5 text-[15px] font-medium"
+                                disabled={searching}
+                                onClick={searchUsers}
+                            >
+                                {searching ? t("sxPermissionsSearching") : t("sxPermissionsSearch")}
+                            </Button>
+                        </div>
+                        {userId && (
+                            <p className="mt-2.5 text-sm text-muted-foreground">
+                                {t("sxPermissionsSelectedLabel")}{" "}
+                                <span className="font-medium text-foreground">{userLabel}</span>
+                            </p>
+                        )}
+                    </li>
+                </Group>
+                {searching && (
+                    <div className="mt-3">
+                        <ListSkeleton rows={2} />
                     </div>
                 )}
+                {!searching && searchFailed && (
+                    <div className="mt-3">
+                        <Notice
+                            title={t("sxPermissionsUserSearchError")}
+                            description={t("sxLoadErrorDescription")}
+                            onRetry={searchUsers}
+                        />
+                    </div>
+                )}
+                {!searching && searchedEmpty && (
+                    <div className="mt-3">
+                        <Notice
+                            title={t("sxPermissionsNoUsersTitle")}
+                            description={t("sxPermissionsNoUsersDescription")}
+                        />
+                    </div>
+                )}
+                {!searching && users.length > 0 && (
+                    <Group className="mt-3">
+                        {users.map(u => (
+                            <Row
+                                key={u.id}
+                                title={u.username || u.email || u.id}
+                                subtitle={u.email}
+                                onClick={() => {
+                                    setUserId(u.id);
+                                    setUserLabel(u.username || u.email || u.id);
+                                    setUsers([]);
+                                    setUserQuery(u.username || u.email || "");
+                                }}
+                            />
+                        ))}
+                    </Group>
+                )}
+            </Section>
 
-                <div className="flex justify-end">
-                    <Button disabled={running} onClick={evaluate}>
-                        <ScalesIcon /> {running ? "Değerlendiriliyor…" : "Değerlendir"}
-                    </Button>
-                </div>
+            <Section label={t("sxPermissionsResourceSection")}>
+                {typesReady ? (
+                    <Group>
+                        <li className="flex min-h-16 flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
+                            <span className="text-base font-medium">{t("sxPermissionsResourceType")}</span>
+                            <Select value={resourceType} onValueChange={setResourceType}>
+                                <SelectTrigger
+                                    aria-label={t("sxPermissionsResourceType")}
+                                    className="max-w-full"
+                                >
+                                    <SelectValue placeholder={t("sxPermissionsSelectType")} />
+                                </SelectTrigger>
+                                <SelectContent align="end">
+                                    {types.map((rt: any) => (
+                                        <SelectItem key={rt.type} value={rt.type}>
+                                            {rt.type}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </li>
+                        <li className="px-4 py-3.5">
+                            <div className="text-base font-medium">{t("sxPermissionsResourceName")}</div>
+                            <p className="mt-0.5 text-[13px] text-muted-foreground">
+                                {t("sxPermissionsResourceNameHint")}
+                            </p>
+                            <Input
+                                size="lg"
+                                className="mt-3"
+                                aria-label={t("sxPermissionsResourceName")}
+                                value={resourceName}
+                                onChange={e => setResourceName(e.target.value)}
+                                placeholder={t("sxPermissionsOptionalPlaceholder")}
+                            />
+                        </li>
+                    </Group>
+                ) : (
+                    <ResourceTypesState state={resourceTypes} />
+                )}
+            </Section>
+
+            {scopeOptions.length > 0 && (
+                <Section label={t("sxPermissionsScopes")}>
+                    <Group>
+                        {scopeOptions.map((s: string) => (
+                            <CheckRow
+                                key={s}
+                                label={s}
+                                checked={scopes.includes(s)}
+                                onToggle={() => toggleScope(s)}
+                            />
+                        ))}
+                    </Group>
+                </Section>
+            )}
+
+            <div className="flex justify-end">
+                <Button size="form" disabled={running} onClick={evaluate}>
+                    {running ? t("sxPermissionsEvaluating") : t("sxPermissionsEvaluate")}
+                </Button>
             </div>
 
-            {/* ── Result ── */}
-            <div>
-                <GroupCaption>Sonuç</GroupCaption>
-                {result === null ? (
-                    <Empty>
-                        <EmptyHeader>
-                            <EmptyMedia variant="icon">
-                                <ScalesIcon />
-                            </EmptyMedia>
-                            <EmptyDescription>
-                                Bir konu ve kaynak seçip değerlendirin.
-                            </EmptyDescription>
-                        </EmptyHeader>
-                    </Empty>
+            <Section label={t("sxPermissionsResult")}>
+                {running ? (
+                    <ListSkeleton rows={2} />
+                ) : evalFailed ? (
+                    <Notice
+                        title={t("sxPermissionsEvaluateError")}
+                        description={t("sxLoadErrorDescription")}
+                        onRetry={evaluate}
+                    />
+                ) : result === null ? (
+                    <Notice
+                        title={t("sxPermissionsResultEmptyTitle")}
+                        description={t("sxPermissionsResultEmptyDescription")}
+                    />
                 ) : (
                     <EvaluationResult result={result} />
                 )}
-            </div>
-        </div>
+            </Section>
+        </>
+    );
+}
+
+function StatusIcon({ permit }: { permit: boolean }) {
+    return permit ? (
+        <CheckCircleIcon weight="fill" className="size-6 text-[#248a3d] dark:text-[#32d74b]" />
+    ) : (
+        <XCircleIcon weight="fill" className="size-6 text-[#d70015] dark:text-[#ff453a]" />
     );
 }
 
 function EvaluationResult({ result }: any) {
+    const t = useT();
     const results = result?.results || [];
     const first = results[0] || {};
     const permit = result?.status === "PERMIT" || first?.status === "PERMIT";
@@ -1298,105 +1247,75 @@ function EvaluationResult({ result }: any) {
     const policies = first?.policies || [];
 
     return (
-        <div className="space-y-4">
-            <Alert variant={permit ? "default" : "destructive"}>
-                {permit ? <CheckCircleIcon weight="fill" /> : <XCircleIcon weight="fill" />}
-                <AlertTitle>
-                    {permit ? "İzin verildi (PERMIT)" : "Reddedildi (DENY)"}
-                </AlertTitle>
-                <AlertDescription>
-                    {first?.resource?.name || "Tüm kaynaklar"}
-                </AlertDescription>
-            </Alert>
+        <div className="flex flex-col gap-6">
+            <Group>
+                <Row
+                    leading={<StatusIcon permit={permit} />}
+                    title={permit ? t("sxPermissionsResultPermit") : t("sxPermissionsResultDeny")}
+                    subtitle={first?.resource?.name || t("sxPermissionsAllResources")}
+                    trailing={
+                        <Chip tone={permit ? "success" : "danger"}>{permit ? "PERMIT" : "DENY"}</Chip>
+                    }
+                />
+            </Group>
 
             {allowed.length > 0 && (
                 <div>
-                    <GroupCaption>İzin verilen kapsamlar</GroupCaption>
-                    <ItemGroup variant="inset">
-                        {allowed.map((s: any, i: number) => (
-                            <Fragment key={s.id || s.name}>
-                                {i > 0 && <ItemSeparator />}
-                                <Item size="sm">
-                                    <ItemContent>
-                                        <ItemTitle className="font-normal text-sm">
-                                            {s.name}
-                                        </ItemTitle>
-                                    </ItemContent>
-                                    <ItemActions>
-                                        <CheckCircleIcon
-                                            className="size-5 text-primary"
-                                            weight="fill"
-                                        />
-                                    </ItemActions>
-                                </Item>
-                            </Fragment>
+                    <Caption>{t("sxPermissionsAllowedScopes")}</Caption>
+                    <Group>
+                        {allowed.map((s: any) => (
+                            <Row
+                                key={s.id || s.name}
+                                className="min-h-13"
+                                title={s.name}
+                                trailing={<StatusIcon permit />}
+                            />
                         ))}
-                    </ItemGroup>
+                    </Group>
                 </div>
             )}
 
             {denied.length > 0 && (
                 <div>
-                    <GroupCaption>Reddedilen kapsamlar</GroupCaption>
-                    <ItemGroup variant="inset">
-                        {denied.map((s: any, i: number) => (
-                            <Fragment key={s.id || s.name}>
-                                {i > 0 && <ItemSeparator />}
-                                <Item size="sm">
-                                    <ItemContent>
-                                        <ItemTitle className="font-normal text-sm">
-                                            {s.name}
-                                        </ItemTitle>
-                                    </ItemContent>
-                                    <ItemActions>
-                                        <XCircleIcon
-                                            className="size-5 text-destructive"
-                                            weight="fill"
-                                        />
-                                    </ItemActions>
-                                </Item>
-                            </Fragment>
+                    <Caption>{t("sxPermissionsDeniedScopes")}</Caption>
+                    <Group>
+                        {denied.map((s: any) => (
+                            <Row
+                                key={s.id || s.name}
+                                className="min-h-13"
+                                title={s.name}
+                                trailing={<StatusIcon permit={false} />}
+                            />
                         ))}
-                    </ItemGroup>
+                    </Group>
                 </div>
             )}
 
             {policies.length > 0 && (
                 <div>
-                    <GroupCaption>Politika sonuçları</GroupCaption>
-                    <ItemGroup variant="inset">
+                    <Caption>{t("sxPermissionsPolicyResults")}</Caption>
+                    <Group>
                         {policies.map((p: any, i: number) => (
-                            <Fragment key={p?.policy?.id || i}>
-                                {i > 0 && <ItemSeparator />}
-                                <Item size="sm">
-                                    <ItemContent>
-                                        <ItemTitle className="font-normal text-sm">
-                                            {p?.policy?.name || "—"}
-                                        </ItemTitle>
-                                    </ItemContent>
-                                    <ItemActions>
-                                        <Badge
-                                            variant={
-                                                p?.status === "PERMIT"
-                                                    ? "outline"
-                                                    : "destructive"
-                                            }
-                                        >
-                                            {p?.status}
-                                        </Badge>
-                                    </ItemActions>
-                                </Item>
-                            </Fragment>
+                            <Row
+                                key={p?.policy?.id || i}
+                                className="min-h-13"
+                                title={p?.policy?.name || "—"}
+                                trailing={
+                                    <Chip tone={p?.status === "PERMIT" ? "success" : "danger"}>
+                                        {p?.status}
+                                    </Chip>
+                                }
+                            />
                         ))}
-                    </ItemGroup>
+                    </Group>
                 </div>
             )}
         </div>
     );
 }
 
-/** Confirm dialog — returns a [confirm(opts), node] pair (built on @ui/patterns/confirm). */
 function useConfirm() {
+    const t = useT();
     const [opts, setOpts] = useState<any>(null);
     const [open, setOpen] = useState(false);
     const confirm = (o: {
@@ -1414,17 +1333,15 @@ function useConfirm() {
             <ConfirmContent>
                 <ConfirmHeader>
                     <ConfirmTitle>{opts?.title}</ConfirmTitle>
-                    {opts?.message && (
-                        <ConfirmDescription>{opts.message}</ConfirmDescription>
-                    )}
+                    {opts?.message && <ConfirmDescription>{opts.message}</ConfirmDescription>}
                 </ConfirmHeader>
                 <ConfirmFooter>
-                    <ConfirmCancel>Vazgeç</ConfirmCancel>
+                    <ConfirmCancel>{t("sxPermissionsCancel")}</ConfirmCancel>
                     <ConfirmAction
                         variant={opts?.danger ? "destructive" : "default"}
                         onClick={() => opts?.onConfirm?.()}
                     >
-                        {opts?.confirmLabel ?? "Onayla"}
+                        {opts?.confirmLabel ?? t("sxPermissionsConfirm")}
                     </ConfirmAction>
                 </ConfirmFooter>
             </ConfirmContent>

@@ -1,41 +1,10 @@
 // @ts-nocheck
 
-import {
-    CaretRightIcon,
-    MagnifyingGlassIcon,
-    PlusIcon,
-    ShieldCheckIcon,
-    TrashIcon,
-    UserPlusIcon,
-    UsersThreeIcon
-} from "@phosphor-icons/react";
-import { Avatar, AvatarFallback } from "@ui/components/avatar";
+import { PlusIcon, ShieldCheckIcon, UserPlusIcon, UsersThreeIcon } from "@phosphor-icons/react";
 import { Button } from "@ui/components/button";
 import { Checkbox } from "@ui/components/checkbox";
-import {
-    Empty,
-    EmptyDescription,
-    EmptyHeader,
-    EmptyMedia,
-    EmptyTitle
-} from "@ui/components/empty";
+import { Field, FieldLabel } from "@ui/components/field";
 import { Input } from "@ui/components/input";
-import {
-    InputGroup,
-    InputGroupAddon,
-    InputGroupInput
-} from "@ui/components/input-group";
-import {
-    Item,
-    ItemActions,
-    ItemContent,
-    ItemDescription,
-    ItemGroup,
-    ItemMedia,
-    ItemSeparator,
-    ItemTitle
-} from "@ui/components/item";
-import { Spinner } from "@ui/components/spinner";
 import {
     Confirm,
     ConfirmAction,
@@ -54,36 +23,65 @@ import {
     ModalHeader,
     ModalTitle
 } from "@ui/patterns/modal";
-import { SegmentPicker, SegmentPickerItem } from "@ui/patterns/segment-picker";
-import { Fragment, useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { AlertVariant, useAlerts } from "../../shared/keycloak-ui-shared";
 import { useAdminClient } from "../admin-client";
+import {
+    AdminPage,
+    GROUP,
+    Group,
+    ListSkeleton,
+    Notice,
+    Row,
+    SEPARATOR,
+    SearchField,
+    Section,
+    SegmentTabs,
+    TextAction
+} from "../ui/kit";
+import { useT } from "../ui/i18n";
 import { useRealm } from "../ui/realm";
 import { initials } from "../ui/util";
 
-const PAGE_CLS = "mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8";
+const DANGER_BTN = "bg-[#d70015] text-white hover:bg-[#d70015]/90 dark:bg-[#ff453a] dark:hover:bg-[#ff453a]/90";
 
-function Loading() {
+function Monogram({ name }: { name: string }) {
     return (
-        <div className="grid place-items-center py-16">
-            <Spinner />
-        </div>
+        <span className="grid size-8 place-items-center rounded-full bg-[#6e6e73] text-[11px] font-semibold text-white dark:bg-[#48484a]">
+            {initials(name)}
+        </span>
+    );
+}
+
+function IconTile({ children }: any) {
+    return (
+        <span className="grid size-8 place-items-center rounded-lg bg-[#e5e5ea] dark:bg-[#2c2c2e] [&_svg]:size-4.5">
+            {children}
+        </span>
+    );
+}
+
+function AddLabel({ icon, children }: any) {
+    return (
+        <span className="inline-flex items-center gap-1 [&_svg]:size-3.5">
+            {icon}
+            {children}
+        </span>
     );
 }
 
 function ConfirmDialog({ opts, onClose }: any) {
+    const t = useT();
     return (
         <Confirm open={!!opts} onOpenChange={o => !o && onClose()}>
             <ConfirmContent>
                 <ConfirmHeader>
                     <ConfirmTitle>{opts?.title}</ConfirmTitle>
-                    {opts?.message && (
-                        <ConfirmDescription>{opts.message}</ConfirmDescription>
-                    )}
+                    {opts?.message && <ConfirmDescription>{opts.message}</ConfirmDescription>}
                 </ConfirmHeader>
                 <ConfirmFooter>
-                    <ConfirmCancel>Vazgeç</ConfirmCancel>
+                    <ConfirmCancel>{t("sxGroupDetailCancel")}</ConfirmCancel>
                     <ConfirmAction
                         variant={opts?.danger ? "destructive" : "default"}
                         onClick={() => {
@@ -92,7 +90,7 @@ function ConfirmDialog({ opts, onClose }: any) {
                             fn?.();
                         }}
                     >
-                        {opts?.confirmLabel ?? "Onayla"}
+                        {opts?.confirmLabel ?? t("sxGroupDetailConfirm")}
                     </ConfirmAction>
                 </ConfirmFooter>
             </ConfirmContent>
@@ -100,37 +98,42 @@ function ConfirmDialog({ opts, onClose }: any) {
     );
 }
 
-function EmptyCard({ icon, title, desc }: any) {
-    return (
-        <Empty>
-            <EmptyHeader>
-                <EmptyMedia variant="icon">{icon}</EmptyMedia>
-                <EmptyTitle>{title}</EmptyTitle>
-                {desc && <EmptyDescription>{desc}</EmptyDescription>}
-            </EmptyHeader>
-        </Empty>
-    );
-}
+function useLoader(fetcher: () => Promise<any>, deps: any[]) {
+    const [data, setData] = useState<any[]>([]);
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
+    const [attempt, setAttempt] = useState(0);
+    const fetcherRef = useRef(fetcher);
+    fetcherRef.current = fetcher;
 
-function EmptyRow({ children }: any) {
-    return (
-        <Item size="sm">
-            <ItemContent>
-                <ItemDescription className="text-center">{children}</ItemDescription>
-            </ItemContent>
-        </Item>
-    );
+    useEffect(() => {
+        let alive = true;
+        setStatus("loading");
+        fetcherRef
+            .current()
+            .then(result => {
+                if (!alive) return;
+                setData(Array.isArray(result) ? result : []);
+                setStatus("ready");
+            })
+            .catch(() => alive && setStatus("error"));
+        return () => {
+            alive = false;
+        };
+    }, [...deps, attempt]);
+
+    return { data, setData, status, retry: () => setAttempt(n => n + 1) };
 }
 
 const TABS = [
-    { value: "members", label: "Üyeler" },
-    { value: "attributes", label: "Öznitelikler" },
-    { value: "roles", label: "Rol eşlemesi" },
-    { value: "children", label: "Alt gruplar" },
-    { value: "settings", label: "Ayarlar" }
+    { value: "members", label: "sxGroupDetailTabMembers" },
+    { value: "attributes", label: "sxGroupDetailTabAttributes" },
+    { value: "roles", label: "sxGroupDetailTabRoles" },
+    { value: "children", label: "sxGroupDetailTabChildren" },
+    { value: "settings", label: "sxGroupDetailTabSettings" }
 ];
 
 export default function GroupDetail() {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
     const { id } = useParams();
@@ -138,185 +141,176 @@ export default function GroupDetail() {
     const { addError } = useAlerts();
 
     const [group, setGroup] = useState<any>(null);
-    const [loading, setLoading] = useState(true);
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
+    const [attempt, setAttempt] = useState(0);
     const [tab, setTab] = useState("members");
 
-    const reload = useCallback(async () => {
+    const reload = async () => {
         try {
             const g = await adminClient.groups.findOne({ id });
             setGroup(g);
         } catch (e) {
-            addError("Grup yüklenemedi.", e);
-        } finally {
-            setLoading(false);
+            addError(t("sxGroupDetailReloadError"), e);
         }
-    }, [adminClient, id, addError]);
+    };
 
     useEffect(() => {
-        setLoading(true);
-        reload();
-    }, [reload]);
+        let alive = true;
+        setStatus("loading");
+        adminClient.groups
+            .findOne({ id })
+            .then(g => {
+                if (!alive) return;
+                setGroup(g ?? null);
+                setStatus("ready");
+            })
+            .catch(e => {
+                if (!alive) return;
+                if (e?.response?.status === 404) {
+                    setGroup(null);
+                    setStatus("ready");
+                } else setStatus("error");
+            });
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, id, attempt]);
 
-    if (loading)
+    const back = { label: t("sxNavGroups"), to: `/${realm}/groups` };
+
+    if (status === "loading")
         return (
-            <div className={PAGE_CLS}>
-                <Loading />
-            </div>
+            <AdminPage title={t("sxGroupDetailTitle")} back={back}>
+                <ListSkeleton rows={3} />
+            </AdminPage>
+        );
+    if (status === "error")
+        return (
+            <AdminPage title={t("sxGroupDetailTitle")} back={back}>
+                <Notice
+                    title={t("sxGroupDetailLoadError")}
+                    description={t("sxLoadErrorDescription")}
+                    onRetry={() => setAttempt(n => n + 1)}
+                />
+            </AdminPage>
         );
     if (!group)
         return (
-            <div className={PAGE_CLS}>
-                <EmptyCard icon={<UsersThreeIcon />} title="Grup bulunamadı" />
-            </div>
+            <AdminPage title={t("sxGroupDetailNotFoundTitle")} back={back}>
+                <Notice
+                    title={t("sxGroupDetailNotFoundTitle")}
+                    description={t("sxGroupDetailNotFoundDescription")}
+                    action={
+                        <Button asChild>
+                            <Link to={back.to}>{t("sxGroupDetailBackToGroups")}</Link>
+                        </Button>
+                    }
+                />
+            </AdminPage>
         );
 
     return (
-        <div className={PAGE_CLS}>
-            {/* iOS nav-bar header */}
-            <div className="relative mb-7 flex items-center">
-                <Button
-                    type="button"
-                    variant="secondary"
-                    size="icon"
-                    onClick={() => navigate(`/${realm}/groups`)}
-                    aria-label="Geri"
-                >
-                    <CaretRightIcon className="rotate-180" weight="bold" />
-                </Button>
-                <div className="absolute left-1/2 -translate-x-1/2 text-center">
-                    <p className="font-semibold">{group.name}</p>
-                    <p className="font-mono text-xs text-muted-foreground">
-                        {group.path}
-                    </p>
-                </div>
-            </div>
+        <AdminPage
+            title={group.name}
+            description={<span className="font-mono text-[15px] [overflow-wrap:anywhere]">{group.path}</span>}
+            back={back}
+        >
+            <SegmentTabs
+                ariaLabel={t("sxGroupDetailSections")}
+                value={tab}
+                onChange={setTab}
+                items={TABS.map(item => ({ value: item.value, label: t(item.label) }))}
+            />
 
-            <div className="mb-5 flex justify-center">
-                <SegmentPicker value={tab} onValueChange={setTab}>
-                    {TABS.map(t => (
-                        <SegmentPickerItem key={t.value} value={t.value} label={t.label} />
-                    ))}
-                </SegmentPicker>
+            <div key={group.id}>
+                {tab === "members" && <MembersTab group={group} />}
+                {tab === "attributes" && <AttributesTab group={group} reload={reload} />}
+                {tab === "roles" && <RolesTab group={group} />}
+                {tab === "children" && (
+                    <ChildrenTab group={group} onOpen={cid => navigate(`/${realm}/groups/${cid}`)} reload={reload} />
+                )}
+                {tab === "settings" && (
+                    <SettingsTab group={group} reload={reload} onDeleted={() => navigate(`/${realm}/groups`)} />
+                )}
             </div>
-
-            {tab === "members" && <MembersTab group={group} />}
-            {tab === "attributes" && <AttributesTab group={group} reload={reload} />}
-            {tab === "roles" && <RolesTab group={group} />}
-            {tab === "children" && (
-                <ChildrenTab
-                    group={group}
-                    onOpen={cid => navigate(`/${realm}/groups/${cid}`)}
-                    reload={reload}
-                />
-            )}
-            {tab === "settings" && (
-                <SettingsTab
-                    group={group}
-                    reload={reload}
-                    onDeleted={() => navigate(`/${realm}/groups`)}
-                />
-            )}
-        </div>
+        </AdminPage>
     );
 }
 
-/* ── Members ──────────────────────────────────────────────────────────── */
 function MembersTab({ group }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [confirmOpts, setConfirmOpts] = useState<any>(null);
     const confirm = setConfirmOpts;
-    const [members, setMembers] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
     const [adding, setAdding] = useState(false);
-
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            const m = await adminClient.groups.listMembers({ id: group.id, max: 200 });
-            setMembers(Array.isArray(m) ? m : []);
-        } catch (e) {
-            addError("Üyeler yüklenemedi.", e);
-        } finally {
-            setLoading(false);
-        }
-    }, [adminClient, group.id, addError]);
-
-    useEffect(() => {
-        load();
-    }, [load]);
+    const {
+        data: members,
+        setData: setMembers,
+        status,
+        retry
+    } = useLoader(() => adminClient.groups.listMembers({ id: group.id, max: 200 }), [adminClient, group.id]);
 
     const removeMember = (u: any) =>
         confirm({
-            title: "Üyeyi çıkar",
-            message: `${u.username} bu gruptan çıkarılacak.`,
-            confirmLabel: "Çıkar",
+            title: t("sxGroupDetailRemoveMemberTitle"),
+            message: t("sxGroupDetailRemoveMemberMessage", { name: u.username }),
+            confirmLabel: t("sxGroupDetailRemove"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.users.delFromGroup({ id: u.id, groupId: group.id });
-                    addAlert("Üye çıkarıldı.", AlertVariant.success);
-                    setMembers(members.filter(m => m.id !== u.id));
+                    addAlert(t("sxGroupDetailMemberRemoved"), AlertVariant.success);
+                    setMembers(prev => prev.filter(m => m.id !== u.id));
                 } catch (e) {
-                    addError("Üye çıkarılamadı.", e);
+                    addError(t("sxGroupDetailMemberRemoveError"), e);
                 }
             }
         });
 
-    if (loading) return <Loading />;
-
     return (
-        <div className="space-y-3">
-            <div className="flex items-center justify-between">
-                <h3 className="ms-1 text-sm font-medium text-muted-foreground">
-                    {members.length} üye
-                </h3>
-                <Button type="button" variant="plain" size="sm" onClick={() => setAdding(true)}>
-                    <UserPlusIcon data-icon="inline-start" /> Üye ekle
-                </Button>
-            </div>
-            {members.length === 0 ? (
-                <EmptyCard
-                    icon={<UsersThreeIcon />}
-                    title="Üye yok"
-                    desc="Bu gruba henüz kullanıcı eklenmemiş."
+        <Section
+            label={status === "ready" ? t("sxGroupDetailMembersCount", { total: members.length }) : t("sxGroupDetailTabMembers")}
+            action={
+                status === "ready" && (
+                    <TextAction onClick={() => setAdding(true)}>
+                        <AddLabel icon={<UserPlusIcon />}>{t("sxGroupDetailAddMember")}</AddLabel>
+                    </TextAction>
+                )
+            }
+        >
+            {status === "loading" && <ListSkeleton />}
+            {status === "error" && (
+                <Notice
+                    title={t("sxGroupDetailMembersLoadError")}
+                    description={t("sxLoadErrorDescription")}
+                    onRetry={retry}
                 />
-            ) : (
-                <ItemGroup variant="inset">
-                    {members.map((u, i) => (
-                        <Fragment key={u.id}>
-                            {i > 0 && <ItemSeparator />}
-                            <Item size="sm">
-                                <ItemMedia>
-                                    <Avatar>
-                                        <AvatarFallback>{initials(u.username)}</AvatarFallback>
-                                    </Avatar>
-                                </ItemMedia>
-                                <ItemContent className="min-w-0">
-                                    <ItemTitle>
-                                        <span className="truncate">{u.username}</span>
-                                    </ItemTitle>
-                                    <ItemDescription className="truncate">
-                                        {u.email || "—"}
-                                    </ItemDescription>
-                                </ItemContent>
-                                <ItemActions>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        onClick={() => removeMember(u)}
-                                        title="Gruptan çıkar"
-                                        aria-label="Gruptan çıkar"
-                                    >
-                                        <TrashIcon />
-                                    </Button>
-                                </ItemActions>
-                            </Item>
-                        </Fragment>
-                    ))}
-                </ItemGroup>
             )}
+            {status === "ready" &&
+                (members.length === 0 ? (
+                    <Notice
+                        title={t("sxGroupDetailNoMembersTitle")}
+                        description={t("sxGroupDetailNoMembersDescription")}
+                        action={<Button onClick={() => setAdding(true)}>{t("sxGroupDetailAddMember")}</Button>}
+                    />
+                ) : (
+                    <Group>
+                        {members.map(u => (
+                            <Row
+                                key={u.id}
+                                leading={<Monogram name={u.username} />}
+                                title={u.username}
+                                subtitle={u.email || "—"}
+                                trailing={
+                                    <TextAction tone="danger" onClick={() => removeMember(u)} aria-label={t("sxGroupDetailRemoveFromGroup")}>
+                                        {t("sxGroupDetailRemove")}
+                                    </TextAction>
+                                }
+                            />
+                        ))}
+                    </Group>
+                ))}
             {adding && (
                 <AddMemberModal
                     group={group}
@@ -324,51 +318,55 @@ function MembersTab({ group }: any) {
                     onClose={() => setAdding(false)}
                     onAdded={() => {
                         setAdding(false);
-                        load();
+                        retry();
                     }}
                 />
             )}
             <ConfirmDialog opts={confirmOpts} onClose={() => setConfirmOpts(null)} />
-        </div>
+        </Section>
     );
 }
 
 function AddMemberModal({ group, existing, onClose, onAdded }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [q, setQ] = useState("");
+    const [term, setTerm] = useState("");
     const [results, setResults] = useState<any[]>([]);
-    const [loading, setLoading] = useState(false);
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
+    const [attempt, setAttempt] = useState(0);
     const [busy, setBusy] = useState<string | null>(null);
 
-    const search = async () => {
-        setLoading(true);
-        try {
-            const r = await adminClient.users.find({
-                search: q.trim() || undefined,
-                max: 20
-            });
-            setResults(Array.isArray(r) ? r : []);
-        } catch (e) {
-            addError("Arama başarısız.", e);
-        } finally {
-            setLoading(false);
-        }
-    };
+    useEffect(() => {
+        const timer = setTimeout(() => setTerm(q.trim()), 300);
+        return () => clearTimeout(timer);
+    }, [q]);
 
     useEffect(() => {
-        search();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [search]);
+        let alive = true;
+        setStatus("loading");
+        adminClient.users
+            .find({ search: term || undefined, max: 20 })
+            .then(r => {
+                if (!alive) return;
+                setResults(Array.isArray(r) ? r : []);
+                setStatus("ready");
+            })
+            .catch(() => alive && setStatus("error"));
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, term, attempt]);
 
     const add = async (u: any) => {
         setBusy(u.id);
         try {
             await adminClient.users.addToGroup({ id: u.id, groupId: group.id });
-            addAlert(`${u.username} eklendi.`, AlertVariant.success);
+            addAlert(t("sxGroupDetailMemberAdded", { name: u.username }), AlertVariant.success);
             onAdded();
         } catch (e) {
-            addError("Eklenemedi.", e);
+            addError(t("sxGroupDetailMemberAddError"), e);
             setBusy(null);
         }
     };
@@ -377,69 +375,54 @@ function AddMemberModal({ group, existing, onClose, onAdded }: any) {
         <Modal open onOpenChange={o => !o && onClose()}>
             <ModalContent className="sm:max-w-2xl">
                 <ModalHeader>
-                    <ModalTitle>Üye ekle</ModalTitle>
+                    <ModalTitle>{t("sxGroupDetailAddMember")}</ModalTitle>
                 </ModalHeader>
                 <ModalBody>
-                    <div className="space-y-3">
-                        <InputGroup>
-                            <InputGroupAddon>
-                                <MagnifyingGlassIcon />
-                            </InputGroupAddon>
-                            <InputGroupInput
-                                autoFocus
-                                value={q}
-                                onChange={(e: any) => setQ(e.target.value)}
-                                onKeyDown={(e: any) => e.key === "Enter" && search()}
-                                placeholder="Kullanıcı ara…"
+                    <div className="flex flex-col gap-3">
+                        <SearchField
+                            value={q}
+                            onChange={setQ}
+                            onEnter={() => setTerm(q.trim())}
+                            placeholder={t("sxGroupDetailSearchUsers")}
+                        />
+                        {status === "loading" ? (
+                            <ListSkeleton />
+                        ) : status === "error" ? (
+                            <Notice
+                                title={t("sxGroupDetailUsersLoadError")}
+                                description={t("sxLoadErrorDescription")}
+                                onRetry={() => setAttempt(n => n + 1)}
                             />
-                        </InputGroup>
-                        {loading ? (
-                            <Loading />
+                        ) : results.length === 0 ? (
+                            <Notice
+                                title={t("sxGroupDetailNoUsersTitle")}
+                                description={
+                                    term ? t("sxGroupDetailNoUsersSearchDescription") : t("sxGroupDetailNoUsersDescription")
+                                }
+                            />
                         ) : (
-                            <ItemGroup variant="inset">
-                                {results.length === 0 ? (
-                                    <EmptyRow>Kullanıcı bulunamadı.</EmptyRow>
-                                ) : (
-                                    results.map((u, i) => {
-                                        const inGroup = existing.has(u.id);
-                                        return (
-                                            <Fragment key={u.id}>
-                                                {i > 0 && <ItemSeparator />}
-                                                <Item size="sm">
-                                                    <ItemMedia>
-                                                        <Avatar>
-                                                            <AvatarFallback>
-                                                                {initials(u.username)}
-                                                            </AvatarFallback>
-                                                        </Avatar>
-                                                    </ItemMedia>
-                                                    <ItemContent className="min-w-0">
-                                                        <ItemTitle>
-                                                            <span className="truncate">
-                                                                {u.username}
-                                                            </span>
-                                                        </ItemTitle>
-                                                        <ItemDescription className="truncate">
-                                                            {u.email || "—"}
-                                                        </ItemDescription>
-                                                    </ItemContent>
-                                                    <ItemActions>
-                                                        <Button
-                                                            type="button"
-                                                            size="sm"
-                                                            variant={inGroup ? "ghost" : "tinted"}
-                                                            disabled={inGroup || busy === u.id}
-                                                            onClick={() => add(u)}
-                                                        >
-                                                            {inGroup ? "Üye" : "Ekle"}
-                                                        </Button>
-                                                    </ItemActions>
-                                                </Item>
-                                            </Fragment>
-                                        );
-                                    })
-                                )}
-                            </ItemGroup>
+                            <Group>
+                                {results.map(u => {
+                                    const inGroup = existing.has(u.id);
+                                    return (
+                                        <Row
+                                            key={u.id}
+                                            leading={<Monogram name={u.username} />}
+                                            title={u.username}
+                                            subtitle={u.email || "—"}
+                                            trailing={
+                                                inGroup ? (
+                                                    <span className="text-[15px] text-muted-foreground">{t("sxGroupDetailAlreadyMember")}</span>
+                                                ) : (
+                                                    <TextAction disabled={busy === u.id} onClick={() => add(u)}>
+                                                        {t("sxGroupDetailAdd")}
+                                                    </TextAction>
+                                                )
+                                            }
+                                        />
+                                    );
+                                })}
+                            </Group>
                         )}
                     </div>
                 </ModalBody>
@@ -448,8 +431,8 @@ function AddMemberModal({ group, existing, onClose, onAdded }: any) {
     );
 }
 
-/* ── Attributes ───────────────────────────────────────────────────────── */
 function AttributesTab({ group, reload }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const toRows = (attrs: any) =>
@@ -461,9 +444,9 @@ function AttributesTab({ group, reload }: any) {
     const [saving, setSaving] = useState(false);
 
     const setRow = (i: number, field: string, val: string) =>
-        setRows(rows.map((r, idx) => (idx === i ? { ...r, [field]: val } : r)));
-    const addRow = () => setRows([...rows, { k: "", v: "" }]);
-    const delRow = (i: number) => setRows(rows.filter((_, idx) => idx !== i));
+        setRows(prev => prev.map((r, idx) => (idx === i ? { ...r, [field]: val } : r)));
+    const addRow = () => setRows(prev => [...prev, { k: "", v: "" }]);
+    const delRow = (i: number) => setRows(prev => prev.filter((_, idx) => idx !== i));
 
     const save = async () => {
         setSaving(true);
@@ -477,113 +460,101 @@ function AttributesTab({ group, reload }: any) {
                         .map((s: string) => s.trim())
                         .filter(Boolean);
             });
-            await adminClient.groups.update(
-                { id: group.id },
-                { name: group.name, attributes }
-            );
-            addAlert("Öznitelikler kaydedildi.", AlertVariant.success);
+            await adminClient.groups.update({ id: group.id }, { name: group.name, attributes });
+            addAlert(t("sxGroupDetailAttributesSaved"), AlertVariant.success);
             reload();
         } catch (e) {
-            addError("Kaydedilemedi.", e);
+            addError(t("sxGroupDetailAttributesSaveError"), e);
         } finally {
             setSaving(false);
         }
     };
 
     return (
-        <div className="space-y-3">
-            <h3 className="mb-2 ms-1 text-sm font-medium text-muted-foreground">
-                Öznitelikler
-            </h3>
-            <ItemGroup variant="inset">
+        <div className="max-w-110">
+            <Section
+                label={t("sxGroupDetailTabAttributes")}
+                action={
+                    <TextAction onClick={addRow}>
+                        <AddLabel icon={<PlusIcon weight="bold" />}>{t("sxGroupDetailAddAttribute")}</AddLabel>
+                    </TextAction>
+                }
+            >
                 {rows.length === 0 ? (
-                    <EmptyRow>Öznitelik yok.</EmptyRow>
+                    <Notice
+                        title={t("sxGroupDetailNoAttributesTitle")}
+                        description={t("sxGroupDetailNoAttributesDescription")}
+                        action={<Button onClick={addRow}>{t("sxGroupDetailAddAttribute")}</Button>}
+                    />
                 ) : (
-                    rows.map((r, i) => (
-                        <Fragment key={i}>
-                            {i > 0 && <ItemSeparator />}
-                            <Item size="sm">
-                                <Input
-                                    size="sm"
-                                    value={r.k}
-                                    onChange={(e: any) => setRow(i, "k", e.target.value)}
-                                    placeholder="anahtar"
-                                    className="w-2/5"
-                                />
-                                <span className="text-muted-foreground">:</span>
-                                <Input
-                                    size="sm"
-                                    value={r.v}
-                                    onChange={(e: any) => setRow(i, "v", e.target.value)}
-                                    placeholder="değer (virgülle ayır)"
-                                    className="flex-1"
-                                />
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    onClick={() => delRow(i)}
-                                    title="Sil"
-                                    aria-label="Sil"
-                                >
-                                    <TrashIcon />
-                                </Button>
-                            </Item>
-                        </Fragment>
-                    ))
+                    <ul className={GROUP}>
+                        {rows.map((r, i) => (
+                            <Fragment key={i}>
+                                {i > 0 && <li aria-hidden className={SEPARATOR} />}
+                                <li className="flex items-center gap-2 px-4 py-3">
+                                    <Input
+                                        size="md"
+                                        value={r.k}
+                                        onChange={(e: any) => setRow(i, "k", e.target.value)}
+                                        placeholder={t("sxGroupDetailKeyPlaceholder")}
+                                        aria-label={t("sxGroupDetailKey")}
+                                        className="w-2/5 min-w-0 font-medium"
+                                    />
+                                    <Input
+                                        size="md"
+                                        value={r.v}
+                                        onChange={(e: any) => setRow(i, "v", e.target.value)}
+                                        placeholder={t("sxGroupDetailValuePlaceholder")}
+                                        aria-label={t("sxGroupDetailValue")}
+                                        className="min-w-0 flex-1"
+                                    />
+                                    <TextAction tone="danger" aria-label={t("sxGroupDetailDelete")} onClick={() => delRow(i)}>
+                                        {t("sxGroupDetailDelete")}
+                                    </TextAction>
+                                </li>
+                            </Fragment>
+                        ))}
+                    </ul>
                 )}
-                <ItemSeparator />
-                <Item size="sm" asChild>
-                    <button type="button" onClick={addRow}>
-                        <ItemMedia variant="icon" className="text-primary">
-                            <PlusIcon />
-                        </ItemMedia>
-                        <ItemContent>
-                            <ItemTitle className="text-primary">Öznitelik ekle</ItemTitle>
-                        </ItemContent>
-                    </button>
-                </Item>
-            </ItemGroup>
-            <div className="flex justify-end">
-                <Button disabled={saving} onClick={save}>
-                    {saving ? "Kaydediliyor…" : "Kaydet"}
+            </Section>
+            <div className="mt-7 flex flex-col gap-1.5">
+                <Button type="button" size="form" block disabled={saving} onClick={save}>
+                    {saving ? t("sxGroupDetailSaving") : t("sxGroupDetailSave")}
+                </Button>
+                <Button
+                    type="button"
+                    variant="plain"
+                    size="form"
+                    block
+                    disabled={saving}
+                    onClick={() => setRows(toRows(group.attributes))}
+                >
+                    {t("sxGroupDetailCancel")}
                 </Button>
             </div>
         </div>
     );
 }
 
-/* ── Role mapping (realm roles) ───────────────────────────────────────── */
 function RolesTab({ group }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [confirmOpts, setConfirmOpts] = useState<any>(null);
     const confirm = setConfirmOpts;
-    const [assigned, setAssigned] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
     const [picking, setPicking] = useState(false);
-
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            const a = await adminClient.groups.listRealmRoleMappings({ id: group.id });
-            setAssigned(Array.isArray(a) ? a : []);
-        } catch (e) {
-            addError("Roller yüklenemedi.", e);
-        } finally {
-            setLoading(false);
-        }
-    }, [adminClient, group.id, addError]);
-
-    useEffect(() => {
-        load();
-    }, [load]);
+    const {
+        data: assigned,
+        setData: setAssigned,
+        status,
+        retry
+    } = useLoader(() => adminClient.groups.listRealmRoleMappings({ id: group.id }), [adminClient, group.id]);
 
     const removeRole = (r: any) =>
         confirm({
-            title: "Rolü kaldır",
-            message: `“${r.name}” rolü bu gruptan kaldırılacak.`,
-            confirmLabel: "Kaldır",
+            title: t("sxGroupDetailRemoveRoleTitle"),
+            message: t("sxGroupDetailRemoveRoleMessage", { name: r.name }),
+            confirmLabel: t("sxGroupDetailUnassign"),
             danger: true,
             onConfirm: async () => {
                 try {
@@ -591,68 +562,61 @@ function RolesTab({ group }: any) {
                         id: group.id,
                         roles: [{ id: r.id, name: r.name }]
                     });
-                    addAlert("Rol kaldırıldı.", AlertVariant.success);
-                    setAssigned(assigned.filter(x => x.id !== r.id));
+                    addAlert(t("sxGroupDetailRoleRemoved"), AlertVariant.success);
+                    setAssigned(prev => prev.filter(x => x.id !== r.id));
                 } catch (e) {
-                    addError("Kaldırılamadı.", e);
+                    addError(t("sxGroupDetailRoleRemoveError"), e);
                 }
             }
         });
 
-    if (loading) return <Loading />;
-
     return (
-        <div className="space-y-3">
-            <div className="flex items-center justify-between">
-                <h3 className="ms-1 text-sm font-medium text-muted-foreground">
-                    Atanmış realm rolleri
-                </h3>
-                <Button type="button" variant="plain" size="sm" onClick={() => setPicking(true)}>
-                    <PlusIcon data-icon="inline-start" /> Rol ata
-                </Button>
-            </div>
-            {assigned.length === 0 ? (
-                <EmptyCard
-                    icon={<ShieldCheckIcon />}
-                    title="Rol atanmamış"
-                    desc="Bu gruba realm rolü atayarak tüm üyelere toplu yetki ver."
+        <Section
+            label={t("sxGroupDetailAssignedRoles")}
+            action={
+                status === "ready" && (
+                    <TextAction onClick={() => setPicking(true)}>
+                        <AddLabel icon={<PlusIcon weight="bold" />}>{t("sxGroupDetailAssignRole")}</AddLabel>
+                    </TextAction>
+                )
+            }
+        >
+            {status === "loading" && <ListSkeleton />}
+            {status === "error" && (
+                <Notice
+                    title={t("sxGroupDetailRolesLoadError")}
+                    description={t("sxLoadErrorDescription")}
+                    onRetry={retry}
                 />
-            ) : (
-                <ItemGroup variant="inset">
-                    {assigned.map((r, i) => (
-                        <Fragment key={r.id}>
-                            {i > 0 && <ItemSeparator />}
-                            <Item size="sm">
-                                <ItemMedia variant="icon">
-                                    <ShieldCheckIcon />
-                                </ItemMedia>
-                                <ItemContent className="min-w-0">
-                                    <ItemTitle>
-                                        <span className="truncate">{r.name}</span>
-                                    </ItemTitle>
-                                    {r.description && (
-                                        <ItemDescription className="truncate">
-                                            {r.description}
-                                        </ItemDescription>
-                                    )}
-                                </ItemContent>
-                                <ItemActions>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        onClick={() => removeRole(r)}
-                                        title="Rolü kaldır"
-                                        aria-label="Rolü kaldır"
-                                    >
-                                        <TrashIcon />
-                                    </Button>
-                                </ItemActions>
-                            </Item>
-                        </Fragment>
-                    ))}
-                </ItemGroup>
             )}
+            {status === "ready" &&
+                (assigned.length === 0 ? (
+                    <Notice
+                        title={t("sxGroupDetailNoRolesTitle")}
+                        description={t("sxGroupDetailNoRolesDescription")}
+                        action={<Button onClick={() => setPicking(true)}>{t("sxGroupDetailAssignRole")}</Button>}
+                    />
+                ) : (
+                    <Group>
+                        {assigned.map(r => (
+                            <Row
+                                key={r.id}
+                                leading={
+                                    <IconTile>
+                                        <ShieldCheckIcon />
+                                    </IconTile>
+                                }
+                                title={r.name}
+                                subtitle={r.description || undefined}
+                                trailing={
+                                    <TextAction tone="danger" onClick={() => removeRole(r)} aria-label={t("sxGroupDetailRemoveRoleTitle")}>
+                                        {t("sxGroupDetailUnassign")}
+                                    </TextAction>
+                                }
+                            />
+                        ))}
+                    </Group>
+                ))}
             {picking && (
                 <PickRoleModal
                     group={group}
@@ -660,38 +624,26 @@ function RolesTab({ group }: any) {
                     onClose={() => setPicking(false)}
                     onAdded={() => {
                         setPicking(false);
-                        load();
+                        retry();
                     }}
                 />
             )}
             <ConfirmDialog opts={confirmOpts} onClose={() => setConfirmOpts(null)} />
-        </div>
+        </Section>
     );
 }
 
-function PickRoleModal({ group, assigned, onClose, onAdded }: any) {
+function PickRoleModal({ group, onClose, onAdded }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
-    const [roles, setRoles] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
     const [sel, setSel] = useState<Set<string>>(new Set());
     const [saving, setSaving] = useState(false);
-
-    useEffect(() => {
-        (async () => {
-            try {
-                const a = await adminClient.groups.listAvailableRealmRoleMappings({
-                    id: group.id
-                });
-                setRoles(Array.isArray(a) ? a : []);
-            } catch (e) {
-                addError("Roller yüklenemedi.", e);
-            } finally {
-                setLoading(false);
-            }
-        })();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [group.id, adminClient.groups.listAvailableRealmRoleMappings, addError]);
+    const {
+        data: roles,
+        status,
+        retry
+    } = useLoader(() => adminClient.groups.listAvailableRealmRoleMappings({ id: group.id }), [adminClient, group.id]);
 
     const toggle = (id: string) =>
         setSel(prev => {
@@ -701,20 +653,15 @@ function PickRoleModal({ group, assigned, onClose, onAdded }: any) {
         });
 
     const save = async () => {
-        const chosen = roles
-            .filter(r => sel.has(r.id))
-            .map(r => ({ id: r.id, name: r.name }));
+        const chosen = roles.filter(r => sel.has(r.id)).map(r => ({ id: r.id, name: r.name }));
         if (chosen.length === 0) return;
         setSaving(true);
         try {
-            await adminClient.groups.addRealmRoleMappings({
-                id: group.id,
-                roles: chosen
-            });
-            addAlert(`${chosen.length} rol atandı.`, AlertVariant.success);
+            await adminClient.groups.addRealmRoleMappings({ id: group.id, roles: chosen });
+            addAlert(t("sxGroupDetailRolesAssigned", { total: chosen.length }), AlertVariant.success);
             onAdded();
         } catch (e) {
-            addError("Atanamadı.", e);
+            addError(t("sxGroupDetailRolesAssignError"), e);
             setSaving(false);
         }
     };
@@ -723,48 +670,48 @@ function PickRoleModal({ group, assigned, onClose, onAdded }: any) {
         <Modal open onOpenChange={o => !o && onClose()}>
             <ModalContent className="sm:max-w-2xl">
                 <ModalHeader>
-                    <ModalTitle>Rol ata</ModalTitle>
+                    <ModalTitle>{t("sxGroupDetailAssignRole")}</ModalTitle>
                 </ModalHeader>
                 <ModalBody>
-                    {loading ? (
-                        <Loading />
+                    {status === "loading" ? (
+                        <ListSkeleton />
+                    ) : status === "error" ? (
+                        <Notice
+                            title={t("sxGroupDetailRolesLoadError")}
+                            description={t("sxLoadErrorDescription")}
+                            onRetry={retry}
+                        />
+                    ) : roles.length === 0 ? (
+                        <Notice
+                            title={t("sxGroupDetailNoAvailableRolesTitle")}
+                            description={t("sxGroupDetailNoAvailableRolesDescription")}
+                        />
                     ) : (
-                        <ItemGroup variant="inset">
-                            {roles.length === 0 ? (
-                                <EmptyRow>Atanabilecek rol yok.</EmptyRow>
-                            ) : (
-                                roles.map((r, i) => (
-                                    <Fragment key={r.id}>
-                                        {i > 0 && <ItemSeparator />}
-                                        <Item size="sm" asChild>
-                                            <label>
-                                                <ItemMedia>
-                                                    <Checkbox
-                                                        checked={sel.has(r.id)}
-                                                        onCheckedChange={() => toggle(r.id)}
-                                                    />
-                                                </ItemMedia>
-                                                <ItemContent className="min-w-0">
-                                                    <ItemTitle>
-                                                        <span className="truncate">{r.name}</span>
-                                                    </ItemTitle>
-                                                    {r.description && (
-                                                        <ItemDescription className="truncate">
-                                                            {r.description}
-                                                        </ItemDescription>
-                                                    )}
-                                                </ItemContent>
-                                            </label>
-                                        </Item>
-                                    </Fragment>
-                                ))
-                            )}
-                        </ItemGroup>
+                        <ul className={GROUP}>
+                            {roles.map((r, i) => (
+                                <Fragment key={r.id}>
+                                    {i > 0 && <li aria-hidden className={SEPARATOR} />}
+                                    <li>
+                                        <label className="flex min-h-14 cursor-pointer items-center gap-3 px-4 py-2.5 hover:bg-black/3 dark:hover:bg-white/4">
+                                            <Checkbox checked={sel.has(r.id)} onCheckedChange={() => toggle(r.id)} />
+                                            <span className="min-w-0">
+                                                <span className="block truncate text-base font-medium">{r.name}</span>
+                                                {r.description && (
+                                                    <span className="mt-0.5 block truncate text-[13px] text-muted-foreground">
+                                                        {r.description}
+                                                    </span>
+                                                )}
+                                            </span>
+                                        </label>
+                                    </li>
+                                </Fragment>
+                            ))}
+                        </ul>
                     )}
                 </ModalBody>
                 <ModalFooter>
                     <Button disabled={saving || sel.size === 0} onClick={save}>
-                        {saving ? "Atanıyor…" : `Ata (${sel.size})`}
+                        {saving ? t("sxGroupDetailAssigning") : t("sxGroupDetailAssignCount", { total: sel.size })}
                     </Button>
                 </ModalFooter>
             </ModalContent>
@@ -772,124 +719,113 @@ function PickRoleModal({ group, assigned, onClose, onAdded }: any) {
     );
 }
 
-/* ── Child groups ─────────────────────────────────────────────────────── */
 function ChildrenTab({ group, onOpen, reload }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
-    const [children, setChildren] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
     const [creating, setCreating] = useState(false);
     const [name, setName] = useState("");
-
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            const subs = await adminClient.groups.listSubGroups({
-                parentId: group.id,
-                briefRepresentation: false
-            });
-            setChildren(Array.isArray(subs) ? subs : []);
-        } catch (e) {
-            addError("Alt gruplar yüklenemedi.", e);
-        } finally {
-            setLoading(false);
-        }
-    }, [adminClient, group.id, addError]);
-
-    useEffect(() => {
-        load();
-    }, [load]);
+    const { data: children, status, retry } = useLoader(
+        () => adminClient.groups.listSubGroups({ parentId: group.id, briefRepresentation: false }),
+        [adminClient, group.id]
+    );
 
     const create = async () => {
         const n = name.trim();
         if (!n) return;
         try {
             await adminClient.groups.createChildGroup({ id: group.id }, { name: n });
-            addAlert("Alt grup oluşturuldu.", AlertVariant.success);
+            addAlert(t("sxGroupDetailChildCreated"), AlertVariant.success);
             setCreating(false);
             setName("");
-            load();
+            retry();
             reload();
         } catch (e) {
-            addError("Oluşturulamadı.", e);
+            addError(t("sxGroupDetailChildCreateError"), e);
         }
     };
 
-    if (loading) return <Loading />;
-
     return (
-        <div className="space-y-3">
-            <div className="flex items-center justify-between">
-                <h3 className="ms-1 text-sm font-medium text-muted-foreground">
-                    {children.length} alt grup
-                </h3>
-                <Button type="button" variant="plain" size="sm" onClick={() => setCreating(true)}>
-                    <PlusIcon data-icon="inline-start" /> Alt grup
-                </Button>
-            </div>
-            {children.length === 0 ? (
-                <EmptyCard
-                    icon={<UsersThreeIcon />}
-                    title="Alt grup yok"
-                    desc="Hiyerarşi oluşturmak için alt grup ekle."
+        <Section
+            label={status === "ready" ? t("sxGroupDetailChildrenCount", { total: children.length }) : t("sxGroupDetailTabChildren")}
+            action={
+                status === "ready" && (
+                    <TextAction onClick={() => setCreating(true)}>
+                        <AddLabel icon={<PlusIcon weight="bold" />}>{t("sxGroupDetailChild")}</AddLabel>
+                    </TextAction>
+                )
+            }
+        >
+            {status === "loading" && <ListSkeleton />}
+            {status === "error" && (
+                <Notice
+                    title={t("sxGroupDetailChildrenLoadError")}
+                    description={t("sxLoadErrorDescription")}
+                    onRetry={retry}
                 />
-            ) : (
-                <ItemGroup variant="inset">
-                    {children.map((c, i) => (
-                        <Fragment key={c.id}>
-                            {i > 0 && <ItemSeparator />}
-                            <Item size="sm" asChild>
-                                <button type="button" onClick={() => onOpen(c.id)}>
-                                    <ItemMedia variant="icon">
-                                        <UsersThreeIcon />
-                                    </ItemMedia>
-                                    <ItemContent className="min-w-0">
-                                        <ItemTitle>
-                                            <span className="truncate">{c.name}</span>
-                                        </ItemTitle>
-                                    </ItemContent>
-                                    <ItemActions>
-                                        <CaretRightIcon className="text-muted-foreground" />
-                                    </ItemActions>
-                                </button>
-                            </Item>
-                        </Fragment>
-                    ))}
-                </ItemGroup>
             )}
+            {status === "ready" &&
+                (children.length === 0 ? (
+                    <Notice
+                        title={t("sxGroupDetailNoChildrenTitle")}
+                        description={t("sxGroupDetailNoChildrenDescription")}
+                        action={<Button onClick={() => setCreating(true)}>{t("sxGroupDetailCreateChild")}</Button>}
+                    />
+                ) : (
+                    <Group>
+                        {children.map(c => (
+                            <Row
+                                key={c.id}
+                                onClick={() => onOpen(c.id)}
+                                leading={
+                                    <IconTile>
+                                        <UsersThreeIcon />
+                                    </IconTile>
+                                }
+                                title={c.name}
+                            />
+                        ))}
+                    </Group>
+                ))}
             <Modal open={creating} onOpenChange={o => !o && setCreating(false)}>
                 <ModalContent>
                     <ModalHeader>
-                        <ModalTitle>Alt grup oluştur</ModalTitle>
+                        <ModalTitle>{t("sxGroupDetailCreateChild")}</ModalTitle>
                     </ModalHeader>
                     <ModalBody>
-                        <Input
-                            autoFocus
-                            value={name}
-                            onChange={(e: any) => setName(e.target.value)}
-                            onKeyDown={(e: any) => e.key === "Enter" && create()}
-                            placeholder="Alt grup adı"
-                        />
+                        <Field size="lg">
+                            <FieldLabel htmlFor="child-group-name">{t("sxGroupDetailChildName")}</FieldLabel>
+                            <Input
+                                id="child-group-name"
+                                size="lg"
+                                autoFocus
+                                value={name}
+                                onChange={(e: any) => setName(e.target.value)}
+                                onKeyDown={(e: any) => e.key === "Enter" && create()}
+                                placeholder={t("sxGroupDetailChildName")}
+                            />
+                        </Field>
                     </ModalBody>
                     <ModalFooter>
                         <Button disabled={!name.trim()} onClick={create}>
-                            Oluştur
+                            {t("sxGroupDetailCreate")}
                         </Button>
                     </ModalFooter>
                 </ModalContent>
             </Modal>
-        </div>
+        </Section>
     );
 }
 
-/* ── Settings ─────────────────────────────────────────────────────────── */
 function SettingsTab({ group, reload, onDeleted }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [confirmOpts, setConfirmOpts] = useState<any>(null);
     const confirm = setConfirmOpts;
     const [name, setName] = useState(group.name || "");
     const [saving, setSaving] = useState(false);
+    const dirty = name !== (group.name || "");
 
     const save = async () => {
         const n = name.trim();
@@ -897,10 +833,10 @@ function SettingsTab({ group, reload, onDeleted }: any) {
         setSaving(true);
         try {
             await adminClient.groups.update({ id: group.id }, { ...group, name: n });
-            addAlert("Grup güncellendi.", AlertVariant.success);
+            addAlert(t("sxGroupDetailUpdated"), AlertVariant.success);
             reload();
         } catch (e) {
-            addError("Güncellenemedi.", e);
+            addError(t("sxGroupDetailUpdateError"), e);
         } finally {
             setSaving(false);
         }
@@ -908,88 +844,76 @@ function SettingsTab({ group, reload, onDeleted }: any) {
 
     const remove = () =>
         confirm({
-            title: "Grubu sil",
-            message: `“${group.name}” ve tüm alt grupları silinecek.`,
-            confirmLabel: "Sil",
+            title: t("sxGroupDetailDeleteGroup"),
+            message: t("sxGroupDetailDeleteGroupMessage", { name: group.name }),
+            confirmLabel: t("sxGroupDetailDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.groups.del({ id: group.id });
-                    addAlert("Grup silindi.", AlertVariant.success);
+                    addAlert(t("sxGroupDetailDeleted"), AlertVariant.success);
                     onDeleted();
                 } catch (e) {
-                    addError("Silinemedi.", e);
+                    addError(t("sxGroupDetailDeleteError"), e);
                 }
             }
         });
 
     return (
-        <div className="space-y-6">
-            <div>
-                <h3 className="mb-2 ms-1 text-sm font-medium text-muted-foreground">
-                    Genel
-                </h3>
-                <ItemGroup variant="inset">
-                    <Item size="sm">
-                        <ItemContent>
-                            <ItemTitle>
-                                <label htmlFor="group-settings-name">Grup adı</label>
-                            </ItemTitle>
-                            <Input
-                                id="group-settings-name"
-                                size="sm"
-                                value={name}
-                                onChange={(e: any) => setName(e.target.value)}
-                            />
-                        </ItemContent>
-                    </Item>
-                    <ItemSeparator />
-                    <Item size="sm">
-                        <ItemContent>
-                            <ItemTitle>Yol</ItemTitle>
-                        </ItemContent>
-                        <ItemActions>
-                            <span className="font-mono text-sm text-muted-foreground">
-                                {group.path}
-                            </span>
-                        </ItemActions>
-                    </Item>
-                    <ItemSeparator />
-                    <Item size="sm">
-                        <ItemContent>
-                            <ItemTitle>Grup ID</ItemTitle>
-                        </ItemContent>
-                        <ItemActions>
-                            <span className="font-mono text-xs text-muted-foreground">
-                                {group.id}
-                            </span>
-                        </ItemActions>
-                    </Item>
-                </ItemGroup>
-                <div className="mt-3 flex justify-end">
-                    <Button disabled={saving || !name.trim()} onClick={save}>
-                        {saving ? "Kaydediliyor…" : "Kaydet"}
+        <div className="max-w-110">
+            <form
+                onSubmit={e => {
+                    e.preventDefault();
+                    save();
+                }}
+            >
+                <div className="flex flex-col gap-4">
+                    <Field size="lg">
+                        <FieldLabel htmlFor="group-settings-name">{t("sxGroupDetailName")}</FieldLabel>
+                        <Input
+                            id="group-settings-name"
+                            size="lg"
+                            value={name}
+                            onChange={(e: any) => setName(e.target.value)}
+                        />
+                    </Field>
+                    <Field size="lg">
+                        <FieldLabel>{t("sxGroupDetailPath")}</FieldLabel>
+                        <p className="ps-0.5 font-mono text-[13px] text-muted-foreground [overflow-wrap:anywhere]">
+                            {group.path}
+                        </p>
+                    </Field>
+                    <Field size="lg">
+                        <FieldLabel>{t("sxGroupDetailId")}</FieldLabel>
+                        <p className="ps-0.5 font-mono text-[13px] text-muted-foreground [overflow-wrap:anywhere]">
+                            {group.id}
+                        </p>
+                    </Field>
+                </div>
+                <div className="mt-7 flex flex-col gap-1.5">
+                    <Button type="submit" size="form" block disabled={saving || !name.trim() || !dirty}>
+                        {saving ? t("sxGroupDetailSaving") : t("sxGroupDetailSave")}
+                    </Button>
+                    <Button
+                        type="button"
+                        variant="plain"
+                        size="form"
+                        block
+                        disabled={saving || !dirty}
+                        onClick={() => setName(group.name || "")}
+                    >
+                        {t("sxGroupDetailCancel")}
                     </Button>
                 </div>
-            </div>
-
-            <div>
-                <h3 className="mb-2 ms-1 text-sm font-medium text-muted-foreground">
-                    Tehlikeli bölge
-                </h3>
-                <ItemGroup variant="inset">
-                    <Item size="sm" asChild>
-                        <button type="button" onClick={remove}>
-                            <ItemContent>
-                                <ItemTitle className="text-destructive">Grubu sil</ItemTitle>
-                            </ItemContent>
-                        </button>
-                    </Item>
-                </ItemGroup>
-                <p className="mt-2 ms-1 text-sm text-muted-foreground">
-                    Grup ve tüm alt grupları kalıcı olarak silinir.
+            </form>
+            <section className="mt-7 border-t border-border pt-6">
+                <p className="mb-3 text-[13px] leading-[1.4] text-muted-foreground">
+                    {t("sxGroupDetailDeleteHint")}
                 </p>
-            </div>
+                <Button type="button" size="form" block className={DANGER_BTN} onClick={remove}>
+                    {t("sxGroupDetailDeleteGroup")}
+                </Button>
+            </section>
             <ConfirmDialog opts={confirmOpts} onClose={() => setConfirmOpts(null)} />
         </div>
     );

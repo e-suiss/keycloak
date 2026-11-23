@@ -9,7 +9,6 @@ import {
     UsersIcon,
     UsersThreeIcon
 } from "@phosphor-icons/react";
-import { Badge } from "@ui/components/badge";
 import { Button } from "@ui/components/button";
 import {
     DropdownMenu,
@@ -18,27 +17,8 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger
 } from "@ui/components/dropdown-menu";
-import {
-    Empty,
-    EmptyContent,
-    EmptyDescription,
-    EmptyHeader,
-    EmptyMedia,
-    EmptyTitle
-} from "@ui/components/empty";
 import { Field, FieldLabel } from "@ui/components/field";
 import { Input } from "@ui/components/input";
-import {
-    Item,
-    ItemActions,
-    ItemContent,
-    ItemDescription,
-    ItemGroup,
-    ItemMedia,
-    ItemSeparator,
-    ItemTitle
-} from "@ui/components/item";
-import { Spinner } from "@ui/components/spinner";
 import { cn } from "@ui/lib/utils";
 import {
     Confirm,
@@ -62,9 +42,12 @@ import { Fragment, useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AlertVariant, useAlerts } from "../../shared/keycloak-ui-shared";
 import { useAdminClient } from "../admin-client";
+import { AdminPage, Chip, GROUP, ListSkeleton, Notice, SEPARATOR, Section, TextAction } from "../ui/kit";
+import { useT } from "../ui/i18n";
 import { useRealm } from "../ui/realm";
 
 export default function Groups() {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
     const { addAlert, addError } = useAlerts();
@@ -72,40 +55,37 @@ export default function Groups() {
     const [confirmOpts, setConfirmOpts] = useState<any>(null);
     const confirm = setConfirmOpts;
 
-    const [loading, setLoading] = useState(true);
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
     const [roots, setRoots] = useState<any[]>([]);
     const [defaults, setDefaults] = useState<Set<string>>(new Set());
-    const [_reloadKey, setReloadKey] = useState(0);
+    const [reloadKey, setReloadKey] = useState(0);
     const reload = () => setReloadKey(k => k + 1);
 
-    const [createParent, setCreateParent] = useState<any>(undefined); // undefined=closed, null=root, group=child
+    const [createParent, setCreateParent] = useState<any>(undefined);
     const [newName, setNewName] = useState("");
     const [creating, setCreating] = useState(false);
 
     useEffect(() => {
         let alive = true;
         (async () => {
-            setLoading(true);
+            setStatus("loading");
             try {
                 const [list, def] = await Promise.all([
-                    adminClient.groups
-                        .find({ briefRepresentation: false })
-                        .catch(() => []),
-                    adminClient.realms.getDefaultGroups({ realm }).catch(() => [])
+                    adminClient.groups.find({ briefRepresentation: false }),
+                    adminClient.realms.getDefaultGroups({ realm })
                 ]);
                 if (!alive) return;
                 setRoots(sortGroups(list));
                 setDefaults(new Set((def || []).map((g: any) => g.id)));
-            } catch (e) {
-                if (alive) addError("Gruplar yüklenemedi.", e);
-            } finally {
-                if (alive) setLoading(false);
+                setStatus("ready");
+            } catch {
+                if (alive) setStatus("error");
             }
         })();
         return () => {
             alive = false;
         };
-    }, [adminClient, realm, addError]);
+    }, [adminClient, realm, reloadKey]);
 
     const openCreate = (parent: any) => {
         setNewName("");
@@ -122,11 +102,11 @@ export default function Groups() {
                     { name }
                 );
             else await adminClient.groups.create({ name });
-            addAlert("Grup oluşturuldu.", AlertVariant.success);
+            addAlert(t("sxGroupsCreated"), AlertVariant.success);
             setCreateParent(undefined);
             reload();
         } catch (e) {
-            addError("Grup oluşturulamadı.", e);
+            addError(t("sxGroupsCreateError"), e);
         } finally {
             setCreating(false);
         }
@@ -134,17 +114,17 @@ export default function Groups() {
 
     const remove = (g: any) =>
         confirm({
-            title: "Grubu sil",
-            message: `“${g.name}” ve tüm alt grupları silinecek. Emin misiniz?`,
-            confirmLabel: "Sil",
+            title: t("sxGroupsDeleteTitle"),
+            message: t("sxGroupsDeleteMessage", { name: g.name }),
+            confirmLabel: t("sxGroupsDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.groups.del({ id: g.id });
-                    addAlert("Grup silindi.", AlertVariant.success);
+                    addAlert(t("sxGroupsDeleted"), AlertVariant.success);
                     reload();
                 } catch (e) {
-                    addError("Grup silinemedi.", e);
+                    addError(t("sxGroupsDeleteError"), e);
                 }
             }
         });
@@ -155,7 +135,7 @@ export default function Groups() {
             if (isDef) await adminClient.realms.removeDefaultGroup({ realm, id: g.id });
             else await adminClient.realms.addDefaultGroup({ realm, id: g.id });
             addAlert(
-                isDef ? "Varsayılan gruptan çıkarıldı." : "Varsayılan grup yapıldı.",
+                isDef ? t("sxGroupsDefaultRemoved") : t("sxGroupsDefaultAdded"),
                 AlertVariant.success
             );
             setDefaults(prev => {
@@ -164,53 +144,51 @@ export default function Groups() {
                 return next;
             });
         } catch (e) {
-            addError("Güncellenemedi.", e);
+            addError(t("sxGroupsDefaultError"), e);
         }
     };
 
     return (
-        <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-            <div className="mb-6 flex flex-wrap items-center justify-end gap-2">
-                <Button onClick={() => openCreate(null)}>Yeni grup</Button>
-            </div>
-            {loading ? (
-                <div className="grid place-items-center py-16">
-                    <Spinner />
-                </div>
-            ) : roots.length === 0 ? (
-                <Empty>
-                    <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                            <UsersThreeIcon />
-                        </EmptyMedia>
-                        <EmptyTitle>Henüz grup yok</EmptyTitle>
-                        <EmptyDescription>
-                            Kullanıcıları düzenlemek ve toplu rol atamak için ilk grubunu
-                            oluştur.
-                        </EmptyDescription>
-                    </EmptyHeader>
-                    <EmptyContent>
-                        <Button onClick={() => openCreate(null)}>Yeni grup</Button>
-                    </EmptyContent>
-                </Empty>
-            ) : (
-                <ItemGroup variant="inset">
-                    {roots.map((g, i) => (
-                        <Fragment key={g.id}>
-                            {i > 0 && <ItemSeparator />}
-                            <TreeNode
-                                group={g}
-                                depth={0}
-                                defaults={defaults}
-                                onOpen={id => navigate(`/${realm}/groups/${id}`)}
-                                onAddChild={openCreate}
-                                onDelete={remove}
-                                onToggleDefault={toggleDefault}
-                            />
-                        </Fragment>
-                    ))}
-                </ItemGroup>
-            )}
+        <AdminPage
+            title={t("sxNavGroups")}
+            description={t("sxGroupsDescription")}
+            actions={<Button onClick={() => openCreate(null)}>{t("sxGroupsNew")}</Button>}
+        >
+            <Section label={t("sxNavGroups")}>
+                {status === "loading" && <ListSkeleton />}
+                {status === "error" && (
+                    <Notice
+                        title={t("sxGroupsLoadError")}
+                        description={t("sxLoadErrorDescription")}
+                        onRetry={reload}
+                    />
+                )}
+                {status === "ready" && roots.length === 0 && (
+                    <Notice
+                        title={t("sxGroupsEmptyTitle")}
+                        description={t("sxGroupsEmptyDescription")}
+                        action={<Button onClick={() => openCreate(null)}>{t("sxGroupsNew")}</Button>}
+                    />
+                )}
+                {status === "ready" && roots.length > 0 && (
+                    <ul className={GROUP}>
+                        {roots.map((g, i) => (
+                            <Fragment key={g.id}>
+                                {i > 0 && <li aria-hidden className={SEPARATOR} />}
+                                <TreeNode
+                                    group={g}
+                                    depth={0}
+                                    defaults={defaults}
+                                    onOpen={id => navigate(`/${realm}/groups/${id}`)}
+                                    onAddChild={openCreate}
+                                    onDelete={remove}
+                                    onToggleDefault={toggleDefault}
+                                />
+                            </Fragment>
+                        ))}
+                    </ul>
+                )}
+            </Section>
 
             <Modal
                 open={createParent !== undefined}
@@ -220,20 +198,21 @@ export default function Groups() {
                     <ModalHeader>
                         <ModalTitle>
                             {createParent
-                                ? `“${createParent.name}” içine alt grup`
-                                : "Yeni grup"}
+                                ? t("sxGroupsSubgroupTitle", { name: createParent.name })
+                                : t("sxGroupsNew")}
                         </ModalTitle>
                     </ModalHeader>
                     <ModalBody>
-                        <Field>
+                        <Field size="lg">
                             <FieldLabel htmlFor="group-create-name">
-                                Grup adı <span className="text-destructive">*</span>
+                                {t("sxGroupsNameLabel")} <span className="text-[#d70015] dark:text-[#ff453a]">*</span>
                             </FieldLabel>
                             <Input
                                 id="group-create-name"
+                                size="lg"
                                 autoFocus
                                 value={newName}
-                                placeholder="örn. Yöneticiler"
+                                placeholder={t("sxGroupsNamePlaceholder")}
                                 onChange={(e: any) => setNewName(e.target.value)}
                                 onKeyDown={(e: any) => e.key === "Enter" && create()}
                             />
@@ -241,7 +220,7 @@ export default function Groups() {
                     </ModalBody>
                     <ModalFooter>
                         <Button disabled={creating || !newName.trim()} onClick={create}>
-                            Oluştur
+                            {t("sxGroupsCreate")}
                         </Button>
                     </ModalFooter>
                 </ModalContent>
@@ -258,7 +237,7 @@ export default function Groups() {
                         )}
                     </ConfirmHeader>
                     <ConfirmFooter>
-                        <ConfirmCancel>Vazgeç</ConfirmCancel>
+                        <ConfirmCancel>{t("sxGroupsCancel")}</ConfirmCancel>
                         <ConfirmAction
                             variant={confirmOpts?.danger ? "destructive" : "default"}
                             onClick={() => {
@@ -267,12 +246,12 @@ export default function Groups() {
                                 fn?.();
                             }}
                         >
-                            {confirmOpts?.confirmLabel ?? "Onayla"}
+                            {confirmOpts?.confirmLabel ?? t("sxGroupsConfirm")}
                         </ConfirmAction>
                     </ConfirmFooter>
                 </ConfirmContent>
             </Confirm>
-        </div>
+        </AdminPage>
     );
 }
 
@@ -289,12 +268,30 @@ function TreeNode({
     onDelete,
     onToggleDefault
 }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const [open, setOpen] = useState(false);
     const [children, setChildren] = useState<any[] | null>(null);
     const [loading, setLoading] = useState(false);
+    const [failed, setFailed] = useState(false);
     const hasChildren = (group.subGroupCount ?? group.subGroups?.length ?? 0) > 0;
     const isDefault = defaults.has(group.id);
+
+    const loadChildren = useCallback(async () => {
+        setLoading(true);
+        setFailed(false);
+        try {
+            const subs = await adminClient.groups.listSubGroups({
+                parentId: group.id,
+                briefRepresentation: false
+            });
+            setChildren(sortGroups(subs));
+        } catch {
+            setFailed(true);
+        } finally {
+            setLoading(false);
+        }
+    }, [adminClient, group.id]);
 
     const expand = useCallback(async () => {
         if (open) {
@@ -302,108 +299,100 @@ function TreeNode({
             return;
         }
         setOpen(true);
-        if (children === null) {
-            setLoading(true);
-            try {
-                const subs = await adminClient.groups.listSubGroups({
-                    parentId: group.id,
-                    briefRepresentation: false
-                });
-                setChildren(sortGroups(subs));
-            } catch {
-                setChildren([]);
-            } finally {
-                setLoading(false);
-            }
-        }
-    }, [open, children, adminClient, group.id]);
+        if (children === null) await loadChildren();
+    }, [open, children, loadChildren]);
+
+    const indent = { paddingInlineStart: 8 + depth * 20 };
+    const childIndent = { paddingInlineStart: 8 + (depth + 1) * 20 + 36 };
 
     return (
         <>
-            <Item size="sm" style={{ paddingInlineStart: 12 + depth * 22 }}>
-                <Button
+            <li className="flex min-h-16 items-center gap-2 py-2 pe-3" style={indent}>
+                <button
                     type="button"
-                    variant="ghost"
-                    size="icon-xs"
                     onClick={expand}
-                    aria-label={open ? "Daralt" : "Genişlet"}
-                    className={cn(!hasChildren && "invisible")}
+                    aria-label={open ? t("sxGroupsCollapse") : t("sxGroupsExpand")}
+                    className={cn(
+                        "grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground outline-none hover:bg-black/5 focus-visible:ring-2 focus-visible:ring-ring/50 dark:hover:bg-white/8",
+                        !hasChildren && "invisible"
+                    )}
                 >
-                    <CaretRightIcon
-                        className={cn("transition-transform", open && "rotate-90")}
-                        weight="bold"
-                    />
-                </Button>
-                <ItemMedia variant="icon">
-                    <UsersThreeIcon />
-                </ItemMedia>
-                <ItemContent className="min-w-0">
-                    <ItemTitle>
-                        <Button
-                            type="button"
-                            variant="link"
-                            size="sm"
-                            className="h-auto px-0"
-                            onClick={() => onOpen(group.id)}
-                        >
-                            <span className="truncate">{group.name}</span>
-                        </Button>
-                    </ItemTitle>
-                </ItemContent>
-                <ItemActions>
+                    <CaretRightIcon className={cn("size-3.5 transition-transform", open && "rotate-90")} weight="bold" />
+                </button>
+                <button
+                    type="button"
+                    onClick={() => onOpen(group.id)}
+                    className="flex min-w-0 flex-1 items-center gap-3 rounded-md py-1 text-left outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring/50"
+                >
+                    <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[#e5e5ea] dark:bg-[#2c2c2e]">
+                        <UsersThreeIcon className="size-4.5" />
+                    </span>
+                    <span className="min-w-0">
+                        <span className="block truncate text-base font-medium">{group.name}</span>
+                        {isDefault && (
+                            <span className="mt-0.5 flex items-center gap-1 text-[13px] text-muted-foreground sm:hidden">
+                                <StarIcon weight="fill" className="size-3" /> {t("sxGroupsDefault")}
+                            </span>
+                        )}
+                    </span>
+                </button>
+                <div className="flex shrink-0 items-center gap-2">
                     {isDefault && (
-                        <Badge variant="outline">
-                            <StarIcon weight="fill" data-icon="inline-start" /> Varsayılan
-                        </Badge>
+                        <span className="hidden sm:flex">
+                            <Chip tone="info">
+                                <span className="flex items-center gap-1">
+                                    <StarIcon weight="fill" className="size-3" /> {t("sxGroupsDefault")}
+                                </span>
+                            </Chip>
+                        </span>
                     )}
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                aria-label="Eylemler"
-                            >
+                            <Button type="button" variant="ghost" size="icon-sm" aria-label={t("sxGroupsActions")}>
                                 <DotsThreeIcon weight="bold" />
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => onOpen(group.id)}>
-                                <UsersIcon /> Aç
+                                <UsersIcon /> {t("sxGroupsOpen")}
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => onAddChild(group)}>
-                                <FolderPlusIcon /> Alt grup ekle
+                                <FolderPlusIcon /> {t("sxGroupsAddSubgroup")}
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => onToggleDefault(group)}>
-                                <StarIcon />{" "}
-                                {isDefault ? "Varsayılandan çıkar" : "Varsayılan yap"}
+                                <StarIcon /> {isDefault ? t("sxGroupsUnsetDefault") : t("sxGroupsSetDefault")}
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                                variant="destructive"
-                                onClick={() => onDelete(group)}
-                            >
-                                <TrashIcon /> Sil
+                            <DropdownMenuItem variant="destructive" onClick={() => onDelete(group)}>
+                                <TrashIcon /> {t("sxGroupsDelete")}
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
-                </ItemActions>
-            </Item>
+                </div>
+            </li>
             {open &&
                 (loading ? (
                     <>
-                        <ItemSeparator />
-                        <Item
-                            size="sm"
-                            style={{ paddingInlineStart: 12 + (depth + 1) * 22 }}
-                        >
-                            <Spinner />
-                        </Item>
+                        <li aria-hidden className={SEPARATOR} />
+                        <li className="flex min-h-12 flex-col justify-center gap-2 py-2 pe-4" style={childIndent}>
+                            <div className="h-3 w-2/5 animate-pulse rounded-md bg-[#e5e5ea] dark:bg-[#2c2c2e]" />
+                            <div className="h-2.5 w-1/4 animate-pulse rounded-md bg-[#e5e5ea] dark:bg-[#2c2c2e]" />
+                        </li>
+                    </>
+                ) : failed ? (
+                    <>
+                        <li aria-hidden className={SEPARATOR} />
+                        <li className="flex min-h-12 flex-wrap items-center gap-x-3 gap-y-1 py-2 pe-3 text-[13px] text-muted-foreground" style={childIndent}>
+                            <span>{t("sxGroupsSubgroupsLoadError")}</span>
+                            <TextAction onClick={loadChildren} className="text-[13px]">
+                                {t("sxRetry")}
+                            </TextAction>
+                        </li>
                     </>
                 ) : children && children.length > 0 ? (
                     children.map(c => (
                         <Fragment key={c.id}>
-                            <ItemSeparator />
+                            <li aria-hidden className={SEPARATOR} />
                             <TreeNode
                                 group={c}
                                 depth={depth + 1}
@@ -417,15 +406,10 @@ function TreeNode({
                     ))
                 ) : (
                     <>
-                        <ItemSeparator />
-                        <Item
-                            size="sm"
-                            style={{ paddingInlineStart: 12 + (depth + 1) * 22 }}
-                        >
-                            <ItemContent>
-                                <ItemDescription>Alt grup yok.</ItemDescription>
-                            </ItemContent>
-                        </Item>
+                        <li aria-hidden className={SEPARATOR} />
+                        <li className="flex min-h-12 items-center py-2 text-[13px] text-muted-foreground" style={childIndent}>
+                            {t("sxGroupsNoSubgroups")}
+                        </li>
                     </>
                 ))}
         </>

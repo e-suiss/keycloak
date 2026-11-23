@@ -3,66 +3,25 @@
 import {
     ArrowDownIcon,
     ArrowUpIcon,
-    CaretDownIcon,
     CaretRightIcon,
-    CopyIcon,
-    DotsThreeIcon,
-    FingerprintIcon,
-    FlowArrowIcon,
     GearSixIcon,
     GitBranchIcon,
-    ListChecksIcon,
-    PasswordIcon,
-    PlusIcon,
-    ShieldCheckIcon,
-    TrashIcon
+    PlusIcon
 } from "@phosphor-icons/react";
-import { Badge } from "@ui/components/badge";
 import { Button } from "@ui/components/button";
 import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
-    DropdownMenuSeparator,
     DropdownMenuTrigger
 } from "@ui/components/dropdown-menu";
-import {
-    Empty,
-    EmptyContent,
-    EmptyDescription,
-    EmptyHeader,
-    EmptyMedia,
-    EmptyTitle
-} from "@ui/components/empty";
-import {
-    Field,
-    FieldDescription,
-    FieldGroup,
-    FieldLabel
-} from "@ui/components/field";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@ui/components/field";
 import { Input } from "@ui/components/input";
-import {
-    Item,
-    ItemActions,
-    ItemContent,
-    ItemDescription,
-    ItemGroup,
-    ItemMedia,
-    ItemSeparator,
-    ItemTitle
-} from "@ui/components/item";
 import { NativeSelect, NativeSelectOption } from "@ui/components/native-select";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue
-} from "@ui/components/select";
-import { Spinner } from "@ui/components/spinner";
 import { Switch } from "@ui/components/switch";
 import { Textarea } from "@ui/components/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@ui/components/toggle-group";
+import { cn } from "@ui/lib/utils";
 import {
     Confirm,
     ConfirmAction,
@@ -81,37 +40,53 @@ import {
     ModalHeader,
     ModalTitle
 } from "@ui/patterns/modal";
-import { SegmentPicker, SegmentPickerItem } from "@ui/patterns/segment-picker";
-import { Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { AlertVariant, useAlerts } from "../../shared/keycloak-ui-shared";
 import { useAdminClient } from "../admin-client";
+import { useT } from "../ui/i18n";
+import {
+    AdminPage,
+    Chip,
+    GROUP,
+    Group,
+    ListSkeleton,
+    Notice,
+    SEPARATOR,
+    Section,
+    SegmentTabs,
+    TextAction
+} from "../ui/kit";
 import { useRealm } from "../ui/realm";
 
-/* ──────────────────────────────────────────────────────────────────────────
-   Static option sets (verified against the upstream keycloak-admin-ui).
-   ──────────────────────────────────────────────────────────────────────── */
-
 const SUB_TABS = [
-    { value: "flows", label: "Akışlar" },
-    { value: "actions", label: "Gerekli eylemler" },
-    { value: "policies", label: "Politikalar" }
+    { value: "flows", label: "sxAuthTabFlows" },
+    { value: "actions", label: "sxAuthTabRequiredActions" },
+    { value: "policies", label: "sxAuthTabPolicies" }
+];
+
+const POLICY_TABS = [
+    { value: "password", label: "sxAuthPolicyTabPassword" },
+    { value: "otp", label: "OTP", raw: true },
+    { value: "webauthn", label: "WebAuthn", raw: true },
+    { value: "passwordless", label: "sxAuthPolicyTabPasswordless" },
+    { value: "ciba", label: "CIBA", raw: true }
 ];
 
 const REQUIREMENTS = ["REQUIRED", "ALTERNATIVE", "DISABLED", "CONDITIONAL"] as const;
 const REQUIREMENT_LABELS: Record<string, string> = {
-    REQUIRED: "Zorunlu",
-    ALTERNATIVE: "Alternatif",
-    DISABLED: "Devre dışı",
-    CONDITIONAL: "Koşullu"
+    REQUIRED: "sxAuthRequirementRequired",
+    ALTERNATIVE: "sxAuthRequirementAlternative",
+    DISABLED: "sxAuthRequirementDisabled",
+    CONDITIONAL: "sxAuthRequirementConditional"
 };
 
 const BINDINGS: { key: string; label: string }[] = [
-    { key: "browserFlow", label: "Tarayıcı akışı" },
-    { key: "registrationFlow", label: "Kayıt akışı" },
-    { key: "directGrantFlow", label: "Doğrudan erişim" },
-    { key: "resetCredentialsFlow", label: "Kimlik bilgisi sıfırlama" },
-    { key: "clientAuthenticationFlow", label: "İstemci doğrulama" },
-    { key: "dockerAuthenticationFlow", label: "Docker doğrulama" }
+    { key: "browserFlow", label: "sxAuthBindingBrowser" },
+    { key: "registrationFlow", label: "sxAuthBindingRegistration" },
+    { key: "directGrantFlow", label: "sxAuthBindingDirectGrant" },
+    { key: "resetCredentialsFlow", label: "sxAuthBindingResetCredentials" },
+    { key: "clientAuthenticationFlow", label: "sxAuthBindingClientAuthentication" },
+    { key: "dockerAuthenticationFlow", label: "sxAuthBindingDockerAuthentication" }
 ];
 
 const OTP_TYPES = ["totp", "hotp"];
@@ -132,61 +107,62 @@ const ATTESTATION_PREFERENCE = ["not specified", "none", "indirect", "direct"];
 const AUTHENTICATOR_ATTACHMENT = ["not specified", "platform", "cross-platform"];
 const RESIDENT_KEY_OPTIONS = ["not specified", "Yes", "No"];
 const USER_VERIFY = ["not specified", "required", "preferred", "discouraged"];
+const WEBAUTHN_OPTION_LABELS: Record<string, string> = {
+    "not specified": "sxAuthNotSpecified",
+    Yes: "sxAuthYes",
+    No: "sxAuthNo"
+};
 
 const CIBA_DELIVERY_MODES = ["poll", "ping"];
 const CIBA_USER_HINTS = ["login_hint", "id_token_hint", "login_hint_token"];
 
-/* ──────────────────────────────────────────────────────────────────────────
-   Small shared select wrapper (ui Select only).
-   ──────────────────────────────────────────────────────────────────────── */
+const HAIRLINE = "border-[#e5e5ea] dark:border-[#38383a]";
 
-const PICK_NONE = "__none__";
+const EMPTY_STATUS = { flows: false, actions: false, rep: false };
 
-function Pick({
-    value,
-    onChange,
-    options,
-    placeholder = "Seç",
-    className,
-    "aria-label": ariaLabel
-}: any) {
-    // Radix Select reserves "" for "no selection"; an option with value "" maps to NONE.
-    const hasEmptyOption = options.some((o: any) => (typeof o === "string" ? o : o.value) === "");
+function Choice({ value, onChange, options, placeholder, size = "default", className, id, "aria-label": ariaLabel }: any) {
+    const t = useT();
+    const normalized = options.map((o: any) =>
+        typeof o === "string" ? { value: o, label: o } : o
+    );
     const current = value ?? "";
+    const known = normalized.some((o: any) => o.value === current);
     return (
-        <Select
-            value={current === "" && hasEmptyOption ? PICK_NONE : current}
-            onValueChange={(v: string) => onChange(v === PICK_NONE ? "" : v)}
+        <NativeSelect
+            id={id}
+            size={size}
+            className={className}
+            aria-label={ariaLabel}
+            value={current}
+            onChange={(e: any) => onChange(e.target.value)}
         >
-            <SelectTrigger size="sm" aria-label={ariaLabel} className={className}>
-                <SelectValue placeholder={placeholder} />
-            </SelectTrigger>
-            <SelectContent align="end">
-                {options.map((o: any) => {
-                    const v = typeof o === "string" ? o : o.value;
-                    const l = typeof o === "string" ? o : o.label;
-                    return (
-                        <SelectItem key={v} value={v === "" ? PICK_NONE : v}>
-                            {l}
-                        </SelectItem>
-                    );
-                })}
-            </SelectContent>
-        </Select>
+            {!known && current === "" && (
+                <NativeSelectOption value="" disabled>
+                    {placeholder ?? t("sxAuthSelect")}
+                </NativeSelectOption>
+            )}
+            {!known && current !== "" && (
+                <NativeSelectOption value={current}>{current}</NativeSelectOption>
+            )}
+            {normalized.map((o: any) => (
+                <NativeSelectOption key={o.value} value={o.value}>
+                    {o.label}
+                </NativeSelectOption>
+            ))}
+        </NativeSelect>
     );
 }
 
-/* ──────────────────────────────────────────────────────────────────────────
-   Component
-   ──────────────────────────────────────────────────────────────────────── */
-
 export default function Authentication() {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
     const { addAlert, addError } = useAlerts();
     const [confirm, confirmNode] = useConfirm();
 
     const [loading, setLoading] = useState(true);
+    const [failed, setFailed] = useState(EMPTY_STATUS);
+    const loadedRef = useRef({ ...EMPTY_STATUS });
     const [tab, setTab] = useState("flows");
 
     const [flows, setFlows] = useState<any[]>([]);
@@ -194,12 +170,13 @@ export default function Authentication() {
     const [rep, setRep] = useState<any>(null);
     const [passwordPolicyTypes, setPasswordPolicyTypes] = useState<any[]>([]);
 
-    // flow detail
     const [openFlow, setOpenFlow] = useState<string | null>(null);
+    const openFlowRef = useRef<string | null>(null);
+    openFlowRef.current = openFlow;
     const [executions, setExecutions] = useState<any[]>([]);
     const [execLoading, setExecLoading] = useState(false);
+    const [execFailed, setExecFailed] = useState(false);
 
-    // modals
     const [dupTarget, setDupTarget] = useState<any>(null);
     const [dupName, setDupName] = useState("");
     const [createOpen, setCreateOpen] = useState(false);
@@ -211,22 +188,35 @@ export default function Authentication() {
 
     const [saving, setSaving] = useState(false);
 
-    /* ── data loading ─────────────────────────────────────────────────── */
-
     const load = async (alive = { current: true }) => {
-        setLoading(true);
+        const loaded = loadedRef.current;
+        if (!loaded.flows || !loaded.actions || !loaded.rep) setLoading(true);
         try {
             const [flowsRes, actionsRes, realmRep, info] = await Promise.all([
-                adminClient.authenticationManagement.getFlows().catch(() => []),
-                adminClient.authenticationManagement.getRequiredActions().catch(() => []),
-                adminClient.realms.findOne({ realm }).catch(() => ({})),
+                adminClient.authenticationManagement.getFlows().catch(() => null),
+                adminClient.authenticationManagement.getRequiredActions().catch(() => null),
+                adminClient.realms.findOne({ realm }).catch(() => null),
                 adminClient.serverInfo.find().catch(() => null)
             ]);
             if (!alive.current) return;
-            setFlows(Array.isArray(flowsRes) ? flowsRes : []);
-            setRequiredActions(Array.isArray(actionsRes) ? actionsRes : []);
-            setRep(realmRep || {});
-            setPasswordPolicyTypes(info?.passwordPolicies || []);
+            if (flowsRes !== null) {
+                setFlows(Array.isArray(flowsRes) ? flowsRes : []);
+                loaded.flows = true;
+            }
+            if (actionsRes !== null) {
+                setRequiredActions(Array.isArray(actionsRes) ? actionsRes : []);
+                loaded.actions = true;
+            }
+            if (realmRep) {
+                setRep(realmRep);
+                loaded.rep = true;
+            }
+            if (info?.passwordPolicies) setPasswordPolicyTypes(info.passwordPolicies);
+            setFailed({
+                flows: !loaded.flows,
+                actions: !loaded.actions,
+                rep: !loaded.rep
+            });
         } finally {
             if (alive.current) setLoading(false);
         }
@@ -234,12 +224,19 @@ export default function Authentication() {
 
     useEffect(() => {
         const alive = { current: true };
+        loadedRef.current = { ...EMPTY_STATUS };
+        setFailed(EMPTY_STATUS);
+        setFlows([]);
+        setRequiredActions([]);
+        setRep(null);
+        setOpenFlow(null);
+        setExecutions([]);
+        setExecFailed(false);
         load(alive);
         return () => {
             alive.current = false;
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [load]);
+    }, [realm]);
 
     const setField = (k: string, v: any) => setRep((p: any) => ({ ...p, [k]: v }));
 
@@ -257,33 +254,44 @@ export default function Authentication() {
         }
     };
 
-    /* ── flows ────────────────────────────────────────────────────────── */
-
     const topLevelFlows = useMemo(() => flows.filter(f => f?.topLevel), [flows]);
     const topLevelAliases = topLevelFlows.map(f => f.alias);
 
-    const loadExecutions = async (flowAlias: string) => {
-        setExecLoading(true);
+    const loadExecutions = async (flowAlias: string, silent = false) => {
+        if (!silent) {
+            setExecLoading(true);
+            setExecFailed(false);
+        }
         try {
             const res = await adminClient.authenticationManagement.getExecutions({
                 flow: flowAlias
             });
+            if (openFlowRef.current !== flowAlias) return;
             setExecutions(Array.isArray(res) ? res : []);
+            setExecFailed(false);
         } catch (err) {
-            addError("Adımlar yüklenemedi.", err);
-            setExecutions([]);
+            if (openFlowRef.current !== flowAlias) return;
+            if (silent) addError(t("sxAuthStepsReloadError"), err);
+            else {
+                setExecutions([]);
+                setExecFailed(true);
+            }
         } finally {
-            setExecLoading(false);
+            if (!silent && openFlowRef.current === flowAlias) setExecLoading(false);
         }
     };
 
     const toggleFlow = async (flow: any) => {
         if (openFlow === flow.alias) {
+            openFlowRef.current = null;
             setOpenFlow(null);
             setExecutions([]);
+            setExecFailed(false);
             return;
         }
+        openFlowRef.current = flow.alias;
         setOpenFlow(flow.alias);
+        setExecutions([]);
         await loadExecutions(flow.alias);
     };
 
@@ -297,10 +305,10 @@ export default function Authentication() {
                 { flow: flowAlias },
                 { ...exec, requirement }
             );
-            addAlert("Adım gereksinimi güncellendi.", AlertVariant.success);
-            await loadExecutions(flowAlias);
+            addAlert(t("sxAuthRequirementUpdated"), AlertVariant.success);
+            await loadExecutions(flowAlias, true);
         } catch (err) {
-            addError("Adım güncellenemedi.", err);
+            addError(t("sxAuthStepUpdateError"), err);
         }
     };
 
@@ -314,56 +322,60 @@ export default function Authentication() {
                 await adminClient.authenticationManagement.lowerPriorityExecution({
                     id: exec.id
                 });
-            await loadExecutions(flowAlias);
+            await loadExecutions(flowAlias, true);
         } catch (err) {
-            addError("Sıra değiştirilemedi.", err);
+            addError(t("sxAuthReorderError"), err);
         }
     };
-
-    /* ── execution config (gear) ──────────────────────────────────────────
-       A configurable execution (configurable=true) carries an authenticator
-       config — e.g. the "Registration: KYC Mode" step's a1/l1 dropdown, or each
-       "Terms & Conditions" document. The form is generated from the provider's
-       config-description so any configurable step is editable here. */
     const [cfgExec, setCfgExec] = useState<any>(null);
     const [cfgDesc, setCfgDesc] = useState<any>(null);
     const [cfgValues, setCfgValues] = useState<Record<string, any>>({});
     const [cfgAlias, setCfgAlias] = useState("");
     const [cfgLoading, setCfgLoading] = useState(false);
+    const [cfgFailed, setCfgFailed] = useState(false);
     const [cfgSaving, setCfgSaving] = useState(false);
+    const cfgExecRef = useRef<any>(null);
 
     const openConfig = async (exec: any) => {
+        cfgExecRef.current = exec;
         setCfgExec(exec);
         setCfgDesc(null);
         setCfgValues({});
         setCfgAlias("");
+        setCfgFailed(false);
         setCfgLoading(true);
         try {
             const desc = await adminClient.authenticationManagement.getConfigDescription({
                 providerId: exec.providerId
             });
-            setCfgDesc(desc || { properties: [] });
+            let values: Record<string, any> = {};
+            let alias = `${exec.providerId}-config`;
             if (exec.authenticationConfig) {
                 const cfg = await adminClient.authenticationManagement.getConfig({
                     id: exec.authenticationConfig
                 });
-                setCfgAlias(cfg?.alias || `${exec.providerId}-config`);
-                setCfgValues({ ...(cfg?.config || {}) });
+                alias = cfg?.alias || alias;
+                values = { ...(cfg?.config || {}) };
             } else {
-                const defaults: Record<string, any> = {};
                 (desc?.properties || []).forEach((p: any) => {
                     if (p.defaultValue !== undefined && p.defaultValue !== null)
-                        defaults[p.name] = String(p.defaultValue);
+                        values[p.name] = String(p.defaultValue);
                 });
-                setCfgValues(defaults);
-                setCfgAlias(`${exec.providerId}-config`);
             }
-        } catch (err) {
-            addError("Adım yapılandırması yüklenemedi.", err);
-            setCfgExec(null);
+            if (cfgExecRef.current !== exec) return;
+            setCfgDesc(desc || { properties: [] });
+            setCfgValues(values);
+            setCfgAlias(alias);
+        } catch {
+            if (cfgExecRef.current === exec) setCfgFailed(true);
         } finally {
-            setCfgLoading(false);
+            if (cfgExecRef.current === exec) setCfgLoading(false);
         }
+    };
+
+    const closeConfig = () => {
+        cfgExecRef.current = null;
+        setCfgExec(null);
     };
 
     const saveConfig = async () => {
@@ -388,12 +400,12 @@ export default function Authentication() {
                     config
                 });
             }
-            addAlert("Adım yapılandırması kaydedildi.", AlertVariant.success);
+            addAlert(t("sxAuthStepConfigSaved"), AlertVariant.success);
             const flowAlias = openFlow;
-            setCfgExec(null);
-            if (flowAlias) await loadExecutions(flowAlias);
+            closeConfig();
+            if (flowAlias) await loadExecutions(flowAlias, true);
         } catch (err) {
-            addError("Yapılandırma kaydedilemedi.", err);
+            addError(t("sxAuthStepConfigSaveError"), err);
         } finally {
             setCfgSaving(false);
         }
@@ -406,34 +418,36 @@ export default function Authentication() {
                 flow: dupTarget.alias,
                 newName: dupName.trim()
             });
-            addAlert("Akış kopyalandı.", AlertVariant.success);
+            addAlert(t("sxAuthFlowCopied"), AlertVariant.success);
             setDupTarget(null);
             setDupName("");
             await load();
         } catch (err) {
-            addError("Akış kopyalanamadı.", err);
+            addError(t("sxAuthFlowCopyError"), err);
         }
     };
 
     const deleteFlow = (flow: any) =>
         confirm({
-            title: "Akışı sil",
-            message: `“${flow.alias}” akışını silmek istediğinize emin misiniz?`,
-            confirmLabel: "Sil",
+            title: t("sxAuthDeleteFlowTitle"),
+            message: t("sxAuthDeleteFlowMessage", { name: flow.alias }),
+            confirmLabel: t("sxAuthDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.authenticationManagement.deleteFlow({
                         flowId: flow.id
                     });
-                    addAlert("Akış silindi.", AlertVariant.success);
+                    addAlert(t("sxAuthFlowDeleted"), AlertVariant.success);
                     if (openFlow === flow.alias) {
+                        openFlowRef.current = null;
                         setOpenFlow(null);
                         setExecutions([]);
+                        setExecFailed(false);
                     }
                     await load();
                 } catch (err) {
-                    addError("Akış silinemedi.", err);
+                    addError(t("sxAuthFlowDeleteError"), err);
                 }
             }
         });
@@ -448,16 +462,14 @@ export default function Authentication() {
                 topLevel: true,
                 builtIn: false
             });
-            addAlert("Akış oluşturuldu.", AlertVariant.success);
+            addAlert(t("sxAuthFlowCreated"), AlertVariant.success);
             setCreateOpen(false);
             setCreateForm({ alias: "", description: "", providerId: "basic-flow" });
             await load();
         } catch (err) {
-            addError("Akış oluşturulamadı.", err);
+            addError(t("sxAuthFlowCreateError"), err);
         }
     };
-
-    /* ── required actions ─────────────────────────────────────────────── */
 
     const sortedActions = useMemo(
         () =>
@@ -471,10 +483,10 @@ export default function Authentication() {
                 { alias: action.alias },
                 { ...action, ...patch }
             );
-            addAlert("Gerekli eylem güncellendi.", AlertVariant.success);
+            addAlert(t("sxAuthRequiredActionUpdated"), AlertVariant.success);
             await load();
         } catch (err) {
-            addError("Gerekli eylem güncellenemedi.", err);
+            addError(t("sxAuthRequiredActionUpdateError"), err);
         }
     };
 
@@ -490,17 +502,15 @@ export default function Authentication() {
                 });
             await load();
         } catch (err) {
-            addError("Öncelik değiştirilemedi.", err);
+            addError(t("sxAuthPriorityError"), err);
         }
     };
-
-    /* ── password policy builder ──────────────────────────────────────── */
 
     const policyTokens = useMemo(
         () => parsePolicy(rep?.passwordPolicy || "", passwordPolicyTypes),
         [rep?.passwordPolicy, passwordPolicyTypes]
     );
-    const usedPolicyIds = new Set(policyTokens.map(t => t.id));
+    const usedPolicyIds = new Set(policyTokens.map(x => x.id));
     const availablePolicyTypes = passwordPolicyTypes.filter(
         p => !usedPolicyIds.has(p.id) || p.multipleSupported
     );
@@ -518,7 +528,7 @@ export default function Authentication() {
         setField("passwordPolicy", serializePolicy(next));
     };
     const setPolicyValue = (idx: number, value: string) => {
-        const next = policyTokens.map((t, i) => (i === idx ? { ...t, value } : t));
+        const next = policyTokens.map((x, i) => (i === idx ? { ...x, value } : x));
         setField("passwordPolicy", serializePolicy(next));
     };
     const removePolicy = (idx: number) => {
@@ -526,132 +536,156 @@ export default function Authentication() {
         setField("passwordPolicy", serializePolicy(next));
     };
 
-    /* ── render ───────────────────────────────────────────────────────── */
+    const tabFailed =
+        tab === "flows" ? failed.flows || failed.rep : tab === "actions" ? failed.actions : failed.rep;
+    const tabErrorTitle =
+        tab === "flows"
+            ? t("sxAuthFlowsLoadError")
+            : tab === "actions"
+              ? t("sxAuthRequiredActionsLoadError")
+              : t("sxAuthPoliciesLoadError");
 
-    if (loading || !rep) {
-        return (
-            <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-                <div className="flex justify-center py-16">
-                    <Spinner className="size-6" />
-                </div>
-            </div>
-        );
-    }
+    const pageActions =
+        tab === "flows" && !loading && !tabFailed ? (
+            <Button onClick={() => setCreateOpen(true)}>{t("sxAuthCreateFlow")}</Button>
+        ) : undefined;
 
     return (
-        <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-            <div className="mb-6 flex justify-center">
-                <SegmentPicker value={tab} onValueChange={setTab} aria-label="Bölüm">
-                    {SUB_TABS.map(o => (
-                        <SegmentPickerItem key={o.value} value={o.value} label={o.label} />
-                    ))}
-                </SegmentPicker>
-            </div>
+        <AdminPage
+            width="wide"
+            title={t("sxAuthTitle")}
+            description={t("sxAuthDescription")}
+            actions={pageActions}
+        >
+            <SegmentTabs
+                value={tab}
+                onChange={setTab}
+                items={SUB_TABS.map(x => ({ value: x.value, label: t(x.label) }))}
+                ariaLabel={t("sxAuthSectionsLabel")}
+            />
 
-            <div className="mx-auto w-full max-w-2xl space-y-6">
-                {tab === "flows" && (
-                    <FlowsTab
-                        flows={flows}
-                        topLevelFlows={topLevelFlows}
-                        topLevelAliases={topLevelAliases}
-                        openFlow={openFlow}
-                        executions={executions}
-                        execLoading={execLoading}
-                        toggleFlow={toggleFlow}
-                        changeRequirement={changeRequirement}
-                        moveExec={moveExec}
-                        onConfigure={openConfig}
-                        onDuplicate={(f: any) => {
-                            setDupTarget(f);
-                            setDupName(`${f.alias} kopya`);
-                        }}
-                        onDelete={deleteFlow}
-                        onCreate={() => setCreateOpen(true)}
-                        bindings={rep}
-                        onBind={(k: string, v: string) =>
-                            persist(
-                                { [k]: v || undefined },
-                                "Akış bağlaması kaydedildi.",
-                                "Bağlama kaydedilemedi."
-                            )
-                        }
-                        saving={saving}
-                    />
-                )}
+            {loading ? (
+                <ListSkeleton rows={4} />
+            ) : tabFailed ? (
+                <Notice
+                    title={tabErrorTitle}
+                    description={t("sxLoadErrorDescription")}
+                    onRetry={() => load()}
+                />
+            ) : (
+                <>
+                    {tab === "flows" && (
+                        <FlowsTab
+                            flows={flows}
+                            topLevelFlows={topLevelFlows}
+                            topLevelAliases={topLevelAliases}
+                            openFlow={openFlow}
+                            executions={executions}
+                            execLoading={execLoading}
+                            execFailed={execFailed}
+                            onRetryExecutions={(alias: string) => loadExecutions(alias)}
+                            toggleFlow={toggleFlow}
+                            changeRequirement={changeRequirement}
+                            moveExec={moveExec}
+                            onConfigure={openConfig}
+                            onDuplicate={(f: any) => {
+                                setDupTarget(f);
+                                setDupName(t("sxAuthCopyDefaultName", { name: f.alias }));
+                            }}
+                            onDelete={deleteFlow}
+                            onCreate={() => setCreateOpen(true)}
+                            bindings={rep}
+                            onBind={(k: string, v: string) =>
+                                persist(
+                                    { [k]: v || undefined },
+                                    t("sxAuthBindingSaved"),
+                                    t("sxAuthBindingSaveError")
+                                )
+                            }
+                            saving={saving}
+                        />
+                    )}
 
-                {tab === "actions" && (
-                    <RequiredActionsTab
-                        actions={sortedActions}
-                        onUpdate={updateAction}
-                        onMove={moveAction}
-                    />
-                )}
+                    {tab === "actions" && (
+                        <RequiredActionsTab
+                            actions={sortedActions}
+                            onUpdate={updateAction}
+                            onMove={moveAction}
+                        />
+                    )}
 
-                {tab === "policies" && (
-                    <PoliciesTab
-                        rep={rep}
-                        setField={setField}
-                        persist={persist}
-                        saving={saving}
-                        policyTokens={policyTokens}
-                        availablePolicyTypes={availablePolicyTypes}
-                        addPolicy={addPolicy}
-                        setPolicyValue={setPolicyValue}
-                        removePolicy={removePolicy}
-                    />
-                )}
-            </div>
+                    {tab === "policies" && (
+                        <PoliciesTab
+                            rep={rep}
+                            setField={setField}
+                            persist={persist}
+                            saving={saving}
+                            policyTokens={policyTokens}
+                            availablePolicyTypes={availablePolicyTypes}
+                            addPolicy={addPolicy}
+                            setPolicyValue={setPolicyValue}
+                            removePolicy={removePolicy}
+                        />
+                    )}
+                </>
+            )}
 
-            {/* duplicate flow modal */}
             <Modal open={!!dupTarget} onOpenChange={o => !o && setDupTarget(null)}>
                 <ModalContent>
                     <ModalHeader>
-                        <ModalTitle>Akışı kopyala</ModalTitle>
+                        <ModalTitle>{t("sxAuthCopyFlowTitle")}</ModalTitle>
                     </ModalHeader>
                     <ModalBody>
                         <FieldGroup>
-                            <p className="text-sm text-muted-foreground">
-                                “{dupTarget?.alias}” akışının bir kopyası oluşturulacak.
+                            <p className="text-[15px] text-muted-foreground">
+                                {t("sxAuthCopyFlowDescription", { name: dupTarget?.alias ?? "" })}
                             </p>
-                            <Field>
-                                <FieldLabel>Yeni akış adı</FieldLabel>
+                            <Field size="lg">
+                                <FieldLabel htmlFor="auth-dup-name">{t("sxAuthNewFlowName")}</FieldLabel>
                                 <Input
+                                    id="auth-dup-name"
+                                    size="lg"
                                     value={dupName}
                                     onChange={(e: any) => setDupName(e.target.value)}
-                                    placeholder="Akış adı"
+                                    placeholder={t("sxAuthFlowNamePlaceholder")}
                                 />
                             </Field>
                         </FieldGroup>
                     </ModalBody>
                     <ModalFooter>
                         <Button onClick={submitDuplicate} disabled={!dupName.trim()}>
-                            Kopyala
+                            {t("sxAuthCopy")}
                         </Button>
                     </ModalFooter>
                 </ModalContent>
             </Modal>
 
-            {/* create flow modal */}
             <Modal open={createOpen} onOpenChange={o => !o && setCreateOpen(false)}>
                 <ModalContent>
                     <ModalHeader>
-                        <ModalTitle>Akış oluştur</ModalTitle>
+                        <ModalTitle>{t("sxAuthCreateFlow")}</ModalTitle>
                     </ModalHeader>
                     <ModalBody>
                         <FieldGroup>
-                            <Field>
-                                <FieldLabel>Ad</FieldLabel>
+                            <Field size="lg">
+                                <FieldLabel htmlFor="auth-create-alias">{t("sxAuthName")}</FieldLabel>
                                 <Input
+                                    id="auth-create-alias"
+                                    size="lg"
                                     value={createForm.alias}
                                     onChange={(e: any) =>
                                         setCreateForm(p => ({ ...p, alias: e.target.value }))
                                     }
-                                    placeholder="Örn. Özel tarayıcı akışı"
+                                    placeholder={t("sxAuthCreateFlowNamePlaceholder")}
                                 />
                             </Field>
-                            <Field>
-                                <FieldLabel>Açıklama</FieldLabel>
+                            <Field size="lg">
+                                <FieldLabel htmlFor="auth-create-description">
+                                    {t("sxAuthDescriptionLabel")}
+                                </FieldLabel>
                                 <Input
+                                    id="auth-create-description"
+                                    size="lg"
                                     value={createForm.description}
                                     onChange={(e: any) =>
                                         setCreateForm(p => ({
@@ -659,48 +693,58 @@ export default function Authentication() {
                                             description: e.target.value
                                         }))
                                     }
-                                    placeholder="İsteğe bağlı"
+                                    placeholder={t("sxAuthOptional")}
                                 />
                             </Field>
-                            <Field>
-                                <FieldLabel>Akış türü</FieldLabel>
-                                <Pick
+                            <Field size="lg">
+                                <FieldLabel htmlFor="auth-create-type">{t("sxAuthFlowType")}</FieldLabel>
+                                <Choice
+                                    id="auth-create-type"
+                                    size="lg"
+                                    className="w-full"
                                     value={createForm.providerId}
                                     onChange={(v: string) =>
                                         setCreateForm(p => ({ ...p, providerId: v }))
                                     }
                                     options={[
-                                        { value: "basic-flow", label: "Temel akış" },
-                                        { value: "client-flow", label: "İstemci akışı" }
+                                        { value: "basic-flow", label: t("sxAuthBasicFlow") },
+                                        { value: "client-flow", label: t("sxAuthClientFlow") }
                                     ]}
-                                    aria-label="Akış türü"
                                 />
                             </Field>
                         </FieldGroup>
                     </ModalBody>
                     <ModalFooter>
                         <Button onClick={submitCreate} disabled={!createForm.alias.trim()}>
-                            Oluştur
+                            {t("sxAuthCreate")}
                         </Button>
                     </ModalFooter>
                 </ModalContent>
             </Modal>
 
-            {/* execution config modal (gear) */}
-            <Modal open={!!cfgExec} onOpenChange={o => !o && setCfgExec(null)}>
+            <Modal open={!!cfgExec} onOpenChange={o => !o && closeConfig()}>
                 <ModalContent>
                     <ModalHeader>
-                        <ModalTitle>{`Yapılandırma — ${cfgExec?.displayName || cfgExec?.providerId || ""}`}</ModalTitle>
+                        <ModalTitle>
+                            {t("sxAuthConfigTitle", {
+                                name: cfgExec?.displayName || cfgExec?.providerId || ""
+                            })}
+                        </ModalTitle>
                     </ModalHeader>
                     <ModalBody>
                         {cfgLoading ? (
-                            <div className="flex justify-center py-8">
-                                <Spinner className="size-6" />
-                            </div>
+                            <ListSkeleton rows={2} />
+                        ) : cfgFailed ? (
+                            <Notice
+                                title={t("sxAuthStepConfigLoadError")}
+                                description={t("sxLoadErrorDescription")}
+                                onRetry={() => cfgExec && openConfig(cfgExec)}
+                            />
                         ) : (cfgDesc?.properties || []).length === 0 ? (
-                            <p className="text-sm text-muted-foreground">
-                                Bu adımın yapılandırılabilir alanı yok.
-                            </p>
+                            <Notice
+                                title={t("sxAuthNoConfigTitle")}
+                                description={t("sxAuthNoConfigDescription")}
+                            />
                         ) : (
                             <FieldGroup>
                                 {cfgDesc.properties.map((p: any) => (
@@ -717,47 +761,51 @@ export default function Authentication() {
                         )}
                     </ModalBody>
                     <ModalFooter>
-                        <Button onClick={saveConfig} disabled={cfgSaving || cfgLoading}>
-                            Kaydet
+                        <Button
+                            onClick={saveConfig}
+                            disabled={cfgSaving || cfgLoading || cfgFailed}
+                        >
+                            {t("sxAuthSave")}
                         </Button>
                     </ModalFooter>
                 </ModalContent>
             </Modal>
 
             {confirmNode}
-        </div>
+        </AdminPage>
     );
 }
 
-/* ──────────────────────────────────────────────────────────────────────────
-   One config property → the matching control (List→select, boolean→switch,
-   Text→textarea, otherwise text/number/password input).
-   ──────────────────────────────────────────────────────────────────────── */
-
 function ConfigField({ prop, value, onChange }: any) {
+    const t = useT();
+    const id = useId();
     const type = String(prop.type || "String").toLowerCase();
     const label = prop.label || prop.name;
-    const hint = prop.helpText ? <FieldDescription>{prop.helpText}</FieldDescription> : null;
+    const hint = prop.helpText ? (
+        <FieldDescription className="ps-0.5 text-[13px]">{prop.helpText}</FieldDescription>
+    ) : null;
     if (type === "boolean") {
         return (
-            <Field>
-                <FieldLabel>{label}</FieldLabel>
-                <Switch
-                    checked={value === true || value === "true"}
-                    onCheckedChange={(v: boolean) => onChange(v)}
-                />
+            <Field size="lg">
+                <div className="flex items-center justify-between gap-4">
+                    <FieldLabel htmlFor={id}>{label}</FieldLabel>
+                    <Switch
+                        id={id}
+                        checked={value === true || value === "true"}
+                        onCheckedChange={(v: boolean) => onChange(v)}
+                    />
+                </div>
                 {hint}
             </Field>
         );
     }
     if (type === "list" && prop.options?.length) {
-        // Native <select> (no portal) — a Radix Select would open *behind* the
-        // dialog overlay (z-50 content vs z-100 overlay) and look like it never
-        // opened.
         return (
-            <Field>
-                <FieldLabel>{label}</FieldLabel>
+            <Field size="lg">
+                <FieldLabel htmlFor={id}>{label}</FieldLabel>
                 <NativeSelect
+                    id={id}
+                    size="lg"
                     value={value ?? ""}
                     onChange={(e: any) => onChange(e.target.value)}
                     aria-label={label}
@@ -765,7 +813,7 @@ function ConfigField({ prop, value, onChange }: any) {
                 >
                     {value === undefined || value === "" ? (
                         <NativeSelectOption value="" disabled>
-                            Seç
+                            {t("sxAuthSelect")}
                         </NativeSelectOption>
                     ) : null}
                     {prop.options.map((o: string) => (
@@ -780,9 +828,11 @@ function ConfigField({ prop, value, onChange }: any) {
     }
     if (type === "text" || type === "script") {
         return (
-            <Field>
-                <FieldLabel>{label}</FieldLabel>
+            <Field size="lg">
+                <FieldLabel htmlFor={id}>{label}</FieldLabel>
                 <Textarea
+                    id={id}
+                    size="lg"
                     value={value ?? ""}
                     onChange={(e: any) => onChange(e.target.value)}
                     placeholder={prop.placeholder}
@@ -792,9 +842,11 @@ function ConfigField({ prop, value, onChange }: any) {
         );
     }
     return (
-        <Field>
-            <FieldLabel>{label}</FieldLabel>
+        <Field size="lg">
+            <FieldLabel htmlFor={id}>{label}</FieldLabel>
             <Input
+                id={id}
+                size="lg"
                 type={
                     prop.secret || type === "password"
                         ? "password"
@@ -811,61 +863,90 @@ function ConfigField({ prop, value, onChange }: any) {
     );
 }
 
-/* ── small layout helpers built from esuiss pieces ───────────────────── */
-
-function GroupCaption({ children }: { children: ReactNode }) {
+function SaveBar({ onClick, saving }: any) {
+    const t = useT();
     return (
-        <h3 className="mb-2 ms-1 text-sm font-medium text-muted-foreground">{children}</h3>
+        <div className="flex justify-end">
+            <Button size="form" onClick={onClick} disabled={saving}>
+                {saving ? t("sxAuthSaving") : t("sxAuthSave")}
+            </Button>
+        </div>
     );
 }
 
-/** Label-left / control-right settings row inside an inset ItemGroup. */
-function SettingRow({ label, hint, children }: any) {
+function FormCard({ children }: { children: ReactNode }) {
+    return <div className={cn(GROUP, "grid gap-4 p-4 sm:grid-cols-2")}>{children}</div>;
+}
+
+function FormField({ label, hint, wide, children }: any) {
+    const id = useId();
     return (
-        <Item size="sm">
-            <ItemContent>
-                <ItemTitle className="font-normal">{label}</ItemTitle>
-                {hint && <ItemDescription>{hint}</ItemDescription>}
-            </ItemContent>
-            <ItemActions>{children}</ItemActions>
-        </Item>
+        <Field size="lg" className={cn("min-w-0", wide && "sm:col-span-2")}>
+            <FieldLabel htmlFor={id}>{label}</FieldLabel>
+            {children(id)}
+            {hint && <FieldDescription className="ps-0.5 text-[13px]">{hint}</FieldDescription>}
+        </Field>
     );
 }
 
-/** Insert ItemSeparators between rows. */
-function withSeparators(nodes: ReactNode[]) {
-    return nodes.map((n, i) => (
-        <Fragment key={i}>
-            {i > 0 && <ItemSeparator />}
-            {n}
-        </Fragment>
-    ));
-}
-
-function EmptyBlock({ icon, title, desc, action }: any) {
+function SelectField({ label, hint, value, onChange, options }: any) {
     return (
-        <Empty>
-            <EmptyHeader>
-                <EmptyMedia variant="icon">{icon}</EmptyMedia>
-                <EmptyTitle>{title}</EmptyTitle>
-                {desc && <EmptyDescription>{desc}</EmptyDescription>}
-            </EmptyHeader>
-            {action && <EmptyContent>{action}</EmptyContent>}
-        </Empty>
+        <FormField label={label} hint={hint}>
+            {(id: string) => (
+                <Choice
+                    id={id}
+                    size="lg"
+                    className="w-full"
+                    value={value}
+                    onChange={onChange}
+                    options={options}
+                />
+            )}
+        </FormField>
     );
 }
 
-/* ──────────────────────────────────────────────────────────────────────────
-   Flows tab
-   ──────────────────────────────────────────────────────────────────────── */
+function NumberField({ label, hint, value, onChange }: any) {
+    return (
+        <FormField label={label} hint={hint}>
+            {(id: string) => (
+                <Input
+                    id={id}
+                    size="lg"
+                    type="number"
+                    className="tabular-nums"
+                    value={value}
+                    onChange={(e: any) => onChange(Number(e.target.value))}
+                />
+            )}
+        </FormField>
+    );
+}
+
+function IconAction({ label, onClick, disabled, children }: any) {
+    return (
+        <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={label}
+            title={label}
+            onClick={onClick}
+            disabled={disabled}
+            className="text-muted-foreground hover:text-foreground"
+        >
+            {children}
+        </Button>
+    );
+}
 
 function FlowsTab({
-    flows,
     topLevelFlows,
     topLevelAliases,
     openFlow,
     executions,
     execLoading,
+    execFailed,
+    onRetryExecutions,
     toggleFlow,
     changeRequirement,
     moveExec,
@@ -874,347 +955,281 @@ function FlowsTab({
     onDelete,
     onCreate,
     bindings,
-    onBind,
-    saving
+    onBind
 }: any) {
+    const t = useT();
     if (!topLevelFlows.length) {
         return (
-            <EmptyBlock
-                icon={<FlowArrowIcon />}
-                title="Akış yok"
-                desc="Bu realm için tanımlı kimlik doğrulama akışı bulunamadı."
-                action={<Button onClick={onCreate}>Akış oluştur</Button>}
+            <Notice
+                title={t("sxAuthNoFlowsTitle")}
+                description={t("sxAuthNoFlowsDescription")}
+                action={<Button onClick={onCreate}>{t("sxAuthCreateFlow")}</Button>}
             />
         );
     }
 
     return (
         <>
-            {/* bindings */}
-            <div>
-                <GroupCaption>Akış bağlamaları</GroupCaption>
-                <ItemGroup variant="inset">
-                    {withSeparators(
-                        BINDINGS.map(({ key, label }) => (
-                            <SettingRow key={key} label={label}>
-                                <Pick
-                                    value={bindings?.[key] ?? ""}
-                                    onChange={(v: string) => onBind(key, v)}
-                                    options={[
-                                        { value: "", label: "—" },
-                                        ...topLevelAliases.map((a: string) => ({
-                                            value: a,
-                                            label: a
-                                        }))
-                                    ]}
-                                    placeholder="—"
-                                    aria-label={label}
-                                />
-                            </SettingRow>
-                        ))
-                    )}
-                </ItemGroup>
-            </div>
+            <Section label={t("sxAuthFlowBindings")}>
+                <Group>
+                    {BINDINGS.map(({ key, label }) => (
+                        <li
+                            key={key}
+                            className="flex min-h-14 items-center justify-between gap-3 px-4 py-2.5"
+                        >
+                            <span className="min-w-0 text-base">{t(label)}</span>
+                            <Choice
+                                className="w-40 shrink-0 sm:w-64"
+                                value={bindings?.[key] ?? ""}
+                                onChange={(v: string) => onBind(key, v)}
+                                options={[
+                                    { value: "", label: "—" },
+                                    ...topLevelAliases.map((a: string) => ({ value: a, label: a }))
+                                ]}
+                                aria-label={t(label)}
+                            />
+                        </li>
+                    ))}
+                </Group>
+            </Section>
 
-            {/* flow list */}
-            <div>
-                <div className="mb-2 ms-1 flex items-center justify-between">
-                    <h3 className="text-sm font-medium text-muted-foreground">Akışlar</h3>
-                    <Button variant="plain" size="sm" onClick={onCreate}>
-                        <PlusIcon /> Akış oluştur
-                    </Button>
-                </div>
-                <ItemGroup variant="inset">
-                    {withSeparators(
-                        topLevelFlows.map((flow: any) => {
-                            const isOpen = openFlow === flow.alias;
-                            return (
-                                <div key={flow.id || flow.alias}>
-                                    <Item size="sm">
-                                        <Item size="xs" asChild className="min-w-0 flex-1 p-0">
-                                            <button
-                                                type="button"
-                                                onClick={() => toggleFlow(flow)}
-                                                className="text-start"
-                                            >
-                                                <ItemMedia variant="icon">
-                                                    {isOpen ? (
-                                                        <CaretDownIcon className="text-muted-foreground" />
-                                                    ) : (
-                                                        <CaretRightIcon className="text-muted-foreground rtl:rotate-180" />
-                                                    )}
-                                                </ItemMedia>
-                                                <ItemContent className="min-w-0">
-                                                    <ItemTitle className="font-normal">
-                                                        {flow.alias}
-                                                    </ItemTitle>
-                                                    {flow.description && (
-                                                        <ItemDescription className="truncate">
-                                                            {flow.description}
-                                                        </ItemDescription>
-                                                    )}
-                                                </ItemContent>
-                                            </button>
-                                        </Item>
-                                        <ItemActions>
-                                            {flow.builtIn ? (
-                                                <Badge variant="secondary">Yerleşik</Badge>
-                                            ) : (
-                                                <Badge>Özel</Badge>
+            <Section label={t("sxAuthTabFlows")}>
+                <Group>
+                    {topLevelFlows.map((flow: any) => {
+                        const isOpen = openFlow === flow.alias;
+                        const usedBy = BINDINGS.filter(b => bindings?.[b.key] === flow.alias);
+                        return (
+                            <li key={flow.id || flow.alias}>
+                                <div className="flex min-h-16 items-center gap-3 px-4 py-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => toggleFlow(flow)}
+                                        aria-expanded={isOpen}
+                                        className="flex min-w-0 flex-1 items-start gap-3 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                                    >
+                                        <CaretRightIcon
+                                            className={cn(
+                                                "mt-1.5 size-3.5 shrink-0 text-muted-foreground transition-transform rtl:rotate-180",
+                                                isOpen && "rotate-90 rtl:rotate-90"
                                             )}
-                                            <DropdownMenu>
-                                                <DropdownMenuTrigger asChild>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon-sm"
-                                                        aria-label="Eylemler"
-                                                    >
-                                                        <DotsThreeIcon
-                                                            className="size-5"
-                                                            weight="bold"
-                                                        />
-                                                    </Button>
-                                                </DropdownMenuTrigger>
-                                                <DropdownMenuContent align="end">
-                                                    <DropdownMenuItem
-                                                        onClick={() => onDuplicate(flow)}
-                                                    >
-                                                        <CopyIcon /> Kopyala
-                                                    </DropdownMenuItem>
-                                                    {!flow.builtIn && (
-                                                        <>
-                                                            <DropdownMenuSeparator />
-                                                            <DropdownMenuItem
-                                                                variant="destructive"
-                                                                onClick={() => onDelete(flow)}
-                                                            >
-                                                                <TrashIcon /> Sil
-                                                            </DropdownMenuItem>
-                                                        </>
-                                                    )}
-                                                </DropdownMenuContent>
-                                            </DropdownMenu>
-                                        </ItemActions>
-                                    </Item>
+                                        />
+                                        <span className="min-w-0">
+                                            <span className="block text-base font-medium [overflow-wrap:anywhere]">
+                                                {flow.alias}
+                                            </span>
+                                            {flow.description && (
+                                                <span className="mt-0.5 block text-[13px] text-muted-foreground [overflow-wrap:anywhere]">
+                                                    {flow.description}
+                                                </span>
+                                            )}
+                                            <span className="mt-2 flex flex-wrap gap-1.5">
+                                                {usedBy.map(b => (
+                                                    <Chip key={b.key} tone="success">
+                                                        {t(b.label)}
+                                                    </Chip>
+                                                ))}
+                                                <Chip tone={flow.builtIn ? "neutral" : "info"}>
+                                                    {flow.builtIn ? t("sxAuthBuiltIn") : t("sxAuthCustom")}
+                                                </Chip>
+                                            </span>
+                                        </span>
+                                    </button>
+                                    <div className="flex shrink-0 items-center gap-4">
+                                        <TextAction onClick={() => onDuplicate(flow)}>
+                                            {t("sxAuthCopy")}
+                                        </TextAction>
+                                        {!flow.builtIn && (
+                                            <TextAction tone="danger" onClick={() => onDelete(flow)}>
+                                                {t("sxAuthDelete")}
+                                            </TextAction>
+                                        )}
+                                    </div>
+                                </div>
 
-                                    {isOpen && (
-                                        <>
-                                            <ItemSeparator />
-                                            {execLoading ? (
-                                                <div className="flex justify-center px-4 py-6">
-                                                    <Spinner className="size-6" />
-                                                </div>
-                                            ) : executions.length === 0 ? (
-                                                <Item size="sm">
-                                                    <ItemContent>
-                                                        <ItemDescription className="text-center">
-                                                            Bu akışta adım yok.
-                                                        </ItemDescription>
-                                                    </ItemContent>
-                                                </Item>
-                                            ) : (
-                                                withSeparators(
-                                                    executions.map((ex: any, i: number) => (
-                                                        <Item
-                                                            key={ex.id || i}
-                                                            size="xs"
-                                                            role="listitem"
+                                {isOpen && (
+                                    <div className={cn("border-t bg-white/70 dark:bg-black/20", HAIRLINE)}>
+                                        {execLoading ? (
+                                            <div className="p-3">
+                                                <ListSkeleton rows={2} />
+                                            </div>
+                                        ) : execFailed ? (
+                                            <div className="p-3">
+                                                <Notice
+                                                    title={t("sxAuthStepsLoadError")}
+                                                    description={t("sxLoadErrorDescription")}
+                                                    onRetry={() => onRetryExecutions(flow.alias)}
+                                                />
+                                            </div>
+                                        ) : executions.length === 0 ? (
+                                            <div className="p-3">
+                                                <Notice
+                                                    title={t("sxAuthNoStepsTitle")}
+                                                    description={t("sxAuthNoStepsDescription")}
+                                                />
+                                            </div>
+                                        ) : (
+                                            <ul aria-label={t("sxAuthFlowSteps", { name: flow.alias })}>
+                                                {executions.map((ex: any, i: number) => (
+                                                    <li key={ex.id || i}>
+                                                        {i > 0 && <div aria-hidden className={SEPARATOR} />}
+                                                        <div
+                                                            className="flex flex-col gap-2 py-2.5 pe-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
                                                             style={{
-                                                                paddingInlineStart:
-                                                                    16 + (ex.level || 0) * 20
+                                                                paddingInlineStart: 16 + (ex.level || 0) * 20
                                                             }}
                                                         >
-                                                            {ex.level > 0 && (
-                                                                <ItemMedia variant="icon">
-                                                                    <GitBranchIcon className="text-muted-foreground" />
-                                                                </ItemMedia>
-                                                            )}
-                                                            <ItemContent className="min-w-0">
-                                                                <ItemTitle className="text-sm font-normal">
-                                                                    {ex.displayName ||
-                                                                        ex.providerId}
-                                                                    {ex.authenticationFlow && (
-                                                                        <Badge variant="secondary">
-                                                                            alt akış
-                                                                        </Badge>
-                                                                    )}
-                                                                </ItemTitle>
-                                                            </ItemContent>
-                                                            <ItemActions>
+                                                            <div className="flex min-w-0 items-center gap-2">
+                                                                {ex.level > 0 && (
+                                                                    <GitBranchIcon className="size-4 shrink-0 text-muted-foreground" />
+                                                                )}
+                                                                <span className="min-w-0 text-[15px] [overflow-wrap:anywhere]">
+                                                                    {ex.displayName || ex.providerId}
+                                                                </span>
+                                                                {ex.authenticationFlow && (
+                                                                    <Chip>{t("sxAuthSubFlow")}</Chip>
+                                                                )}
+                                                            </div>
+                                                            <div className="flex shrink-0 items-center justify-end gap-0.5">
                                                                 {ex.configurable && (
-                                                                    <Button
-                                                                        variant="ghost"
-                                                                        size="icon-sm"
-                                                                        aria-label="Yapılandır"
-                                                                        title="Yapılandır"
-                                                                        onClick={() =>
-                                                                            onConfigure(ex)
-                                                                        }
+                                                                    <IconAction
+                                                                        label={t("sxAuthConfigure")}
+                                                                        onClick={() => onConfigure(ex)}
                                                                     >
                                                                         <GearSixIcon />
-                                                                    </Button>
+                                                                    </IconAction>
                                                                 )}
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="icon-sm"
-                                                                    aria-label="Yukarı taşı"
-                                                                    onClick={() =>
-                                                                        moveExec(
-                                                                            flow.alias,
-                                                                            ex,
-                                                                            "up"
-                                                                        )
-                                                                    }
+                                                                <IconAction
+                                                                    label={t("sxAuthMoveUp")}
+                                                                    onClick={() => moveExec(flow.alias, ex, "up")}
                                                                 >
                                                                     <ArrowUpIcon />
-                                                                </Button>
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="icon-sm"
-                                                                    aria-label="Aşağı taşı"
-                                                                    onClick={() =>
-                                                                        moveExec(
-                                                                            flow.alias,
-                                                                            ex,
-                                                                            "down"
-                                                                        )
-                                                                    }
+                                                                </IconAction>
+                                                                <IconAction
+                                                                    label={t("sxAuthMoveDown")}
+                                                                    onClick={() => moveExec(flow.alias, ex, "down")}
                                                                 >
                                                                     <ArrowDownIcon />
-                                                                </Button>
-                                                                <Pick
+                                                                </IconAction>
+                                                                <Choice
+                                                                    size="sm"
+                                                                    className="ms-1.5 w-36"
                                                                     value={ex.requirement}
                                                                     onChange={(v: string) =>
-                                                                        changeRequirement(
-                                                                            flow.alias,
-                                                                            ex,
-                                                                            v
-                                                                        )
+                                                                        changeRequirement(flow.alias, ex, v)
                                                                     }
-                                                                    options={(ex
-                                                                        .requirementChoices
-                                                                        ?.length
+                                                                    options={(ex.requirementChoices?.length
                                                                         ? ex.requirementChoices
                                                                         : REQUIREMENTS
                                                                     ).map((r: string) => ({
                                                                         value: r,
-                                                                        label:
-                                                                            REQUIREMENT_LABELS[
-                                                                                r
-                                                                            ] || r
+                                                                        label: REQUIREMENT_LABELS[r]
+                                                                            ? t(REQUIREMENT_LABELS[r])
+                                                                            : r
                                                                     }))}
-                                                                    aria-label="Gereksinim"
-                                                                    className="w-30"
+                                                                    aria-label={t("sxAuthRequirement")}
                                                                 />
-                                                            </ItemActions>
-                                                        </Item>
-                                                    ))
-                                                )
-                                            )}
-                                        </>
-                                    )}
-                                </div>
-                            );
-                        })
-                    )}
-                </ItemGroup>
-            </div>
+                                                            </div>
+                                                        </div>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
+                                )}
+                            </li>
+                        );
+                    })}
+                </Group>
+            </Section>
         </>
     );
 }
 
-/* ──────────────────────────────────────────────────────────────────────────
-   Required actions tab
-   ──────────────────────────────────────────────────────────────────────── */
-
 function RequiredActionsTab({ actions, onUpdate, onMove }: any) {
+    const t = useT();
     if (!actions.length) {
         return (
-            <EmptyBlock
-                icon={<ListChecksIcon />}
-                title="Gerekli eylem yok"
-                desc="Tanımlı gerekli eylem bulunamadı."
+            <Notice
+                title={t("sxAuthNoRequiredActionsTitle")}
+                description={t("sxAuthNoRequiredActionsDescription")}
             />
         );
     }
     return (
-        <div>
-            <GroupCaption>Gerekli eylemler</GroupCaption>
-            <ItemGroup variant="inset">
-                {withSeparators(
-                    actions.map((a: any, i: number) => (
-                        <Item key={a.alias} size="sm">
-                            <ItemMedia className="flex-col gap-0.5">
+        <Section label={t("sxAuthTabRequiredActions")}>
+            <Group>
+                {actions.map((a: any, i: number) => (
+                    <li
+                        key={a.alias}
+                        className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                    >
+                        <div className="flex min-w-0 items-center gap-3">
+                            <div className="flex shrink-0 flex-col">
                                 <Button
                                     variant="ghost"
                                     size="icon-xs"
-                                    aria-label="Yukarı taşı"
+                                    aria-label={t("sxAuthMoveUp")}
                                     onClick={() => onMove(a, "up")}
                                     disabled={i === 0}
+                                    className="text-muted-foreground hover:text-foreground"
                                 >
                                     <ArrowUpIcon />
                                 </Button>
                                 <Button
                                     variant="ghost"
                                     size="icon-xs"
-                                    aria-label="Aşağı taşı"
+                                    aria-label={t("sxAuthMoveDown")}
                                     onClick={() => onMove(a, "down")}
                                     disabled={i === actions.length - 1}
+                                    className="text-muted-foreground hover:text-foreground"
                                 >
                                     <ArrowDownIcon />
                                 </Button>
-                            </ItemMedia>
-                            <ItemContent className="min-w-0">
-                                <ItemTitle className="font-normal">
+                            </div>
+                            <div className="min-w-0">
+                                <div className="text-base font-medium [overflow-wrap:anywhere]">
                                     {a.name || a.alias}
-                                </ItemTitle>
-                            </ItemContent>
-                            <ItemActions className="gap-5">
-                                <Field orientation="horizontal" className="w-auto gap-2">
-                                    <FieldLabel
-                                        htmlFor={`ra-enabled-${a.alias}`}
-                                        className="text-xs text-muted-foreground"
-                                    >
-                                        Etkin
-                                    </FieldLabel>
-                                    <Switch
-                                        id={`ra-enabled-${a.alias}`}
-                                        size="sm"
-                                        checked={!!a.enabled}
-                                        onCheckedChange={(v: boolean) =>
-                                            onUpdate(a, { enabled: v })
-                                        }
-                                    />
-                                </Field>
-                                <Field orientation="horizontal" className="w-auto gap-2">
-                                    <FieldLabel
-                                        htmlFor={`ra-defaultAction-${a.alias}`}
-                                        className="text-xs text-muted-foreground"
-                                    >
-                                        Varsayılan
-                                    </FieldLabel>
-                                    <Switch
-                                        id={`ra-defaultAction-${a.alias}`}
-                                        size="sm"
-                                        checked={!!a.defaultAction}
-                                        onCheckedChange={(v: boolean) =>
-                                            onUpdate(a, { defaultAction: v })
-                                        }
-                                        disabled={!a.enabled}
-                                    />
-                                </Field>
-                            </ItemActions>
-                        </Item>
-                    ))
-                )}
-            </ItemGroup>
-        </div>
+                                </div>
+                                {a.name && a.alias && a.name !== a.alias && (
+                                    <div className="mt-0.5 font-mono text-[13px] text-muted-foreground [overflow-wrap:anywhere]">
+                                        {a.alias}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-5 ps-9 sm:ps-0">
+                            <label
+                                htmlFor={`ra-enabled-${a.alias}`}
+                                className="flex items-center gap-2 text-[13px] text-muted-foreground"
+                            >
+                                {t("sxAuthEnabled")}
+                                <Switch
+                                    id={`ra-enabled-${a.alias}`}
+                                    size="sm"
+                                    checked={!!a.enabled}
+                                    onCheckedChange={(v: boolean) => onUpdate(a, { enabled: v })}
+                                />
+                            </label>
+                            <label
+                                htmlFor={`ra-defaultAction-${a.alias}`}
+                                className="flex items-center gap-2 text-[13px] text-muted-foreground"
+                            >
+                                {t("sxAuthDefaultAction")}
+                                <Switch
+                                    id={`ra-defaultAction-${a.alias}`}
+                                    size="sm"
+                                    checked={!!a.defaultAction}
+                                    onCheckedChange={(v: boolean) => onUpdate(a, { defaultAction: v })}
+                                    disabled={!a.enabled}
+                                />
+                            </label>
+                        </div>
+                    </li>
+                ))}
+            </Group>
+        </Section>
     );
 }
-
-/* ──────────────────────────────────────────────────────────────────────────
-   Policies tab
-   ──────────────────────────────────────────────────────────────────────── */
 
 function PoliciesTab({
     rep,
@@ -1227,13 +1242,14 @@ function PoliciesTab({
     setPolicyValue,
     removePolicy
 }: any) {
+    const t = useT();
     const [sub, setSub] = useState("password");
 
     const savePassword = () =>
         persist(
             { passwordPolicy: rep.passwordPolicy ?? "" },
-            "Şifre politikası kaydedildi.",
-            "Şifre politikası kaydedilemedi."
+            t("sxAuthPasswordPolicySaved"),
+            t("sxAuthPasswordPolicySaveError")
         );
 
     const saveOtp = () =>
@@ -1245,8 +1261,8 @@ function PoliciesTab({
                 otpPolicyPeriod: rep.otpPolicyPeriod,
                 otpPolicyLookAheadWindow: rep.otpPolicyLookAheadWindow
             },
-            "OTP politikası kaydedildi.",
-            "OTP politikası kaydedilemedi."
+            t("sxAuthOtpPolicySaved"),
+            t("sxAuthOtpPolicySaveError")
         );
 
     const saveWebauthn = (prefix: string) =>
@@ -1256,14 +1272,13 @@ function PoliciesTab({
                 [`${prefix}SignatureAlgorithms`]: rep[`${prefix}SignatureAlgorithms`],
                 [`${prefix}AttestationConveyancePreference`]:
                     rep[`${prefix}AttestationConveyancePreference`],
-                [`${prefix}AuthenticatorAttachment`]:
-                    rep[`${prefix}AuthenticatorAttachment`],
+                [`${prefix}AuthenticatorAttachment`]: rep[`${prefix}AuthenticatorAttachment`],
                 [`${prefix}RequireResidentKey`]: rep[`${prefix}RequireResidentKey`],
                 [`${prefix}UserVerificationRequirement`]:
                     rep[`${prefix}UserVerificationRequirement`]
             },
-            "WebAuthn politikası kaydedildi.",
-            "WebAuthn politikası kaydedilemedi."
+            t("sxAuthWebauthnPolicySaved"),
+            t("sxAuthWebauthnPolicySaveError")
         );
 
     const saveCiba = () =>
@@ -1274,41 +1289,24 @@ function PoliciesTab({
                 cibaInterval: rep.cibaInterval,
                 cibaAuthRequestedUserHint: rep.cibaAuthRequestedUserHint
             },
-            "CIBA politikası kaydedildi.",
-            "CIBA politikası kaydedilemedi."
+            t("sxAuthCibaPolicySaved"),
+            t("sxAuthCibaPolicySaveError")
         );
-
-    const SAVE = (onClick: any) => (
-        <div className="flex justify-end">
-            <Button onClick={onClick} disabled={saving}>
-                {saving ? "Kaydediliyor…" : "Kaydet"}
-            </Button>
-        </div>
-    );
 
     return (
         <>
-            <div className="flex justify-center">
-                <SegmentPicker value={sub} onValueChange={setSub} aria-label="Politika">
-                    {[
-                        { value: "password", label: "Şifre" },
-                        { value: "otp", label: "OTP" },
-                        { value: "webauthn", label: "WebAuthn" },
-                        { value: "passwordless", label: "Passwordless" },
-                        { value: "ciba", label: "CIBA" }
-                    ].map(o => (
-                        <SegmentPickerItem key={o.value} value={o.value} label={o.label} />
-                    ))}
-                </SegmentPicker>
-            </div>
+            <SegmentTabs
+                value={sub}
+                onChange={setSub}
+                items={POLICY_TABS.map(x => ({ value: x.value, label: x.raw ? x.label : t(x.label) }))}
+                ariaLabel={t("sxAuthPolicyTabsLabel")}
+            />
 
             {sub === "password" && (
-                <div className="space-y-4">
-                    <div>
-                        <div className="mb-2 ms-1 flex items-center justify-between">
-                            <h3 className="text-sm font-medium text-muted-foreground">
-                                Şifre politikası
-                            </h3>
+                <>
+                    <Section
+                        label={t("sxAuthPasswordPolicy")}
+                        action={
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                     <Button
@@ -1316,151 +1314,97 @@ function PoliciesTab({
                                         size="sm"
                                         disabled={!availablePolicyTypes.length}
                                     >
-                                        <PlusIcon /> Politika ekle
+                                        <PlusIcon /> {t("sxAuthAddPolicy")}
                                     </Button>
                                 </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
+                                <DropdownMenuContent align="end" className="max-h-80">
                                     {availablePolicyTypes.map((p: any) => (
-                                        <DropdownMenuItem
-                                            key={p.id}
-                                            onClick={() => addPolicy(p)}
-                                        >
+                                        <DropdownMenuItem key={p.id} onClick={() => addPolicy(p)}>
                                             {p.displayName || p.id}
                                         </DropdownMenuItem>
                                     ))}
                                 </DropdownMenuContent>
                             </DropdownMenu>
-                        </div>
+                        }
+                    >
                         {policyTokens.length === 0 ? (
-                            <EmptyBlock
-                                icon={<PasswordIcon />}
-                                title="Politika tanımlı değil"
-                                desc="Yukarıdan bir şifre politikası türü ekleyin."
+                            <Notice
+                                title={t("sxAuthNoPasswordPolicyTitle")}
+                                description={t("sxAuthNoPasswordPolicyDescription")}
                             />
                         ) : (
-                            <ItemGroup variant="inset">
-                                {withSeparators(
-                                    policyTokens.map((t: any, idx: number) => (
-                                        <Item key={`${t.id}-${idx}`} size="sm">
-                                            <ItemContent className="min-w-0">
-                                                <ItemTitle className="font-normal">
-                                                    {t.displayName || t.id}
-                                                </ItemTitle>
-                                            </ItemContent>
-                                            <ItemActions>
-                                                {t.configType &&
-                                                t.configType !== "boolean" ? (
-                                                    <Input
-                                                        size="sm"
-                                                        value={t.value ?? ""}
-                                                        onChange={(e: any) =>
-                                                            setPolicyValue(
-                                                                idx,
-                                                                e.target.value
-                                                            )
-                                                        }
-                                                        className="w-28"
-                                                        type={
-                                                            t.configType === "int"
-                                                                ? "number"
-                                                                : "text"
-                                                        }
-                                                    />
-                                                ) : null}
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon-sm"
-                                                    aria-label="Kaldır"
-                                                    onClick={() => removePolicy(idx)}
-                                                >
-                                                    <TrashIcon />
-                                                </Button>
-                                            </ItemActions>
-                                        </Item>
-                                    ))
-                                )}
-                            </ItemGroup>
+                            <Group>
+                                {policyTokens.map((p: any, idx: number) => (
+                                    <li
+                                        key={`${p.id}-${idx}`}
+                                        className="flex min-h-14 items-center justify-between gap-3 px-4 py-2.5"
+                                    >
+                                        <span className="min-w-0 text-base [overflow-wrap:anywhere]">
+                                            {p.displayName || p.id}
+                                        </span>
+                                        <div className="flex shrink-0 items-center gap-4">
+                                            {p.configType && p.configType !== "boolean" ? (
+                                                <Input
+                                                    size="md"
+                                                    aria-label={p.displayName || p.id}
+                                                    value={p.value ?? ""}
+                                                    onChange={(e: any) =>
+                                                        setPolicyValue(idx, e.target.value)
+                                                    }
+                                                    className="w-24 sm:w-32"
+                                                    type={p.configType === "int" ? "number" : "text"}
+                                                />
+                                            ) : null}
+                                            <TextAction tone="danger" onClick={() => removePolicy(idx)}>
+                                                {t("sxAuthRemove")}
+                                            </TextAction>
+                                        </div>
+                                    </li>
+                                ))}
+                            </Group>
                         )}
-                    </div>
-                    {SAVE(savePassword)}
-                </div>
+                    </Section>
+                    <SaveBar onClick={savePassword} saving={saving} />
+                </>
             )}
 
             {sub === "otp" && (
-                <div className="space-y-4">
-                    <div>
-                        <GroupCaption>Tek kullanımlık şifre (OTP)</GroupCaption>
-                        <ItemGroup variant="inset">
-                            <SettingRow label="Tür">
-                                <Pick
-                                    value={rep.otpPolicyType ?? "totp"}
-                                    onChange={(v: string) => setField("otpPolicyType", v)}
-                                    options={OTP_TYPES.map(t => ({
-                                        value: t,
-                                        label: t.toUpperCase()
-                                    }))}
-                                    aria-label="OTP türü"
-                                />
-                            </SettingRow>
-                            <ItemSeparator />
-                            <SettingRow label="Hash algoritması">
-                                <Pick
-                                    value={rep.otpPolicyAlgorithm ?? "HmacSHA1"}
-                                    onChange={(v: string) =>
-                                        setField("otpPolicyAlgorithm", v)
-                                    }
-                                    options={OTP_ALGORITHMS}
-                                    aria-label="Algoritma"
-                                />
-                            </SettingRow>
-                            <ItemSeparator />
-                            <SettingRow label="Basamak sayısı">
-                                <Pick
-                                    value={String(rep.otpPolicyDigits ?? 6)}
-                                    onChange={(v: string) =>
-                                        setField("otpPolicyDigits", Number(v))
-                                    }
-                                    options={OTP_DIGITS}
-                                    aria-label="Basamak"
-                                />
-                            </SettingRow>
-                            <ItemSeparator />
-                            <SettingRow
-                                label="Periyot (sn)"
-                                hint="TOTP için geçerlilik penceresi"
-                            >
-                                <Input
-                                    type="number"
-                                    value={rep.otpPolicyPeriod ?? 30}
-                                    onChange={(e: any) =>
-                                        setField(
-                                            "otpPolicyPeriod",
-                                            Number(e.target.value)
-                                        )
-                                    }
-                                    size="sm"
-                                    className="w-24 text-end"
-                                />
-                            </SettingRow>
-                            <ItemSeparator />
-                            <SettingRow label="İleri bakış penceresi">
-                                <Input
-                                    type="number"
-                                    value={rep.otpPolicyLookAheadWindow ?? 1}
-                                    onChange={(e: any) =>
-                                        setField(
-                                            "otpPolicyLookAheadWindow",
-                                            Number(e.target.value)
-                                        )
-                                    }
-                                    size="sm"
-                                    className="w-24 text-end"
-                                />
-                            </SettingRow>
-                        </ItemGroup>
-                    </div>
-                    {SAVE(saveOtp)}
-                </div>
+                <>
+                    <Section label={t("sxAuthOtpPolicy")}>
+                        <FormCard>
+                            <SelectField
+                                label={t("sxAuthOtpType")}
+                                value={rep.otpPolicyType ?? "totp"}
+                                onChange={(v: string) => setField("otpPolicyType", v)}
+                                options={OTP_TYPES.map(x => ({ value: x, label: x.toUpperCase() }))}
+                            />
+                            <SelectField
+                                label={t("sxAuthOtpAlgorithm")}
+                                value={rep.otpPolicyAlgorithm ?? "HmacSHA1"}
+                                onChange={(v: string) => setField("otpPolicyAlgorithm", v)}
+                                options={OTP_ALGORITHMS}
+                            />
+                            <SelectField
+                                label={t("sxAuthOtpDigits")}
+                                value={String(rep.otpPolicyDigits ?? 6)}
+                                onChange={(v: string) => setField("otpPolicyDigits", Number(v))}
+                                options={OTP_DIGITS}
+                            />
+                            <NumberField
+                                label={t("sxAuthOtpPeriod")}
+                                hint={t("sxAuthOtpPeriodHint")}
+                                value={rep.otpPolicyPeriod ?? 30}
+                                onChange={(v: number) => setField("otpPolicyPeriod", v)}
+                            />
+                            <NumberField
+                                label={t("sxAuthOtpLookAhead")}
+                                value={rep.otpPolicyLookAheadWindow ?? 1}
+                                onChange={(v: number) => setField("otpPolicyLookAheadWindow", v)}
+                            />
+                        </FormCard>
+                    </Section>
+                    <SaveBar onClick={saveOtp} saving={saving} />
+                </>
             )}
 
             {sub === "webauthn" && (
@@ -1468,11 +1412,9 @@ function PoliciesTab({
                     rep={rep}
                     setField={setField}
                     prefix="webAuthnPolicy"
-                    title="WebAuthn politikası"
-                    icon={<FingerprintIcon />}
+                    title={t("sxAuthWebauthnPolicy")}
                     save={() => saveWebauthn("webAuthnPolicy")}
                     saving={saving}
-                    SAVE={SAVE}
                 />
             )}
 
@@ -1481,182 +1423,120 @@ function PoliciesTab({
                     rep={rep}
                     setField={setField}
                     prefix="webAuthnPolicyPasswordless"
-                    title="WebAuthn passwordless politikası"
-                    icon={<ShieldCheckIcon />}
+                    title={t("sxAuthWebauthnPasswordlessPolicy")}
                     save={() => saveWebauthn("webAuthnPolicyPasswordless")}
                     saving={saving}
-                    SAVE={SAVE}
                 />
             )}
 
             {sub === "ciba" && (
-                <div className="space-y-4">
-                    <div>
-                        <GroupCaption>CIBA politikası</GroupCaption>
-                        <ItemGroup variant="inset">
-                            <SettingRow label="Token iletim modu">
-                                <Pick
-                                    value={rep.cibaBackchannelTokenDeliveryMode ?? "poll"}
-                                    onChange={(v: string) =>
-                                        setField("cibaBackchannelTokenDeliveryMode", v)
-                                    }
-                                    options={CIBA_DELIVERY_MODES}
-                                    aria-label="İletim modu"
-                                />
-                            </SettingRow>
-                            <ItemSeparator />
-                            <SettingRow label="Kullanıcı ipucu">
-                                <Pick
-                                    value={rep.cibaAuthRequestedUserHint ?? "login_hint"}
-                                    onChange={(v: string) =>
-                                        setField("cibaAuthRequestedUserHint", v)
-                                    }
-                                    options={CIBA_USER_HINTS}
-                                    aria-label="Kullanıcı ipucu"
-                                />
-                            </SettingRow>
-                            <ItemSeparator />
-                            <SettingRow label="Süre (sn)" hint="İsteğin geçerlilik süresi">
-                                <Input
-                                    type="number"
-                                    value={rep.cibaExpiresIn ?? 120}
-                                    onChange={(e: any) =>
-                                        setField("cibaExpiresIn", Number(e.target.value))
-                                    }
-                                    size="sm"
-                                    className="w-24 text-end"
-                                />
-                            </SettingRow>
-                            <ItemSeparator />
-                            <SettingRow label="Poll aralığı (sn)">
-                                <Input
-                                    type="number"
-                                    value={rep.cibaInterval ?? 5}
-                                    onChange={(e: any) =>
-                                        setField("cibaInterval", Number(e.target.value))
-                                    }
-                                    size="sm"
-                                    className="w-24 text-end"
-                                />
-                            </SettingRow>
-                        </ItemGroup>
-                    </div>
-                    {SAVE(saveCiba)}
-                </div>
+                <>
+                    <Section label={t("sxAuthCibaPolicy")}>
+                        <FormCard>
+                            <SelectField
+                                label={t("sxAuthCibaDeliveryMode")}
+                                value={rep.cibaBackchannelTokenDeliveryMode ?? "poll"}
+                                onChange={(v: string) => setField("cibaBackchannelTokenDeliveryMode", v)}
+                                options={CIBA_DELIVERY_MODES}
+                            />
+                            <SelectField
+                                label={t("sxAuthCibaUserHint")}
+                                value={rep.cibaAuthRequestedUserHint ?? "login_hint"}
+                                onChange={(v: string) => setField("cibaAuthRequestedUserHint", v)}
+                                options={CIBA_USER_HINTS}
+                            />
+                            <NumberField
+                                label={t("sxAuthCibaExpiresIn")}
+                                hint={t("sxAuthCibaExpiresInHint")}
+                                value={rep.cibaExpiresIn ?? 120}
+                                onChange={(v: number) => setField("cibaExpiresIn", v)}
+                            />
+                            <NumberField
+                                label={t("sxAuthCibaInterval")}
+                                value={rep.cibaInterval ?? 5}
+                                onChange={(v: number) => setField("cibaInterval", v)}
+                            />
+                        </FormCard>
+                    </Section>
+                    <SaveBar onClick={saveCiba} saving={saving} />
+                </>
             )}
         </>
     );
 }
 
-function WebAuthnSection({ rep, setField, prefix, title, icon, save, SAVE }: any) {
+function WebAuthnSection({ rep, setField, prefix, title, save, saving }: any) {
+    const t = useT();
     const sigSelected: string[] = rep[`${prefix}SignatureAlgorithms`] || [];
+    const withLabels = (values: string[]) =>
+        values.map(v => ({
+            value: v,
+            label: WEBAUTHN_OPTION_LABELS[v] ? t(WEBAUTHN_OPTION_LABELS[v]) : v
+        }));
     return (
-        <div className="space-y-4">
-            <div>
-                <GroupCaption>{title}</GroupCaption>
-                <ItemGroup variant="inset">
-                    <Item size="sm">
-                        <ItemContent>
-                            <ItemTitle className="font-normal">RP görünen adı</ItemTitle>
-                            <ItemDescription>Relying Party (kuruluş) adı</ItemDescription>
+        <>
+            <Section label={title}>
+                <FormCard>
+                    <FormField wide label={t("sxAuthRpName")} hint={t("sxAuthRpNameHint")}>
+                        {(id: string) => (
                             <Input
-                                size="md"
-                                className="mt-1.5"
+                                id={id}
+                                size="lg"
                                 value={rep[`${prefix}RpEntityName`] ?? ""}
-                                onChange={(e: any) =>
-                                    setField(`${prefix}RpEntityName`, e.target.value)
-                                }
+                                onChange={(e: any) => setField(`${prefix}RpEntityName`, e.target.value)}
                                 placeholder="keycloak"
                             />
-                        </ItemContent>
-                    </Item>
-                    <ItemSeparator />
-                    <SettingRow label="Attestation tercihi">
-                        <Pick
-                            value={
-                                rep[`${prefix}AttestationConveyancePreference`] ??
-                                "not specified"
-                            }
-                            onChange={(v: string) =>
-                                setField(`${prefix}AttestationConveyancePreference`, v)
-                            }
-                            options={ATTESTATION_PREFERENCE}
-                            aria-label="Attestation"
-                        />
-                    </SettingRow>
-                    <ItemSeparator />
-                    <SettingRow label="Authenticator bağlantısı">
-                        <Pick
-                            value={
-                                rep[`${prefix}AuthenticatorAttachment`] ?? "not specified"
-                            }
-                            onChange={(v: string) =>
-                                setField(`${prefix}AuthenticatorAttachment`, v)
-                            }
-                            options={AUTHENTICATOR_ATTACHMENT}
-                            aria-label="Authenticator bağlantısı"
-                        />
-                    </SettingRow>
-                    <ItemSeparator />
-                    <SettingRow label="Resident key gerektir">
-                        <Pick
-                            value={rep[`${prefix}RequireResidentKey`] ?? "not specified"}
-                            onChange={(v: string) =>
-                                setField(`${prefix}RequireResidentKey`, v)
-                            }
-                            options={RESIDENT_KEY_OPTIONS}
-                            aria-label="Resident key"
-                        />
-                    </SettingRow>
-                    <ItemSeparator />
-                    <SettingRow label="Kullanıcı doğrulama">
-                        <Pick
-                            value={
-                                rep[`${prefix}UserVerificationRequirement`] ??
-                                "not specified"
-                            }
-                            onChange={(v: string) =>
-                                setField(`${prefix}UserVerificationRequirement`, v)
-                            }
-                            options={USER_VERIFY}
-                            aria-label="Kullanıcı doğrulama"
-                        />
-                    </SettingRow>
-                </ItemGroup>
-            </div>
-            <div>
-                <GroupCaption>İmza algoritmaları</GroupCaption>
-                <ItemGroup variant="inset">
-                    <Item size="sm">
-                        <ToggleGroup
-                            type="multiple"
-                            variant="outline"
-                            size="sm"
-                            className="flex-wrap"
-                            value={sigSelected}
-                            onValueChange={(next: string[]) =>
-                                setField(`${prefix}SignatureAlgorithms`, next)
-                            }
-                            aria-label="İmza algoritmaları"
-                        >
-                            {WEBAUTHN_SIG_ALGS.map(alg => (
-                                <ToggleGroupItem key={alg} value={alg}>
-                                    {alg}
-                                </ToggleGroupItem>
-                            ))}
-                        </ToggleGroup>
-                    </Item>
-                </ItemGroup>
-            </div>
-            {SAVE(save)}
-        </div>
+                        )}
+                    </FormField>
+                    <SelectField
+                        label={t("sxAuthAttestationPreference")}
+                        value={rep[`${prefix}AttestationConveyancePreference`] ?? "not specified"}
+                        onChange={(v: string) => setField(`${prefix}AttestationConveyancePreference`, v)}
+                        options={withLabels(ATTESTATION_PREFERENCE)}
+                    />
+                    <SelectField
+                        label={t("sxAuthAuthenticatorAttachment")}
+                        value={rep[`${prefix}AuthenticatorAttachment`] ?? "not specified"}
+                        onChange={(v: string) => setField(`${prefix}AuthenticatorAttachment`, v)}
+                        options={withLabels(AUTHENTICATOR_ATTACHMENT)}
+                    />
+                    <SelectField
+                        label={t("sxAuthRequireResidentKey")}
+                        value={rep[`${prefix}RequireResidentKey`] ?? "not specified"}
+                        onChange={(v: string) => setField(`${prefix}RequireResidentKey`, v)}
+                        options={withLabels(RESIDENT_KEY_OPTIONS)}
+                    />
+                    <SelectField
+                        label={t("sxAuthUserVerification")}
+                        value={rep[`${prefix}UserVerificationRequirement`] ?? "not specified"}
+                        onChange={(v: string) => setField(`${prefix}UserVerificationRequirement`, v)}
+                        options={withLabels(USER_VERIFY)}
+                    />
+                </FormCard>
+            </Section>
+            <Section label={t("sxAuthSignatureAlgorithms")}>
+                <div className={cn(GROUP, "p-4")}>
+                    <ToggleGroup
+                        type="multiple"
+                        variant="outline"
+                        size="sm"
+                        className="flex-wrap justify-start"
+                        value={sigSelected}
+                        onValueChange={(next: string[]) => setField(`${prefix}SignatureAlgorithms`, next)}
+                        aria-label={t("sxAuthSignatureAlgorithms")}
+                    >
+                        {WEBAUTHN_SIG_ALGS.map(alg => (
+                            <ToggleGroupItem key={alg} value={alg}>
+                                {alg}
+                            </ToggleGroupItem>
+                        ))}
+                    </ToggleGroup>
+                </div>
+            </Section>
+            <SaveBar onClick={save} saving={saving} />
+        </>
     );
 }
-
-/* ──────────────────────────────────────────────────────────────────────────
-   Password policy (de)serialization — mirrors upstream util.ts.
-   "id(value) and id2(value2)" ; bare "id" when no value/config.
-   ──────────────────────────────────────────────────────────────────────── */
 
 const POLICY_SEP = " and ";
 
@@ -1700,8 +1580,8 @@ function parseToken(token: string) {
     return { id, value: trimmed.substring(start + 1, end) };
 }
 
-/** Confirm dialog — returns a [confirm(opts), node] pair (built on @ui/patterns/confirm). */
 function useConfirm() {
+    const t = useT();
     const [opts, setOpts] = useState<any>(null);
     const [open, setOpen] = useState(false);
     const confirm = (o: {
@@ -1724,12 +1604,12 @@ function useConfirm() {
                     )}
                 </ConfirmHeader>
                 <ConfirmFooter>
-                    <ConfirmCancel>Vazgeç</ConfirmCancel>
+                    <ConfirmCancel>{t("sxAuthCancel")}</ConfirmCancel>
                     <ConfirmAction
                         variant={opts?.danger ? "destructive" : "default"}
                         onClick={() => opts?.onConfirm?.()}
                     >
-                        {opts?.confirmLabel ?? "Onayla"}
+                        {opts?.confirmLabel ?? t("sxAuthConfirm")}
                     </ConfirmAction>
                 </ConfirmFooter>
             </ConfirmContent>

@@ -1,43 +1,8 @@
 // @ts-nocheck
 
-import {
-    BuildingsIcon,
-    CaretRightIcon,
-    MagnifyingGlassIcon
-} from "@phosphor-icons/react";
-import { Avatar, AvatarFallback } from "@ui/components/avatar";
 import { Button } from "@ui/components/button";
-import {
-    Empty,
-    EmptyContent,
-    EmptyDescription,
-    EmptyHeader,
-    EmptyMedia,
-    EmptyTitle
-} from "@ui/components/empty";
-import {
-    Field,
-    FieldDescription,
-    FieldGroup,
-    FieldLabel
-} from "@ui/components/field";
+import { Field, FieldDescription, FieldLabel } from "@ui/components/field";
 import { Input } from "@ui/components/input";
-import {
-    InputGroup,
-    InputGroupAddon,
-    InputGroupInput
-} from "@ui/components/input-group";
-import {
-    Item,
-    ItemActions,
-    ItemContent,
-    ItemDescription,
-    ItemGroup,
-    ItemMedia,
-    ItemSeparator,
-    ItemTitle
-} from "@ui/components/item";
-import { Spinner } from "@ui/components/spinner";
 import { Textarea } from "@ui/components/textarea";
 import {
     Modal,
@@ -47,10 +12,12 @@ import {
     ModalHeader,
     ModalTitle
 } from "@ui/patterns/modal";
-import { Fragment, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AlertVariant, useAlerts } from "../../shared/keycloak-ui-shared";
 import { useAdminClient } from "../admin-client";
+import { useT } from "../ui/i18n";
+import { AdminPage, Group, ListSkeleton, Notice, Pager, Row, SearchField, Section } from "../ui/kit";
 import { useRealm } from "../ui/realm";
 import { initials } from "../ui/util";
 
@@ -61,7 +28,6 @@ const lines = (s: string) =>
         .map(x => x.trim())
         .filter(Boolean);
 
-/** Auto-derive an alias from a name (lowercase, dashed, ascii-safe). */
 const aliasFromName = (name: string) =>
     name
         .toLowerCase()
@@ -72,176 +38,112 @@ const aliasFromName = (name: string) =>
         .replace(/-+/g, "-");
 
 export default function Organizations() {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
     const navigate = useNavigate();
-    const { addError } = useAlerts();
 
-    const [loading, setLoading] = useState(true);
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
     const [orgs, setOrgs] = useState<any[]>([]);
     const [first, setFirst] = useState(0);
     const [hasMore, setHasMore] = useState(false);
     const [searchInput, setSearchInput] = useState("");
     const [query, setQuery] = useState("");
+    const [attempt, setAttempt] = useState(0);
     const [createOpen, setCreateOpen] = useState(false);
 
-    const load = async (firstArg = first, q = query) => {
-        setLoading(true);
-        try {
-            const params: any = { first: firstArg, max: PAGE + 1 };
-            if (q.trim()) params.search = q.trim();
-            const list = (await adminClient.organizations.find(params)) ?? [];
-            setHasMore(list.length > PAGE);
-            setOrgs(list.slice(0, PAGE));
-        } catch (e) {
-            addError("Organizasyonlar yüklenemedi.", e as Error);
-        } finally {
-            setLoading(false);
-        }
-    };
-
     useEffect(() => {
-        setFirst(0);
-        load(0, query);
-        // eslint-disable-next-line
-    }, [query, load]);
-
-    // Debounced live search.
-    useEffect(() => {
-        const id = setTimeout(() => setQuery(searchInput.trim()), 300);
+        const id = setTimeout(() => {
+            setFirst(0);
+            setQuery(searchInput.trim());
+        }, 300);
         return () => clearTimeout(id);
     }, [searchInput]);
 
-    const page = (dir: number) => {
-        const f = Math.max(0, first + dir * PAGE);
-        setFirst(f);
-        load(f, query);
-    };
+    useEffect(() => {
+        let alive = true;
+        setStatus("loading");
+        const params: any = { first, max: PAGE + 1 };
+        if (query) params.search = query;
+        adminClient.organizations
+            .find(params)
+            .then(result => {
+                if (!alive) return;
+                const list = Array.isArray(result) ? result : [];
+                setHasMore(list.length > PAGE);
+                setOrgs(list.slice(0, PAGE));
+                setStatus("ready");
+            })
+            .catch(() => alive && setStatus("error"));
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, query, first, attempt]);
+
+    const newButton = <Button onClick={() => setCreateOpen(true)}>{t("sxOrgsNew")}</Button>;
 
     return (
-        <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-            <div className="mb-7">
-                <h1 className="font-semibold text-3xl text-foreground tracking-tight">
-                    Organizasyonlar
-                </h1>
-                <p className="mt-1 text-sm text-muted-foreground">
-                    Realm’inizdeki organizasyonlar, üyeleri ve kimlik sağlayıcıları.
-                </p>
-            </div>
+        <AdminPage
+            title={t("sxOrgsTitle")}
+            description={t("sxOrgsDescription")}
+            actions={newButton}
+        >
+            <SearchField value={searchInput} onChange={setSearchInput} placeholder={t("sxOrgsSearchPlaceholder")} />
 
-            {/* Toolbar */}
-            <div className="mb-6 flex flex-wrap items-center gap-3">
-                <InputGroup className="w-full sm:w-80">
-                    <InputGroupAddon>
-                        <MagnifyingGlassIcon />
-                    </InputGroupAddon>
-                    <InputGroupInput
-                        type="text"
-                        value={searchInput}
-                        onChange={e => setSearchInput(e.target.value)}
-                        placeholder="Organizasyon ara"
+            <Section label={t("sxOrgsTitle")}>
+                {status === "loading" && <ListSkeleton />}
+                {status === "error" && (
+                    <Notice
+                        title={t("sxOrgsLoadError")}
+                        description={t("sxLoadErrorDescription")}
+                        onRetry={() => setAttempt(n => n + 1)}
                     />
-                </InputGroup>
-                <div className="sm:ml-auto">
-                    <Button type="button" onClick={() => setCreateOpen(true)}>
-                        Yeni organizasyon
-                    </Button>
-                </div>
-            </div>
-
-            {loading ? (
-                <div className="grid place-items-center py-16">
-                    <Spinner />
-                </div>
-            ) : orgs.length === 0 ? (
-                <Empty>
-                    <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                            <BuildingsIcon />
-                        </EmptyMedia>
-                        <EmptyTitle>
-                            {query ? "Sonuç bulunamadı" : "Henüz organizasyon yok"}
-                        </EmptyTitle>
-                        <EmptyDescription>
-                            {query
-                                ? `“${query}” ile eşleşen bir organizasyon yok.`
-                                : "Üyeleri ve kimlik sağlayıcıları gruplamak için ilk organizasyonunu oluştur."}
-                        </EmptyDescription>
-                    </EmptyHeader>
-                    {!query && (
-                        <EmptyContent>
-                            <Button type="button" onClick={() => setCreateOpen(true)}>
-                                Yeni organizasyon
-                            </Button>
-                        </EmptyContent>
-                    )}
-                </Empty>
-            ) : (
-                <div className="space-y-4">
-                    <ItemGroup variant="inset">
-                        {orgs.map((o, i) => {
+                )}
+                {status === "ready" && orgs.length === 0 && (
+                    <Notice
+                        title={query ? t("sxOrgsNoMatch") : t("sxOrgsEmpty")}
+                        description={
+                            query
+                                ? t("sxOrgsNoMatchDescription", { query })
+                                : t("sxOrgsEmptyDescription")
+                        }
+                        action={!query ? newButton : undefined}
+                    />
+                )}
+                {status === "ready" && orgs.length > 0 && (
+                    <Group>
+                        {orgs.map(o => {
                             const domains = (o.domains || [])
                                 .map((d: any) => (typeof d === "string" ? d : d?.name))
                                 .filter(Boolean);
                             return (
-                                <Fragment key={o.id}>
-                                    {i > 0 && <ItemSeparator />}
-                                    <Item size="sm" asChild>
-                                        <button
-                                            type="button"
-                                            onClick={() =>
-                                                navigate(`/${realm}/organizations/${o.id}`)
-                                            }
-                                        >
-                                            <ItemMedia>
-                                                <Avatar>
-                                                    <AvatarFallback>
-                                                        {initials(o.name)}
-                                                    </AvatarFallback>
-                                                </Avatar>
-                                            </ItemMedia>
-                                            <ItemContent className="min-w-0">
-                                                <ItemTitle>{o.name}</ItemTitle>
-                                                <ItemDescription className="truncate">
-                                                    {domains.length
-                                                        ? domains.join(", ")
-                                                        : o.alias || "—"}
-                                                </ItemDescription>
-                                            </ItemContent>
-                                            <ItemActions>
-                                                <CaretRightIcon className="text-muted-foreground" />
-                                            </ItemActions>
-                                        </button>
-                                    </Item>
-                                </Fragment>
+                                <Row
+                                    key={o.id}
+                                    onClick={() => navigate(`/${realm}/organizations/${o.id}`)}
+                                    leading={
+                                        <span className="grid size-8 place-items-center rounded-full bg-[#6e6e73] text-[11px] font-semibold text-white dark:bg-[#48484a]">
+                                            {initials(o.name)}
+                                        </span>
+                                    }
+                                    title={o.name}
+                                    subtitle={domains.length ? domains.join(", ") : o.alias || "—"}
+                                />
                             );
                         })}
-                    </ItemGroup>
-                    <div className="flex items-center justify-between px-1">
-                        <span className="text-sm text-muted-foreground tabular-nums">
-                            {`${first + 1}–${first + orgs.length}`}
-                        </span>
-                        <div className="flex gap-1.5">
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                disabled={first === 0}
-                                onClick={() => page(-1)}
-                            >
-                                Önceki
-                            </Button>
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                disabled={!hasMore}
-                                onClick={() => page(1)}
-                            >
-                                Sonraki
-                            </Button>
-                        </div>
+                    </Group>
+                )}
+                {status === "ready" && (
+                    <div className="mt-3">
+                        <Pager
+                            page={Math.floor(first / PAGE) + 1}
+                            hasPrev={first > 0}
+                            hasNext={hasMore}
+                            onPrev={() => setFirst(f => Math.max(0, f - PAGE))}
+                            onNext={() => setFirst(f => f + PAGE)}
+                        />
                     </div>
-                </div>
-            )}
+                )}
+            </Section>
 
             {createOpen && (
                 <CreateOrganization
@@ -252,7 +154,7 @@ export default function Organizations() {
                     }}
                 />
             )}
-        </div>
+        </AdminPage>
     );
 }
 
@@ -263,6 +165,7 @@ function CreateOrganization({
     onClose: () => void;
     onCreated: (id: string) => void;
 }) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [saving, setSaving] = useState(false);
@@ -290,10 +193,10 @@ function CreateOrganization({
                 domains: lines(domains).map(d => ({ name: d, verified: false }))
             };
             const created = await adminClient.organizations.create(rep);
-            addAlert("Organizasyon oluşturuldu.", AlertVariant.success);
+            addAlert(t("sxOrgsCreated"), AlertVariant.success);
             onCreated(created.id);
         } catch (e) {
-            addError("Organizasyon oluşturulamadı.", e as Error);
+            addError(t("sxOrgsCreateError"), e as Error);
             setSaving(false);
         }
     };
@@ -302,25 +205,27 @@ function CreateOrganization({
         <Modal open onOpenChange={o => !o && onClose()}>
             <ModalContent>
                 <ModalHeader>
-                    <ModalTitle>Yeni organizasyon</ModalTitle>
+                    <ModalTitle>{t("sxOrgsNew")}</ModalTitle>
                 </ModalHeader>
                 <ModalBody>
-                    <FieldGroup>
-                        <Field>
+                    <div className="flex flex-col gap-4">
+                        <Field size="lg">
                             <FieldLabel htmlFor="org-name">
-                                Ad<span className="text-destructive"> *</span>
+                                {t("sxCommonName")}<span className="text-[#d70015] dark:text-[#ff453a]"> *</span>
                             </FieldLabel>
                             <Input
+                                size="lg"
                                 id="org-name"
                                 autoFocus
                                 value={name}
                                 onChange={(e: any) => onNameChange(e.target.value)}
-                                placeholder="örn. Acme A.Ş."
+                                placeholder={t("sxOrgsNamePlaceholder")}
                             />
                         </Field>
-                        <Field>
-                            <FieldLabel htmlFor="org-alias">Takma ad (alias)</FieldLabel>
+                        <Field size="lg">
+                            <FieldLabel htmlFor="org-alias">{t("sxOrgsAlias")}</FieldLabel>
                             <Input
+                                size="lg"
                                 id="org-alias"
                                 value={alias}
                                 onChange={(e: any) => {
@@ -331,39 +236,37 @@ function CreateOrganization({
                                 className="font-mono"
                             />
                             <FieldDescription>
-                                Boş bırakılırsa addan türetilir. Sonradan değiştirilemez.
+                                {t("sxOrgsAliasHelp")}
                             </FieldDescription>
                         </Field>
-                        <Field>
-                            <FieldLabel htmlFor="org-domains">Alan adları</FieldLabel>
+                        <Field size="lg">
+                            <FieldLabel htmlFor="org-domains">{t("sxOrgsDomains")}</FieldLabel>
                             <Textarea
+                                size="lg"
                                 id="org-domains"
                                 rows={3}
                                 value={domains}
                                 onChange={(e: any) => setDomains(e.target.value)}
                                 placeholder={"acme.com\nacme.org"}
                             />
-                            <FieldDescription>Her satıra bir alan adı.</FieldDescription>
+                            <FieldDescription>{t("sxOrgsDomainsHelp")}</FieldDescription>
                         </Field>
-                        <Field>
-                            <FieldLabel htmlFor="org-description">Açıklama</FieldLabel>
+                        <Field size="lg">
+                            <FieldLabel htmlFor="org-description">{t("sxCommonDescription")}</FieldLabel>
                             <Textarea
+                                size="lg"
                                 id="org-description"
                                 rows={2}
                                 value={description}
                                 onChange={(e: any) => setDescription(e.target.value)}
-                                placeholder="Kısa açıklama"
+                                placeholder={t("sxOrgsDescriptionPlaceholder")}
                             />
                         </Field>
-                    </FieldGroup>
+                    </div>
                 </ModalBody>
                 <ModalFooter>
-                    <Button
-                        type="button"
-                        disabled={saving || !name.trim()}
-                        onClick={create}
-                    >
-                        {saving ? "Oluşturuluyor…" : "Oluştur"}
+                    <Button size="form" block disabled={saving || !name.trim()} onClick={create}>
+                        {saving ? t("sxCommonCreating") : t("sxCommonCreate")}
                     </Button>
                 </ModalFooter>
             </ModalContent>

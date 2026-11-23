@@ -2,126 +2,136 @@
 
 import {
     AppWindowIcon,
-    CaretRightIcon,
     ClockCounterClockwiseIcon,
     LightningIcon,
     ShieldCheckIcon,
     UserIcon,
     UsersThreeIcon
 } from "@phosphor-icons/react";
-import { Avatar, AvatarFallback } from "@ui/components/avatar";
-import { Badge } from "@ui/components/badge";
-import { Button } from "@ui/components/button";
-import {
-    Card,
-    CardAction,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle
-} from "@ui/components/card";
 import {
     type ChartConfig,
     ChartContainer,
     ChartTooltip,
     ChartTooltipContent
 } from "@ui/components/chart";
-import { Empty, EmptyDescription, EmptyHeader } from "@ui/components/empty";
-import {
-    Item,
-    ItemActions,
-    ItemContent,
-    ItemDescription,
-    ItemGroup,
-    ItemMedia,
-    ItemSeparator,
-    ItemTitle
-} from "@ui/components/item";
-import { Spinner } from "@ui/components/spinner";
-import { Fragment, useEffect, useState } from "react";
+import { Button } from "@ui/components/button";
+import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis } from "recharts";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAdminClient } from "../admin-client";
+import { AdminPage, Chip, GROUP, Group, ListSkeleton, Notice, Row, Section } from "../ui/kit";
+import { useT } from "../ui/i18n";
 import { useRealm } from "../ui/realm";
+import { initials } from "../ui/util";
 
 const DAY = 86400000;
 
-const loginChartConfig = {
-    value: { label: "Giriş", color: "var(--chart-1)" }
-} satisfies ChartConfig;
+const LINK_CLS =
+    "rounded-md text-[15px] font-medium text-primary outline-none hover:opacity-70 focus-visible:ring-2 focus-visible:ring-ring/50";
 
-const PAGE_CLS = "mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8";
+function Monogram({ name }: { name: string }) {
+    return (
+        <span className="grid size-8 place-items-center rounded-full bg-[#6e6e73] text-[11px] font-semibold text-white dark:bg-[#48484a]">
+            {initials(name)}
+        </span>
+    );
+}
 
-export default function Dashboard() {
-    const { adminClient } = useAdminClient();
-    const { realm } = useRealm();
-    const [loading, setLoading] = useState(true);
-    const [info, setInfo] = useState<any>(null);
-    const [stats, setStats] = useState({
-        users: 0,
-        clients: 0,
-        roles: 0,
-        groups: 0,
-        idps: 0
+function IconTile({ children }: { children: any }) {
+    return (
+        <span className="grid size-8 place-items-center rounded-lg bg-[#e5e5ea] text-foreground dark:bg-[#2c2c2e] [&_svg]:size-4.5">
+            {children}
+        </span>
+    );
+}
+
+function useLoad(load: () => Promise<any>, adminClient: any, realm: string) {
+    const [state, setState] = useState<{ status: "loading" | "error" | "ready"; data: any }>({
+        status: "loading",
+        data: null
     });
-    const [events, setEvents] = useState<any[]>([]);
-    const [recentUsers, setRecentUsers] = useState<any[]>([]);
-
+    const [attempt, setAttempt] = useState(0);
     useEffect(() => {
         let alive = true;
-        (async () => {
-            setLoading(true);
-            try {
-                const [realmRep, users, clients, roles, groups, idps, evts, lastUsers] =
-                    await Promise.all([
-                        adminClient.realms.findOne({ realm }),
-                        adminClient.users.count().catch(() => 0),
-                        adminClient.clients.find().catch(() => []),
-                        adminClient.roles.find().catch(() => []),
-                        adminClient.groups.count().catch(() => ({ count: 0 })),
-                        adminClient.identityProviders.find().catch(() => []),
-                        adminClient.realms
-                            .findEvents({ realm, max: 500 })
-                            .catch(() => []),
-                        adminClient.users
-                            .find({ first: 0, max: 5, briefRepresentation: true })
-                            .catch(() => [])
-                    ]);
-                if (!alive) return;
-                setInfo(realmRep);
-                setStats({
-                    users,
-                    clients: clients.length,
-                    roles: roles.length,
-                    groups: groups?.count ?? 0,
-                    idps: idps.length
-                });
-                setEvents(evts);
-                setRecentUsers(
-                    [...lastUsers].sort(
-                        (a, b) => (b.createdTimestamp ?? 0) - (a.createdTimestamp ?? 0)
-                    )
-                );
-            } finally {
-                if (alive) setLoading(false);
-            }
-        })();
+        setState({ status: "loading", data: null });
+        load()
+            .then(data => alive && setState({ status: "ready", data }))
+            .catch(() => alive && setState({ status: "error", data: null }));
         return () => {
             alive = false;
         };
-    }, [adminClient, realm]);
+    }, [adminClient, realm, attempt]);
+    return { ...state, retry: () => setAttempt(n => n + 1) };
+}
 
-    if (loading) {
-        return (
-            <div className={PAGE_CLS}>
-                <div className="grid place-items-center py-16">
-                    <Spinner />
-                </div>
-            </div>
+export default function Dashboard() {
+    const t = useT();
+    const { i18n } = useTranslation();
+    const lang = i18n.language;
+    const { adminClient } = useAdminClient();
+    const { realm } = useRealm();
+    const navigate = useNavigate();
+
+    const info = useLoad(() => adminClient.realms.findOne({ realm }), adminClient, realm);
+    const stats = useLoad(async () => {
+        const [users, clients, roles, groups, idps] = await Promise.all([
+            adminClient.users.count(),
+            adminClient.clients.find(),
+            adminClient.roles.find(),
+            adminClient.groups.count(),
+            adminClient.identityProviders.find()
+        ]);
+        return {
+            users: Number(users) || 0,
+            clients: clients?.length ?? 0,
+            roles: roles?.length ?? 0,
+            groups: groups?.count ?? 0,
+            idps: idps?.length ?? 0
+        };
+    }, adminClient, realm);
+    const events = useLoad(
+        async () => (await adminClient.realms.findEvents({ realm, max: 500 })) ?? [],
+        adminClient,
+        realm
+    );
+    const recentUsers = useLoad(async () => {
+        const list = (await adminClient.users.find({ first: 0, max: 5, briefRepresentation: true })) ?? [];
+        return [...list].sort((a, b) => (b.createdTimestamp ?? 0) - (a.createdTimestamp ?? 0));
+    }, adminClient, realm);
+
+    const num = (value: number) => value.toLocaleString(lang);
+
+    const page = (children: any) => (
+        <AdminPage title={t("sxNavDashboard")} description={t("sxDashboardDescription")}>
+            {children}
+        </AdminPage>
+    );
+
+    if (info.status === "loading") {
+        return page(
+            <>
+                <ListSkeleton rows={2} />
+                <ListSkeleton rows={4} />
+            </>
         );
     }
 
-    // Login activity, last 14 days (real data from events).
+    if (info.status === "error") {
+        return page(
+            <Notice
+                title={t("sxDashboardLoadError")}
+                description={t("sxLoadErrorDescription")}
+                onRetry={info.retry}
+            />
+        );
+    }
+
+    const realmInfo = info.data;
+    const loginChartConfig = {
+        value: { label: t("sxDashboardLogins"), color: "var(--chart-1)" }
+    } satisfies ChartConfig;
+
     const now = Date.now();
     const days = [];
     for (let i = 13; i >= 0; i--) {
@@ -134,7 +144,8 @@ export default function Dashboard() {
     }
     const idx = Object.fromEntries(days.map((d, i) => [d.key, i]));
     let totalLogins = 0;
-    for (const e of events) {
+    const eventList = events.data ?? [];
+    for (const e of eventList) {
         if (e.type && e.type !== "LOGIN") continue;
         const k = new Date(e.time).toISOString().slice(0, 10);
         if (k in idx) {
@@ -144,396 +155,274 @@ export default function Dashboard() {
     }
 
     const tiles = [
-        {
-            label: "Kullanıcılar",
-            value: stats.users,
-            to: "users",
-            icon: ICON.users
-        },
-        {
-            label: "İstemciler",
-            value: stats.clients,
-            to: "clients",
-            icon: ICON.clients
-        },
-        {
-            label: "Roller",
-            value: stats.roles,
-            to: "roles",
-            icon: ICON.roles
-        },
-        {
-            label: "Gruplar",
-            value: stats.groups,
-            to: "groups",
-            icon: ICON.groups
-        }
+        { key: "users", label: t("sxNavUsers"), to: "users", icon: ICON.users },
+        { key: "clients", label: t("sxNavClients"), to: "clients", icon: ICON.clients },
+        { key: "roles", label: t("sxDashboardRoles"), to: "roles", icon: ICON.roles },
+        { key: "groups", label: t("sxNavGroups"), to: "groups", icon: ICON.groups }
     ];
 
     const quick = [
-        {
-            label: "Kullanıcılar",
-            desc: "Hesapları yönet",
-            to: "users",
-            icon: ICON.users
-        },
-        {
-            label: "İstemciler",
-            desc: "Uygulama istemcileri",
-            to: "clients",
-            icon: ICON.clients
-        },
-        {
-            label: "Oturumlar",
-            desc: "Aktif oturumlar",
-            to: "sessions",
-            icon: ICON.sessions
-        },
-        {
-            label: "Olaylar",
-            desc: "Denetim kaydı",
-            to: "events",
-            icon: ICON.events
-        }
+        { key: "users", label: t("sxNavUsers"), desc: t("sxDashboardQuickUsers"), to: "users", icon: ICON.users },
+        { key: "clients", label: t("sxNavClients"), desc: t("sxDashboardQuickClients"), to: "clients", icon: ICON.clients },
+        { key: "sessions", label: t("sxNavSessions"), desc: t("sxDashboardQuickSessions"), to: "sessions", icon: ICON.sessions },
+        { key: "events", label: t("sxNavEvents"), desc: t("sxDashboardQuickEvents"), to: "events", icon: ICON.events }
     ];
 
-    const recentLogins = events.slice(0, 6);
+    const recentLogins = eventList.slice(0, 6);
 
-    return (
-        <div className={PAGE_CLS}>
-            <div className="space-y-8">
-                {/* Stat tiles */}
-                <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-                    {tiles.map(t => (
-                        <Link key={t.label} to={`/${realm}/${t.to}`} className="block">
-                            <Card size="sm">
-                                <CardHeader>
-                                    <CardDescription className="flex items-center gap-2">
-                                        {t.icon}
-                                        {t.label}
-                                    </CardDescription>
-                                    <CardTitle className="text-2xl tabular-nums">
-                                        {t.value.toLocaleString("tr-TR")}
-                                    </CardTitle>
-                                </CardHeader>
-                            </Card>
+    const onOff = (value: boolean) => (
+        <Chip tone={value ? "success" : "neutral"}>{value ? t("sxDashboardOn") : t("sxDashboardOff")}</Chip>
+    );
+
+    const eventsError = (
+        <Notice title={t("sxDashboardEventsLoadError")} description={t("sxLoadErrorDescription")} onRetry={events.retry} />
+    );
+
+    return page(
+        <>
+            {stats.status === "error" ? (
+                <Notice
+                    title={t("sxDashboardStatsLoadError")}
+                    description={t("sxLoadErrorDescription")}
+                    onRetry={stats.retry}
+                />
+            ) : (
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                    {tiles.map(tile => (
+                        <Link
+                            key={tile.key}
+                            to={`/${realm}/${tile.to}`}
+                            className={`${GROUP} block px-4 py-3.5 outline-none transition-colors hover:bg-black/3 focus-visible:ring-2 focus-visible:ring-ring/50 dark:hover:bg-white/4`}
+                        >
+                            <div className="flex items-center gap-2 text-[13px] text-muted-foreground [&_svg]:size-4">
+                                {tile.icon}
+                                <span className="truncate">{tile.label}</span>
+                            </div>
+                            <div className="mt-1.5 text-2xl font-semibold tracking-[-0.01em] tabular-nums">
+                                {stats.status === "loading" ? (
+                                    <span
+                                        aria-busy="true"
+                                        className="my-1.5 block h-5 w-12 animate-pulse rounded-md bg-[#e5e5ea] dark:bg-[#2c2c2e]"
+                                    />
+                                ) : (
+                                    num(stats.data[tile.key])
+                                )}
+                            </div>
                         </Link>
                     ))}
                 </div>
+            )}
 
-                {/* Login activity chart */}
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Giriş Etkinliği · Son 14 Gün</CardTitle>
-                        <CardAction>
-                            <span className="text-sm font-medium text-muted-foreground tabular-nums">
-                                {totalLogins.toLocaleString("tr-TR")} giriş
-                            </span>
-                        </CardAction>
-                    </CardHeader>
-                    <CardContent>
-                        {totalLogins > 0 ? (
-                            <div className="space-y-4">
-                                <ChartContainer
-                                    config={loginChartConfig}
-                                    className="aspect-auto h-11 w-full"
-                                >
-                                    <AreaChart
-                                        data={days}
-                                        margin={{ top: 4, right: 0, bottom: 0, left: 0 }}
-                                    >
-                                        <Area
-                                            dataKey="value"
-                                            type="monotone"
-                                            stroke="var(--color-value)"
-                                            fill="var(--color-value)"
-                                            fillOpacity={0.15}
-                                            strokeWidth={2}
-                                            isAnimationActive={false}
-                                        />
-                                    </AreaChart>
-                                </ChartContainer>
-                                <ChartContainer
-                                    config={loginChartConfig}
-                                    className="aspect-auto h-36 w-full"
-                                >
-                                    <BarChart accessibilityLayer data={days}>
-                                        <CartesianGrid vertical={false} />
-                                        <XAxis
-                                            dataKey="label"
-                                            tickLine={false}
-                                            axisLine={false}
-                                            tickMargin={8}
-                                        />
-                                        <ChartTooltip
-                                            cursor={false}
-                                            content={<ChartTooltipContent />}
-                                        />
-                                        <Bar
-                                            dataKey="value"
-                                            fill="var(--color-value)"
-                                            radius={6}
-                                        />
-                                    </BarChart>
-                                </ChartContainer>
-                            </div>
-                        ) : (
-                            <Empty>
-                                <EmptyHeader>
-                                    <EmptyDescription>
-                                        Bu dönemde giriş olayı yok (olay kaydı kapalı
-                                        olabilir).
-                                    </EmptyDescription>
-                                </EmptyHeader>
-                            </Empty>
-                        )}
-                    </CardContent>
-                </Card>
-
-                {/* Quick access + realm info */}
-                <div className="grid gap-6 lg:grid-cols-2">
-                    <div>
-                        <SectionHeader title="Hızlı Erişim" />
-                        <ItemGroup>
-                            {quick.map(q => (
-                                <Item key={q.label} variant="outline" asChild>
-                                    <Link to={`/${realm}/${q.to}`}>
-                                        <ItemMedia variant="icon">{q.icon}</ItemMedia>
-                                        <ItemContent>
-                                            <ItemTitle>{q.label}</ItemTitle>
-                                            <ItemDescription>{q.desc}</ItemDescription>
-                                        </ItemContent>
-                                        <ItemActions>
-                                            <CaretRightIcon className="text-muted-foreground rtl:rotate-180" />
-                                        </ItemActions>
-                                    </Link>
-                                </Item>
-                            ))}
-                        </ItemGroup>
+            <Section
+                label={t("sxDashboardLoginActivity")}
+                action={
+                    events.status === "ready" && (
+                        <span className="text-[13px] font-medium text-muted-foreground tabular-nums">
+                            {t("sxDashboardLoginCount", { total: num(totalLogins) })}
+                        </span>
+                    )
+                }
+            >
+                {events.status === "loading" ? (
+                    <ListSkeleton rows={2} />
+                ) : events.status === "error" ? (
+                    eventsError
+                ) : totalLogins > 0 ? (
+                    <div className={`${GROUP} space-y-4 p-4`}>
+                        <ChartContainer config={loginChartConfig} className="aspect-auto h-11 w-full">
+                            <AreaChart data={days} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
+                                <Area
+                                    dataKey="value"
+                                    type="monotone"
+                                    stroke="var(--color-value)"
+                                    fill="var(--color-value)"
+                                    fillOpacity={0.15}
+                                    strokeWidth={2}
+                                    isAnimationActive={false}
+                                />
+                            </AreaChart>
+                        </ChartContainer>
+                        <ChartContainer config={loginChartConfig} className="aspect-auto h-36 w-full">
+                            <BarChart accessibilityLayer data={days}>
+                                <CartesianGrid vertical={false} />
+                                <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} />
+                                <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
+                                <Bar dataKey="value" fill="var(--color-value)" radius={6} />
+                            </BarChart>
+                        </ChartContainer>
                     </div>
+                ) : (
+                    <Notice
+                        title={t("sxDashboardNoLoginsTitle")}
+                        description={t("sxDashboardNoLoginsDescription")}
+                    />
+                )}
+            </Section>
 
-                    <div>
-                        <SectionHeader
-                            title="Realm"
-                            action={
-                                <Button variant="link" size="sm" asChild>
-                                    <Link to={`/${realm}/realm-settings`}>Ayarlar</Link>
-                                </Button>
+            <div className="grid gap-6 lg:grid-cols-2">
+                <Section label={t("sxDashboardQuickAccess")}>
+                    <Group>
+                        {quick.map(q => (
+                            <Row
+                                key={q.key}
+                                onClick={() => navigate(`/${realm}/${q.to}`)}
+                                leading={<IconTile>{q.icon}</IconTile>}
+                                title={q.label}
+                                subtitle={q.desc}
+                            />
+                        ))}
+                    </Group>
+                </Section>
+
+                <Section
+                    label="Realm"
+                    action={
+                        <Link to={`/${realm}/realm-settings`} className={LINK_CLS}>
+                            {t("sxDashboardSettings")}
+                        </Link>
+                    }
+                >
+                    <Group>
+                        <InfoRow
+                            label={t("sxDashboardName")}
+                            value={<span className="[overflow-wrap:anywhere]">{realmInfo?.realm}</span>}
+                        />
+                        <InfoRow
+                            label={t("sxDashboardDisplayName")}
+                            value={<span className="[overflow-wrap:anywhere]">{realmInfo?.displayName || "—"}</span>}
+                        />
+                        <InfoRow
+                            label={t("sxDashboardStatus")}
+                            value={
+                                <Chip tone={realmInfo?.enabled ? "success" : "danger"}>
+                                    {realmInfo?.enabled ? t("sxDashboardEnabled") : t("sxDashboardDisabled")}
+                                </Chip>
                             }
                         />
-                        <Card>
-                            <CardContent>
-                                <dl className="space-y-3">
-                                    <InfoRow label="Ad" value={info?.realm} />
-                                    <InfoRow
-                                        label="Görünen ad"
-                                        value={info?.displayName || "—"}
-                                    />
-                                    <InfoRow
-                                        label="Durum"
-                                        value={
-                                            <Badge
-                                                variant={
-                                                    info?.enabled
-                                                        ? "outline"
-                                                        : "destructive"
-                                                }
-                                            >
-                                                {info?.enabled ? "Etkin" : "Devre dışı"}
-                                            </Badge>
-                                        }
-                                    />
-                                    <InfoRow
-                                        label="Kullanıcı kaydı"
-                                        value={
-                                            <Badge
-                                                variant={
-                                                    info?.registrationAllowed
-                                                        ? "outline"
-                                                        : "secondary"
-                                                }
-                                            >
-                                                {info?.registrationAllowed
-                                                    ? "Açık"
-                                                    : "Kapalı"}
-                                            </Badge>
-                                        }
-                                    />
-                                    <InfoRow
-                                        label="Kimlik sağlayıcı"
-                                        value={stats.idps.toLocaleString("tr-TR")}
-                                    />
-                                    <InfoRow
-                                        label="Brute-force"
-                                        value={
-                                            <Badge
-                                                variant={
-                                                    info?.bruteForceProtected
-                                                        ? "outline"
-                                                        : "secondary"
-                                                }
-                                            >
-                                                {info?.bruteForceProtected
-                                                    ? "Açık"
-                                                    : "Kapalı"}
-                                            </Badge>
-                                        }
-                                    />
-                                </dl>
-                            </CardContent>
-                        </Card>
-                    </div>
-                </div>
-
-                {/* Recent logins + recent users */}
-                <div className="grid gap-6 lg:grid-cols-2">
-                    <div>
-                        <SectionHeader
-                            title="Son Girişler"
-                            action={
-                                <Button variant="link" size="sm" asChild>
-                                    <Link to={`/${realm}/events`}>Tümü</Link>
-                                </Button>
+                        <InfoRow label={t("sxDashboardUserRegistration")} value={onOff(realmInfo?.registrationAllowed)} />
+                        <InfoRow
+                            label={t("sxDashboardIdentityProviders")}
+                            value={
+                                <span className="tabular-nums">
+                                    {stats.status === "ready" ? num(stats.data.idps) : "—"}
+                                </span>
                             }
                         />
-                        {recentLogins.length === 0 ? (
-                            <Empty>
-                                <EmptyHeader>
-                                    <EmptyDescription>Olay yok.</EmptyDescription>
-                                </EmptyHeader>
-                            </Empty>
-                        ) : (
-                            <ItemGroup variant="inset">
-                                {recentLogins.map((e, i) => {
-                                    const who =
-                                        e.details?.username || e.userId?.slice(0, 8) || "—";
-                                    return (
-                                        <Fragment key={i}>
-                                            {i > 0 && <ItemSeparator />}
-                                            <Item size="sm">
-                                                <ItemMedia>
-                                                    <Avatar>
-                                                        <AvatarFallback className="uppercase">
-                                                            {(who || "?").charAt(0)}
-                                                        </AvatarFallback>
-                                                    </Avatar>
-                                                </ItemMedia>
-                                                <ItemContent className="min-w-0">
-                                                    <ItemTitle>{who}</ItemTitle>
-                                                    <ItemDescription className="truncate">
-                                                        {e.clientId || "—"} ·{" "}
-                                                        {new Date(e.time).toLocaleString(
-                                                            "tr-TR"
-                                                        )}
-                                                    </ItemDescription>
-                                                </ItemContent>
-                                                <ItemActions>
-                                                    <Badge variant={eventBadge(e.type)}>
-                                                        {eventLabel(e.type)}
-                                                    </Badge>
-                                                </ItemActions>
-                                            </Item>
-                                        </Fragment>
-                                    );
-                                })}
-                            </ItemGroup>
-                        )}
-                    </div>
-
-                    <div>
-                        <SectionHeader
-                            title="Son Kullanıcılar"
-                            action={
-                                <Button variant="link" size="sm" asChild>
-                                    <Link to={`/${realm}/users`}>Tümü</Link>
-                                </Button>
-                            }
-                        />
-                        {recentUsers.length === 0 ? (
-                            <Empty>
-                                <EmptyHeader>
-                                    <EmptyDescription>Kullanıcı yok.</EmptyDescription>
-                                </EmptyHeader>
-                            </Empty>
-                        ) : (
-                            <ItemGroup variant="inset">
-                                {recentUsers.map((u, i) => (
-                                    <Fragment key={u.id}>
-                                        {i > 0 && <ItemSeparator />}
-                                        <Item size="sm" asChild>
-                                            <Link to={`/${realm}/users/${u.id}`}>
-                                                <ItemMedia>
-                                                    <Avatar>
-                                                        <AvatarFallback className="uppercase">
-                                                            {(u.username || "?").charAt(0)}
-                                                        </AvatarFallback>
-                                                    </Avatar>
-                                                </ItemMedia>
-                                                <ItemContent className="min-w-0">
-                                                    <ItemTitle>{u.username}</ItemTitle>
-                                                    <ItemDescription className="truncate">
-                                                        {u.email || "—"}
-                                                    </ItemDescription>
-                                                </ItemContent>
-                                                <ItemActions>
-                                                    <Badge
-                                                        variant={
-                                                            u.enabled
-                                                                ? "outline"
-                                                                : "destructive"
-                                                        }
-                                                    >
-                                                        {u.enabled ? "Etkin" : "Pasif"}
-                                                    </Badge>
-                                                </ItemActions>
-                                            </Link>
-                                        </Item>
-                                    </Fragment>
-                                ))}
-                            </ItemGroup>
-                        )}
-                    </div>
-                </div>
+                        <InfoRow label={t("sxDashboardBruteForce")} value={onOff(realmInfo?.bruteForceProtected)} />
+                    </Group>
+                </Section>
             </div>
-        </div>
-    );
-}
 
-function SectionHeader({ title, action }: { title: string; action?: any }) {
-    return (
-        <div className="mb-3 flex items-center justify-between">
-            <h3 className="font-semibold tracking-tight">{title}</h3>
-            {action}
-        </div>
+            <div className="grid gap-6 lg:grid-cols-2">
+                <Section
+                    label={t("sxDashboardRecentLogins")}
+                    action={
+                        <Link to={`/${realm}/events`} className={LINK_CLS}>
+                            {t("sxDashboardSeeAll")}
+                        </Link>
+                    }
+                >
+                    {events.status === "loading" ? (
+                        <ListSkeleton />
+                    ) : events.status === "error" ? (
+                        eventsError
+                    ) : recentLogins.length === 0 ? (
+                        <Notice title={t("sxDashboardNoEventsTitle")} description={t("sxDashboardNoEventsDescription")} />
+                    ) : (
+                        <Group>
+                            {recentLogins.map((e, i) => {
+                                const who = e.details?.username || e.userId?.slice(0, 8) || "—";
+                                return (
+                                    <Row
+                                        key={i}
+                                        leading={<Monogram name={who} />}
+                                        title={who}
+                                        subtitle={`${e.clientId || "—"} · ${new Date(e.time).toLocaleString(lang)}`}
+                                        trailing={<Chip tone={eventTone(e.type)}>{eventLabel(t, e.type)}</Chip>}
+                                    />
+                                );
+                            })}
+                        </Group>
+                    )}
+                </Section>
+
+                <Section
+                    label={t("sxDashboardRecentUsers")}
+                    action={
+                        <Link to={`/${realm}/users`} className={LINK_CLS}>
+                            {t("sxDashboardSeeAll")}
+                        </Link>
+                    }
+                >
+                    {recentUsers.status === "loading" ? (
+                        <ListSkeleton />
+                    ) : recentUsers.status === "error" ? (
+                        <Notice
+                            title={t("sxDashboardUsersLoadError")}
+                            description={t("sxLoadErrorDescription")}
+                            onRetry={recentUsers.retry}
+                        />
+                    ) : recentUsers.data.length === 0 ? (
+                        <Notice
+                            title={t("sxDashboardNoUsersTitle")}
+                            description={t("sxDashboardNoUsersDescription")}
+                            action={
+                                <Button onClick={() => navigate(`/${realm}/users`)}>{t("sxDashboardGoToUsers")}</Button>
+                            }
+                        />
+                    ) : (
+                        <Group>
+                            {recentUsers.data.map(u => (
+                                <Row
+                                    key={u.id}
+                                    onClick={() => navigate(`/${realm}/users/${u.id}`)}
+                                    leading={<Monogram name={u.username} />}
+                                    title={u.username}
+                                    subtitle={u.email || "—"}
+                                    trailing={
+                                        <Chip tone={u.enabled ? "success" : "danger"}>
+                                            {u.enabled ? t("sxDashboardEnabled") : t("sxDashboardInactive")}
+                                        </Chip>
+                                    }
+                                />
+                            ))}
+                        </Group>
+                    )}
+                </Section>
+            </div>
+        </>
     );
 }
 
 function InfoRow({ label, value }: { label: string; value: any }) {
     return (
-        <div className="flex items-center justify-between gap-3">
-            <dt className="text-sm text-muted-foreground">{label}</dt>
-            <dd className="text-sm font-medium text-foreground">{value}</dd>
-        </div>
+        <li className="flex min-h-12 items-center justify-between gap-3 px-4 py-2.5">
+            <span className="shrink-0 text-[15px] text-muted-foreground">{label}</span>
+            <span className="min-w-0 text-end text-[15px] font-medium">{value}</span>
+        </li>
     );
 }
 
-function eventBadge(type: string) {
-    if (!type) return "secondary";
-    if (type === "LOGIN") return "outline";
-    if (type.endsWith("_ERROR")) return "destructive";
-    if (type === "LOGOUT") return "secondary";
-    return "default";
+function eventTone(type: string) {
+    if (!type) return "neutral";
+    if (type === "LOGIN") return "success";
+    if (type.endsWith("_ERROR")) return "danger";
+    if (type === "LOGOUT") return "neutral";
+    return "info";
 }
-function eventLabel(type: string) {
-    const map: Record<string, string> = {
-        LOGIN: "Giriş",
-        LOGOUT: "Çıkış",
-        LOGIN_ERROR: "Giriş hatası",
-        CODE_TO_TOKEN: "Token",
-        REFRESH_TOKEN: "Yenileme",
-        REGISTER: "Kayıt"
-    };
-    return map[type] || type || "—";
+
+const EVENT_LABELS: Record<string, string> = {
+    LOGIN: "sxDashboardEventLogin",
+    LOGOUT: "sxDashboardEventLogout",
+    LOGIN_ERROR: "sxDashboardEventLoginError",
+    CODE_TO_TOKEN: "sxDashboardEventCodeToToken",
+    REFRESH_TOKEN: "sxDashboardEventRefreshToken",
+    REGISTER: "sxDashboardEventRegister"
+};
+
+function eventLabel(t: any, type: string) {
+    const key = EVENT_LABELS[type];
+    return key ? t(key) : type || "—";
 }
 
 const ICON = {

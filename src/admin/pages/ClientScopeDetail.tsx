@@ -1,43 +1,10 @@
 // @ts-nocheck
 
-import {
-    CaretLeftIcon,
-    CaretRightIcon,
-    CheckIcon,
-    MagnifyingGlassIcon,
-    PencilSimpleIcon,
-    PlusIcon,
-    StackIcon,
-    TrashIcon
-} from "@phosphor-icons/react";
+import { CaretLeftIcon, CheckIcon } from "@phosphor-icons/react";
 import { Button } from "@ui/components/button";
-import {
-    Empty,
-    EmptyContent,
-    EmptyDescription,
-    EmptyHeader,
-    EmptyMedia,
-    EmptyTitle
-} from "@ui/components/empty";
+import { Field, FieldLabel } from "@ui/components/field";
 import { Input } from "@ui/components/input";
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@ui/components/input-group";
-import {
-    Item,
-    ItemActions,
-    ItemContent,
-    ItemDescription,
-    ItemGroup,
-    ItemSeparator,
-    ItemTitle
-} from "@ui/components/item";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue
-} from "@ui/components/select";
-import { Spinner } from "@ui/components/spinner";
+import { NativeSelect, NativeSelectOption } from "@ui/components/native-select";
 import { Switch } from "@ui/components/switch";
 import { Textarea } from "@ui/components/textarea";
 import {
@@ -51,30 +18,35 @@ import {
     ConfirmTitle
 } from "@ui/patterns/confirm";
 import { Modal, ModalBody, ModalContent, ModalHeader, ModalTitle } from "@ui/patterns/modal";
-import { SegmentPicker, SegmentPickerItem } from "@ui/patterns/segment-picker";
-import { cn } from "@ui/lib/utils";
-import {
-    Children,
-    cloneElement,
-    Fragment,
-    isValidElement,
-    type ReactNode,
-    useCallback,
-    useEffect,
-    useState
-} from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AlertVariant, useAlerts } from "../../shared/keycloak-ui-shared";
 import { useAdminClient } from "../admin-client";
 import ConfigForm from "../components/ConfigForm";
+import {
+    AdminPage,
+    Group,
+    ListSkeleton,
+    Notice,
+    Row,
+    SearchField,
+    Section,
+    SegmentTabs,
+    TextAction
+} from "../ui/kit";
+import { useT } from "../ui/i18n";
 import { useRealm } from "../ui/realm";
 
 const TABS = [
-    { value: "settings", label: "Ayarlar" },
-    { value: "mappers", label: "Eşleştiriciler" }
+    { value: "settings", label: "sxClientScopeDetailTabSettings" },
+    { value: "mappers", label: "sxClientScopeDetailTabMappers" }
 ];
 
+const DANGER_BUTTON =
+    "bg-[#d70015] text-white hover:bg-[#d70015]/90 dark:bg-[#ff453a] dark:hover:bg-[#ff453a]/90";
+
 export default function ClientScopeDetail() {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
     const { id } = useParams();
@@ -82,67 +54,71 @@ export default function ClientScopeDetail() {
     const { addError } = useAlerts();
 
     const [scope, setScope] = useState<any>(null);
-    const [loading, setLoading] = useState(true);
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
+    const [attempt, setAttempt] = useState(0);
     const [tab, setTab] = useState("settings");
 
-    const reload = useCallback(async () => {
+    useEffect(() => {
+        let alive = true;
+        setStatus("loading");
+        adminClient.clientScopes
+            .findOne({ id })
+            .then(s => {
+                if (!alive) return;
+                setScope(s ?? null);
+                setStatus("ready");
+            })
+            .catch(() => alive && setStatus("error"));
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, id, attempt]);
+
+    const reload = async () => {
         try {
             const s = await adminClient.clientScopes.findOne({ id });
             setScope(s ?? null);
         } catch (e) {
-            addError("Kapsam yüklenemedi.", e);
-        } finally {
-            setLoading(false);
+            addError(t("sxClientScopeDetailLoadErrorToast"), e);
         }
-    }, [adminClient, id, addError]);
+    };
 
-    useEffect(() => {
-        setLoading(true);
-        reload();
-    }, [reload]);
+    const back = { label: t("sxNavClientScopes"), to: `/${realm}/client-scopes` };
 
-    if (loading)
+    if (status !== "ready" || !scope)
         return (
-            <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-                <div className="flex justify-center py-16">
-                    <Spinner className="size-6" />
-                </div>
-            </div>
-        );
-    if (!scope)
-        return (
-            <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-                <EmptyCard icon={<StackIcon />} title="Kapsam bulunamadı" />
-            </div>
+            <AdminPage title={scope?.name || t("sxClientScopeDetailFallbackTitle")} back={back} width="narrow">
+                {status === "loading" && <ListSkeleton rows={4} />}
+                {status === "error" && (
+                    <Notice
+                        title={t("sxClientScopeDetailLoadError")}
+                        description={t("sxLoadErrorDescription")}
+                        onRetry={() => setAttempt(n => n + 1)}
+                    />
+                )}
+                {status === "ready" && (
+                    <Notice
+                        title={t("sxClientScopeDetailNotFound")}
+                        description={t("sxClientScopeDetailNotFoundDescription")}
+                        action={<Button size="sm" onClick={() => navigate(back.to)}>{t("sxClientScopeDetailBackToList")}</Button>}
+                    />
+                )}
+            </AdminPage>
         );
 
     return (
-        <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-            {/* iOS nav-bar header */}
-            <div className="relative mb-7 flex items-center">
-                <Button
-                    variant="secondary"
-                    size="icon"
-                    onClick={() => navigate(`/${realm}/client-scopes`)}
-                    aria-label="Geri"
-                >
-                    <CaretLeftIcon weight="bold" />
-                </Button>
-                <div className="absolute left-1/2 -translate-x-1/2 text-center">
-                    <p className="font-semibold text-foreground">{scope.name}</p>
-                    <p className="font-mono text-xs text-muted-foreground">
-                        {scope.protocol || "openid-connect"}
-                    </p>
-                </div>
-            </div>
-
-            <div className="mb-5 flex justify-center">
-                <SegmentPicker value={tab} onValueChange={setTab} aria-label="Bölüm">
-                    {TABS.map(t => (
-                        <SegmentPickerItem key={t.value} value={t.value} label={t.label} />
-                    ))}
-                </SegmentPicker>
-            </div>
+        <AdminPage
+            title={scope.name}
+            description={<span className="font-mono text-[15px]">{scope.protocol || "openid-connect"}</span>}
+            back={back}
+            width="narrow"
+        >
+            <SegmentTabs
+                value={tab}
+                onChange={setTab}
+                items={TABS.map(item => ({ value: item.value, label: t(item.label) }))}
+                ariaLabel={t("sxCommonSection")}
+            />
 
             {tab === "settings" && (
                 <SettingsTab
@@ -152,18 +128,13 @@ export default function ClientScopeDetail() {
                 />
             )}
             {tab === "mappers" && <MappersTab scope={scope} />}
-        </div>
+        </AdminPage>
     );
 }
 
-/* ── Settings ─────────────────────────────────────────────────────────── */
-function SettingsTab({ scope, reload, onDeleted }: any) {
-    const { adminClient } = useAdminClient();
-    const { addAlert, addError } = useAlerts();
-    const [confirm, confirmNode] = useConfirmDialog();
-
+function initialForm(scope: any) {
     const attrs = scope.attributes || {};
-    const [f, setF] = useState({
+    return {
         name: scope.name || "",
         description: scope.description || "",
         protocol: scope.protocol || "openid-connect",
@@ -171,9 +142,19 @@ function SettingsTab({ scope, reload, onDeleted }: any) {
         consentText: attrs["consent.screen.text"] || "",
         inToken: attrs["include.in.token.scope"] !== "false",
         guiOrder: attrs["gui.order"] || ""
-    });
+    };
+}
+
+function SettingsTab({ scope, reload, onDeleted }: any) {
+    const t = useT();
+    const { adminClient } = useAdminClient();
+    const { addAlert, addError } = useAlerts();
+    const [confirm, confirmNode] = useConfirmDialog();
+
+    const [f, setF] = useState(() => initialForm(scope));
     const set = (k: string, v: any) => setF(p => ({ ...p, [k]: v }));
     const [saving, setSaving] = useState(false);
+    const dirty = JSON.stringify(f) !== JSON.stringify(initialForm(scope));
 
     const save = async () => {
         const name = f.name.trim();
@@ -202,10 +183,10 @@ function SettingsTab({ scope, reload, onDeleted }: any) {
                     attributes
                 }
             );
-            addAlert("Kapsam kaydedildi.", AlertVariant.success);
+            addAlert(t("sxClientScopeDetailSaved"), AlertVariant.success);
             reload();
         } catch (e) {
-            addError("Kaydedilemedi.", e);
+            addError(t("sxCommonSaveError"), e);
         } finally {
             setSaving(false);
         }
@@ -213,123 +194,136 @@ function SettingsTab({ scope, reload, onDeleted }: any) {
 
     const remove = () =>
         confirm({
-            title: "Kapsamı sil",
-            message: `“${scope.name}” kapsamı kalıcı olarak silinecek.`,
-            confirmLabel: "Sil",
+            title: t("sxClientScopeDetailDeleteTitle"),
+            message: t("sxClientScopeDetailDeleteMessage", { name: scope.name }),
+            confirmLabel: t("sxCommonDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.clientScopes.del({ id: scope.id });
-                    addAlert("Kapsam silindi.", AlertVariant.success);
+                    addAlert(t("sxClientScopesDeleted"), AlertVariant.success);
                     onDeleted();
                 } catch (e) {
-                    addError("Silinemedi.", e);
+                    addError(t("sxCommonDeleteError"), e);
                 }
             }
         });
 
     return (
-        <div className="mx-auto max-w-xl space-y-6">
-            <div>
-                <GroupLabel>Genel</GroupLabel>
-                <Group>
-                    <StackRow label="Ad">
+        <>
+            <Section label={t("sxCommonGeneral")}>
+                <div className="flex flex-col gap-4">
+                    <Field size="lg">
+                        <FieldLabel htmlFor="scope-name">{t("sxCommonName")}</FieldLabel>
                         <Input
-                            size="sm"
+                            size="lg"
+                            id="scope-name"
                             value={f.name}
+                            aria-invalid={!f.name.trim() || undefined}
                             onChange={(e: any) => set("name", e.target.value)}
-                            placeholder="kapsam-adi"
+                            placeholder={t("sxClientScopeDetailNamePlaceholder")}
                         />
-                    </StackRow>
-                    <StackRow label="Açıklama">
+                    </Field>
+                    <Field size="lg">
+                        <FieldLabel htmlFor="scope-description">{t("sxCommonDescription")}</FieldLabel>
                         <Textarea
+                            size="lg"
+                            id="scope-description"
                             value={f.description}
                             onChange={(e: any) => set("description", e.target.value)}
-                            placeholder="Bu kapsamın amacı…"
+                            placeholder={t("sxClientScopeDetailDescriptionPlaceholder")}
                         />
-                    </StackRow>
-                    <Row label="Protokol">
-                        <Select
+                    </Field>
+                    <Field size="lg">
+                        <FieldLabel htmlFor="scope-protocol">{t("sxCommonProtocol")}</FieldLabel>
+                        <NativeSelect
+                            id="scope-protocol"
+                            size="lg"
+                            className="w-full"
                             value={f.protocol}
-                            onValueChange={(v: string) => set("protocol", v)}
+                            onChange={(e: any) => set("protocol", e.target.value)}
                         >
-                            <SelectTrigger size="sm" aria-label="Protokol">
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent align="end" className="z-200">
-                                <SelectItem value="openid-connect">
-                                    openid-connect
-                                </SelectItem>
-                                <SelectItem value="saml">saml</SelectItem>
-                            </SelectContent>
-                        </Select>
-                    </Row>
-                    <StackRow label="Görünüm sırası (gui.order)">
+                            <NativeSelectOption value="openid-connect">openid-connect</NativeSelectOption>
+                            <NativeSelectOption value="saml">saml</NativeSelectOption>
+                        </NativeSelect>
+                    </Field>
+                    <Field size="lg">
+                        <FieldLabel htmlFor="scope-gui-order">{t("sxClientScopeDetailGuiOrder")}</FieldLabel>
                         <Input
-                            size="sm"
+                            size="lg"
+                            id="scope-gui-order"
                             value={f.guiOrder}
                             onChange={(e: any) => set("guiOrder", e.target.value)}
-                            placeholder="örn. 1"
+                            placeholder={t("sxClientScopeDetailGuiOrderPlaceholder")}
                         />
-                    </StackRow>
-                </Group>
-            </div>
+                    </Field>
+                </div>
+            </Section>
 
-            <div>
-                <GroupLabel>Onay & token</GroupLabel>
-                <Group>
-                    <SwitchRow
-                        label="Onay ekranında göster"
-                        hint="Kullanıcı onay ekranında bu kapsam listelenir."
-                        checked={f.onConsent}
-                        onChange={(v: boolean) => set("onConsent", v)}
-                    />
+            <Section label={t("sxClientScopeDetailConsentSection")}>
+                <div className="flex flex-col gap-4">
+                    <Group>
+                        <SwitchRow
+                            label={t("sxClientScopeDetailOnConsent")}
+                            hint={t("sxClientScopeDetailOnConsentHint")}
+                            checked={f.onConsent}
+                            onChange={(v: boolean) => set("onConsent", v)}
+                        />
+                        <SwitchRow
+                            label={t("sxClientScopeDetailInToken")}
+                            hint={t("sxClientScopeDetailInTokenHint")}
+                            checked={f.inToken}
+                            onChange={(v: boolean) => set("inToken", v)}
+                        />
+                    </Group>
                     {f.onConsent && (
-                        <StackRow label="Onay ekranı metni">
+                        <Field size="lg">
+                            <FieldLabel htmlFor="scope-consent-text">{t("sxClientScopeDetailConsentText")}</FieldLabel>
                             <Input
-                                size="sm"
+                                size="lg"
+                                id="scope-consent-text"
                                 value={f.consentText}
                                 onChange={(e: any) => set("consentText", e.target.value)}
                                 placeholder="${profile}"
                             />
-                        </StackRow>
+                        </Field>
                     )}
-                    <SwitchRow
-                        label="Token kapsamına dahil et"
-                        hint="Kapsam adı erişim token'ındaki scope claim'ine eklenir."
-                        checked={f.inToken}
-                        onChange={(v: boolean) => set("inToken", v)}
-                    />
-                </Group>
-                <GroupFooter>
-                    Bu ayarlar kapsamın attributes alanında saklanır.
-                </GroupFooter>
-            </div>
+                    <p className="px-0.5 text-[13px] text-muted-foreground">
+                        {t("sxClientScopeDetailAttributesNote")}
+                    </p>
+                </div>
+            </Section>
 
-            <div className="flex justify-end">
-                <Button disabled={saving || !f.name.trim()} onClick={save}>
-                    {saving ? "Kaydediliyor…" : "Kaydet"}
+            <div className="flex flex-col gap-1.5">
+                <Button size="form" block disabled={saving || !f.name.trim()} onClick={save}>
+                    {saving ? t("sxCommonSaving") : t("sxCommonSave")}
+                </Button>
+                <Button
+                    variant="plain"
+                    size="form"
+                    block
+                    disabled={saving || !dirty}
+                    onClick={() => setF(initialForm(scope))}
+                >
+                    {t("sxCommonCancel")}
                 </Button>
             </div>
 
-            <div>
-                <GroupLabel>Tehlikeli bölge</GroupLabel>
-                <Group>
-                    <ActionRow danger onClick={remove}>
-                        Kapsamı sil
-                    </ActionRow>
-                </Group>
-                <GroupFooter>
-                    Kapsam ve tüm eşleştiricileri kalıcı olarak silinir.
-                </GroupFooter>
-            </div>
+            <section className="border-t border-[#e5e5ea] pt-6 dark:border-[#38383a]">
+                <p className="mb-3 text-[13px] leading-[1.4] text-muted-foreground">
+                    {t("sxClientScopeDetailDeleteNote")}
+                </p>
+                <Button size="form" block className={DANGER_BUTTON} onClick={remove}>
+                    {t("sxClientScopeDetailDeleteTitle")}
+                </Button>
+            </section>
             {confirmNode}
-        </div>
+        </>
     );
 }
 
-/* ── Mappers ──────────────────────────────────────────────────────────── */
 function MappersTab({ scope }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [confirm, confirmNode] = useConfirmDialog();
@@ -339,38 +333,51 @@ function MappersTab({ scope }: any) {
 
     const [mappers, setMappers] = useState<any[]>([]);
     const [serverInfo, setServerInfo] = useState<any>(null);
-    const [loading, setLoading] = useState(true);
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
+    const [attempt, setAttempt] = useState(0);
     const [adding, setAdding] = useState(false);
     const [editing, setEditing] = useState<any>(null);
 
-    const load = useCallback(async () => {
-        setLoading(true);
+    const fetchAll = () =>
+        Promise.all([
+            adminClient.clientScopes.listProtocolMappers({ id }),
+            adminClient.serverInfo.find()
+        ]);
+
+    useEffect(() => {
+        let alive = true;
+        setStatus("loading");
+        fetchAll()
+            .then(([m, si]) => {
+                if (!alive) return;
+                setMappers(Array.isArray(m) ? m : []);
+                setServerInfo(si);
+                setStatus("ready");
+            })
+            .catch(() => alive && setStatus("error"));
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, id, attempt]);
+
+    const load = async () => {
         try {
-            const [m, si] = await Promise.all([
-                adminClient.clientScopes.listProtocolMappers({ id }).catch(() => []),
-                adminClient.serverInfo.find().catch(() => null)
-            ]);
+            const [m, si] = await fetchAll();
             setMappers(Array.isArray(m) ? m : []);
             setServerInfo(si);
         } catch (e) {
-            addError("Eşleştiriciler yüklenemedi.", e);
-        } finally {
-            setLoading(false);
+            addError(t("sxClientScopeDetailMappersLoadErrorToast"), e);
         }
-    }, [adminClient, id, addError]);
-
-    useEffect(() => {
-        load();
-    }, [load]);
+    };
 
     const mapperTypes: any[] = serverInfo?.protocolMapperTypes?.[protocol] || [];
     const builtins: any[] = serverInfo?.builtinProtocolMappers?.[protocol] || [];
 
     const deleteMapper = (m: any) =>
         confirm({
-            title: "Eşleştiriciyi sil",
-            message: `“${m.name}” eşleştiricisi silinecek.`,
-            confirmLabel: "Sil",
+            title: t("sxClientScopeDetailMapperDeleteTitle"),
+            message: t("sxClientScopeDetailMapperDeleteMessage", { name: m.name }),
+            confirmLabel: t("sxCommonDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
@@ -378,66 +385,57 @@ function MappersTab({ scope }: any) {
                         id,
                         mapperId: m.id
                     });
-                    addAlert("Eşleştirici silindi.", AlertVariant.success);
+                    addAlert(t("sxClientScopeDetailMapperDeleted"), AlertVariant.success);
                     setMappers(mappers.filter(x => x.id !== m.id));
                 } catch (e) {
-                    addError("Silinemedi.", e);
+                    addError(t("sxCommonDeleteError"), e);
                 }
             }
         });
 
-    if (loading)
-        return (
-            <div className="flex justify-center py-16">
-                <Spinner className="size-6" />
-            </div>
-        );
-
     return (
-        <div className="mx-auto max-w-xl space-y-3">
-            <div className="flex items-center justify-between">
-                <GroupLabel>{mappers.length} eşleştirici</GroupLabel>
-                <Button variant="plain" size="sm" onClick={() => setAdding(true)}>
-                    <PlusIcon /> Ekle
-                </Button>
-            </div>
-            {mappers.length === 0 ? (
-                <EmptyCard
-                    icon={<StackIcon weight="fill" />}
-                    title="Eşleştirici yok"
-                    desc="Token'a claim eklemek için bir eşleştirici ekleyin."
+        <Section
+            label={
+                status === "ready"
+                    ? t("sxClientScopeDetailMappersCount", { total: mappers.length })
+                    : t("sxClientScopeDetailTabMappers")
+            }
+            action={status === "ready" && <TextAction onClick={() => setAdding(true)}>{t("sxCommonAdd")}</TextAction>}
+        >
+            {status === "loading" && <ListSkeleton />}
+            {status === "error" && (
+                <Notice
+                    title={t("sxClientScopeDetailMappersLoadError")}
+                    description={t("sxLoadErrorDescription")}
+                    onRetry={() => setAttempt(n => n + 1)}
+                />
+            )}
+            {status === "ready" && mappers.length === 0 && (
+                <Notice
+                    title={t("sxClientScopeDetailMappersEmpty")}
+                    description={t("sxClientScopeDetailMappersEmptyDescription")}
                     action={
-                        <Button variant="secondary" onClick={() => setAdding(true)}>
-                            Ekle
+                        <Button size="sm" className="h-8.5 px-4 font-medium" onClick={() => setAdding(true)}>
+                            {t("sxCommonAdd")}
                         </Button>
                     }
                 />
-            ) : (
+            )}
+            {status === "ready" && mappers.length > 0 && (
                 <Group>
                     {mappers.map(m => (
-                        <Item key={m.id} size="sm">
-                            <ItemContent
-                                className="min-w-0 cursor-pointer"
-                                onClick={() => setEditing(m)}
-                            >
-                                <ItemTitle>{m.name}</ItemTitle>
-                                <ItemDescription className="truncate">
-                                    {m.protocolMapper}
-                                </ItemDescription>
-                            </ItemContent>
-                            <ItemActions>
-                                <Button
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    onClick={() => setEditing(m)}
-                                    aria-label="Düzenle"
-                                    title="Düzenle"
-                                >
-                                    <PencilSimpleIcon />
-                                </Button>
-                                <RowDelete onClick={() => deleteMapper(m)} />
-                            </ItemActions>
-                        </Item>
+                        <OpenRow
+                            key={m.id}
+                            testId={`mapper-${m.name}`}
+                            onOpen={() => setEditing(m)}
+                            title={m.name}
+                            subtitle={m.protocolMapper}
+                            trailing={
+                                <TextAction tone="danger" onClick={() => deleteMapper(m)}>
+                                    {t("sxCommonDelete")}
+                                </TextAction>
+                            }
+                        />
                     ))}
                 </Group>
             )}
@@ -469,11 +467,10 @@ function MappersTab({ scope }: any) {
                 />
             )}
             {confirmNode}
-        </div>
+        </Section>
     );
 }
 
-/* config helpers: KC stores config as { [name]: string }; ConfigForm uses { [name]: string[] } */
 function configToForm(config: any) {
     const out: any = {};
     Object.entries(config || {}).forEach(([k, v]: any) => {
@@ -504,9 +501,10 @@ function AddMapperModal({
     onClose,
     onDone
 }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
-    const [view, setView] = useState("choose"); // choose | predefined | pickType | config
+    const [view, setView] = useState("choose");
     const [search, setSearch] = useState("");
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [pickedType, setPickedType] = useState<any>(null);
@@ -519,8 +517,8 @@ function AddMapperModal({
     const filteredBuiltins = availBuiltins.filter((b: any) =>
         (b.name || "").toLowerCase().includes(search.toLowerCase())
     );
-    const filteredTypes = (mapperTypes || []).filter((t: any) =>
-        (t.name || "").toLowerCase().includes(search.toLowerCase())
+    const filteredTypes = (mapperTypes || []).filter((type: any) =>
+        (type.name || "").toLowerCase().includes(search.toLowerCase())
     );
 
     const toggleSel = (n: string) =>
@@ -538,10 +536,10 @@ function AddMapperModal({
         setSaving(true);
         try {
             await adminClient.clientScopes.addMultipleProtocolMappers({ id }, reps);
-            addAlert(`${reps.length} eşleştirici eklendi.`, AlertVariant.success);
+            addAlert(t("sxClientScopeDetailMappersAdded", { total: reps.length }), AlertVariant.success);
             onDone();
         } catch (e) {
-            addError("Eklenemedi.", e);
+            addError(t("sxCommonAddError"), e);
             setSaving(false);
         }
     };
@@ -559,174 +557,122 @@ function AddMapperModal({
                     config: formToConfig(config)
                 }
             );
-            addAlert("Eşleştirici eklendi.", AlertVariant.success);
+            addAlert(t("sxClientScopeDetailMapperAdded"), AlertVariant.success);
             onDone();
         } catch (e) {
-            addError("Eklenemedi.", e);
+            addError(t("sxCommonAddError"), e);
             setSaving(false);
         }
     };
 
     const SubBack = ({ to, children }: any) => (
-        <Button
-            variant="ghost"
-            size="sm"
+        <TextAction
+            className="inline-flex items-center gap-1"
             onClick={() => {
                 setSearch("");
                 setView(to);
             }}
         >
-            <CaretLeftIcon weight="bold" />
+            <CaretLeftIcon className="size-3.5 rtl:rotate-180" />
             {children}
-        </Button>
+        </TextAction>
     );
 
     return (
         <Modal open onOpenChange={o => !o && onClose()}>
             <ModalContent className="sm:max-w-2xl">
                 <ModalHeader>
-                    <ModalTitle>Eşleştirici ekle</ModalTitle>
+                    <ModalTitle>{t("sxClientScopeDetailAddMapper")}</ModalTitle>
                 </ModalHeader>
                 <ModalBody className="space-y-4">
                 {view === "choose" ? (
                     <Group>
-                        <Item size="sm" asChild>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setSearch("");
-                                    setSelected(new Set());
-                                    setView("predefined");
-                                }}
-                            >
-                                <ItemContent>
-                                    <ItemTitle>Hazır eşleştirici ekle</ItemTitle>
-                                    <ItemDescription>Standart claim'leri listeden seç</ItemDescription>
-                                </ItemContent>
-                                <ItemActions>
-                                    <CaretRightIcon weight="bold" className="rtl:rotate-180" />
-                                </ItemActions>
-                            </button>
-                        </Item>
-                        <Item size="sm" asChild>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setSearch("");
-                                    setView("pickType");
-                                }}
-                            >
-                                <ItemContent>
-                                    <ItemTitle>Yeni eşleştirici yapılandır</ItemTitle>
-                                    <ItemDescription>Bir tip seçip özel claim oluştur</ItemDescription>
-                                </ItemContent>
-                                <ItemActions>
-                                    <CaretRightIcon weight="bold" className="rtl:rotate-180" />
-                                </ItemActions>
-                            </button>
-                        </Item>
+                        <Row
+                            title={t("sxClientScopeDetailAddPredefined")}
+                            subtitle={t("sxClientScopeDetailAddPredefinedHint")}
+                            onClick={() => {
+                                setSearch("");
+                                setSelected(new Set());
+                                setView("predefined");
+                            }}
+                        />
+                        <Row
+                            title={t("sxClientScopeDetailConfigureNew")}
+                            subtitle={t("sxClientScopeDetailConfigureNewHint")}
+                            onClick={() => {
+                                setSearch("");
+                                setView("pickType");
+                            }}
+                        />
                     </Group>
                 ) : view === "predefined" ? (
                     <div className="space-y-3">
-                        <SubBack to="choose">Geri</SubBack>
-                        <InputGroup>
-                            <InputGroupAddon>
-                                <MagnifyingGlassIcon />
-                            </InputGroupAddon>
-                            <InputGroupInput
-                                value={search}
-                                onChange={(e: any) => setSearch(e.target.value)}
-                                placeholder="Eşleştirici ara…"
-                            />
-                        </InputGroup>
+                        <SubBack to="choose">{t("sxCommonBack")}</SubBack>
+                        <SearchField value={search} onChange={setSearch} placeholder={t("sxClientScopeDetailSearchMappers")} />
                         <div className="max-h-72 overflow-y-auto">
                             {filteredBuiltins.length === 0 ? (
-                                <EmptyRow>Eklenebilecek hazır eşleştirici yok.</EmptyRow>
+                                <Notice
+                                    title={search.trim() ? t("sxClientScopeDetailNoMatchingMappers") : t("sxClientScopeDetailNoPredefined")}
+                                    description={search.trim() ? t("sxCommonTryDifferentSearch") : t("sxClientScopeDetailNoPredefinedDescription")}
+                                />
                             ) : (
                                 <Group>
-                                    {filteredBuiltins.map((b: any) => {
-                                        const on = selected.has(b.name);
-                                        return (
-                                            <Item key={b.name} size="sm" asChild>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => toggleSel(b.name)}
-                                                >
-                                                    <ItemContent className="min-w-0">
-                                                        <ItemTitle>{b.name}</ItemTitle>
-                                                    </ItemContent>
-                                                    {on && (
-                                                        <ItemActions>
-                                                            <CheckIcon
-                                                                weight="bold"
-                                                                className="text-primary"
-                                                            />
-                                                        </ItemActions>
-                                                    )}
-                                                </button>
-                                            </Item>
-                                        );
-                                    })}
+                                    {filteredBuiltins.map((b: any) => (
+                                        <li key={b.name}>
+                                            <button
+                                                type="button"
+                                                aria-pressed={selected.has(b.name)}
+                                                onClick={() => toggleSel(b.name)}
+                                                className="flex min-h-13 w-full items-center justify-between gap-3 px-4 py-3 text-left outline-none transition-colors hover:bg-black/3 focus-visible:bg-black/5 dark:hover:bg-white/4 dark:focus-visible:bg-white/6"
+                                            >
+                                                <span className="min-w-0 truncate text-base">{b.name}</span>
+                                                {selected.has(b.name) && (
+                                                    <CheckIcon weight="bold" className="size-4 shrink-0 text-primary" />
+                                                )}
+                                            </button>
+                                        </li>
+                                    ))}
                                 </Group>
                             )}
                         </div>
                         <Button
+                            size="form"
                             block
                             disabled={saving || selected.size === 0}
                             onClick={addPredefined}
                         >
                             {saving
-                                ? "Ekleniyor…"
+                                ? t("sxCommonAdding")
                                 : selected.size > 0
-                                  ? `Ekle (${selected.size})`
-                                  : "Ekle"}
+                                  ? t("sxCommonAddWithCount", { total: selected.size })
+                                  : t("sxCommonAdd")}
                         </Button>
                     </div>
                 ) : view === "pickType" ? (
                     <div className="space-y-3">
-                        <SubBack to="choose">Geri</SubBack>
-                        <InputGroup>
-                            <InputGroupAddon>
-                                <MagnifyingGlassIcon />
-                            </InputGroupAddon>
-                            <InputGroupInput
-                                value={search}
-                                onChange={(e: any) => setSearch(e.target.value)}
-                                placeholder="Eşleştirici tipi ara…"
-                            />
-                        </InputGroup>
+                        <SubBack to="choose">{t("sxCommonBack")}</SubBack>
+                        <SearchField value={search} onChange={setSearch} placeholder={t("sxClientScopeDetailSearchMapperTypes")} />
                         <div className="max-h-72 overflow-y-auto">
                             {filteredTypes.length === 0 ? (
-                                <EmptyRow>Eşleştirici tipi yok.</EmptyRow>
+                                <Notice
+                                    title={search.trim() ? t("sxClientScopeDetailNoMatchingTypes") : t("sxClientScopeDetailNoTypes")}
+                                    description={search.trim() ? t("sxCommonTryDifferentSearch") : t("sxClientScopeDetailNoTypesDescription")}
+                                />
                             ) : (
                                 <Group>
-                                    {filteredTypes.map((t: any) => (
-                                        <Item key={t.id} size="sm" asChild>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    setPickedType(t);
-                                                    setName(t.name || "");
-                                                    setConfig({});
-                                                    setView("config");
-                                                }}
-                                            >
-                                                <ItemContent className="min-w-0">
-                                                    <ItemTitle>{t.name}</ItemTitle>
-                                                    {t.category && (
-                                                        <ItemDescription className="truncate">
-                                                            {t.category}
-                                                        </ItemDescription>
-                                                    )}
-                                                </ItemContent>
-                                                <ItemActions>
-                                                    <CaretRightIcon
-                                                        weight="bold"
-                                                        className="rtl:rotate-180"
-                                                    />
-                                                </ItemActions>
-                                            </button>
-                                        </Item>
+                                    {filteredTypes.map((type: any) => (
+                                        <Row
+                                            key={type.id}
+                                            className="min-h-13"
+                                            title={type.name}
+                                            subtitle={type.category}
+                                            onClick={() => {
+                                                setPickedType(type);
+                                                setName(type.name || "");
+                                                setConfig({});
+                                                setView("config");
+                                            }}
+                                        />
                                     ))}
                                 </Group>
                             )}
@@ -735,16 +681,16 @@ function AddMapperModal({
                 ) : (
                     <div className="space-y-4">
                         <SubBack to="pickType">{pickedType?.name}</SubBack>
-                        <Group>
-                            <Row label="Ad">
-                                <Input
-                                    size="sm"
-                                    value={name}
-                                    onChange={(e: any) => setName(e.target.value)}
-                                    placeholder="Eşleştirici adı"
-                                />
-                            </Row>
-                        </Group>
+                        <Field size="lg">
+                            <FieldLabel htmlFor="scope-mapper-name">{t("sxCommonName")}</FieldLabel>
+                            <Input
+                                size="lg"
+                                id="scope-mapper-name"
+                                value={name}
+                                onChange={(e: any) => setName(e.target.value)}
+                                placeholder={t("sxClientScopeDetailMapperNamePlaceholder")}
+                            />
+                        </Field>
                         <ConfigForm
                             properties={pickedType?.properties}
                             value={config}
@@ -753,11 +699,12 @@ function AddMapperModal({
                             }
                         />
                         <Button
+                            size="form"
                             block
                             disabled={saving || !name.trim()}
                             onClick={saveNew}
                         >
-                            {saving ? "Kaydediliyor…" : "Kaydet"}
+                            {saving ? t("sxCommonSaving") : t("sxCommonSave")}
                         </Button>
                     </div>
                 )}
@@ -768,9 +715,10 @@ function AddMapperModal({
 }
 
 function EditMapperModal({ id, mapper, mapperTypes, onClose, onDone }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
-    const type = (mapperTypes || []).find((t: any) => t.id === mapper.protocolMapper);
+    const type = (mapperTypes || []).find((item: any) => item.id === mapper.protocolMapper);
     const [name, setName] = useState(mapper.name || "");
     const [config, setConfig] = useState<any>(configToForm(mapper.config));
     const [saving, setSaving] = useState(false);
@@ -783,10 +731,10 @@ function EditMapperModal({ id, mapper, mapperTypes, onClose, onDone }: any) {
                 { id, mapperId: mapper.id },
                 { ...mapper, name: name.trim(), config: formToConfig(config) }
             );
-            addAlert("Eşleştirici güncellendi.", AlertVariant.success);
+            addAlert(t("sxClientScopeDetailMapperUpdated"), AlertVariant.success);
             onDone();
         } catch (e) {
-            addError("Güncellenemedi.", e);
+            addError(t("sxCommonUpdateError"), e);
             setSaving(false);
         }
     };
@@ -795,24 +743,29 @@ function EditMapperModal({ id, mapper, mapperTypes, onClose, onDone }: any) {
         <Modal open onOpenChange={o => !o && onClose()}>
             <ModalContent className="sm:max-w-2xl">
                 <ModalHeader>
-                    <ModalTitle>Eşleştiriciyi düzenle</ModalTitle>
+                    <ModalTitle>{t("sxClientScopeDetailEditMapper")}</ModalTitle>
                 </ModalHeader>
                 <ModalBody className="space-y-4">
-                <Group>
-                    <Row label="Ad">
-                        <Input
-                                    size="sm"
-                            value={name}
-                            onChange={(e: any) => setName(e.target.value)}
-                            placeholder="Eşleştirici adı"
-                        />
-                    </Row>
-                    <Row label="Tip">
-                        <span className="truncate text-sm text-muted-foreground">
-                            {type?.name || mapper.protocolMapper}
-                        </span>
-                    </Row>
-                </Group>
+                <Field size="lg">
+                    <FieldLabel htmlFor="scope-mapper-edit-name">{t("sxCommonName")}</FieldLabel>
+                    <Input
+                        size="lg"
+                        id="scope-mapper-edit-name"
+                        value={name}
+                        onChange={(e: any) => setName(e.target.value)}
+                        placeholder={t("sxClientScopeDetailMapperNamePlaceholder")}
+                    />
+                </Field>
+                <Field size="lg">
+                    <FieldLabel htmlFor="scope-mapper-edit-type">{t("sxCommonType")}</FieldLabel>
+                    <Input
+                        size="lg"
+                        id="scope-mapper-edit-type"
+                        readOnly
+                        value={type?.name || mapper.protocolMapper}
+                        className="text-muted-foreground"
+                    />
+                </Field>
                 <ConfigForm
                     properties={type?.properties}
                     value={config}
@@ -821,11 +774,12 @@ function EditMapperModal({ id, mapper, mapperTypes, onClose, onDone }: any) {
                     }
                 />
                 <Button
+                    size="form"
                     block
                     disabled={saving || !name.trim()}
                     onClick={save}
                 >
-                    {saving ? "Kaydediliyor…" : "Kaydet"}
+                    {saving ? t("sxCommonSaving") : t("sxCommonSave")}
                 </Button>
                 </ModalBody>
             </ModalContent>
@@ -833,10 +787,8 @@ function EditMapperModal({ id, mapper, mapperTypes, onClose, onDone }: any) {
     );
 }
 
-/* ── esuiss inset-list helpers (thin compositions of @ui Item/Empty/Confirm) ── */
-
-/** Confirm dialog — returns a [confirm(opts), node] pair (built on @ui/patterns/confirm). */
 function useConfirmDialog() {
+    const t = useT();
     const [open, setOpen] = useState(false);
     const [state, setState] = useState<any>(null);
     const confirm = (opts: {
@@ -854,12 +806,10 @@ function useConfirmDialog() {
             <ConfirmContent>
                 <ConfirmHeader>
                     <ConfirmTitle>{state?.title}</ConfirmTitle>
-                    {state?.message && (
-                        <ConfirmDescription>{state.message}</ConfirmDescription>
-                    )}
+                    {state?.message && <ConfirmDescription>{state.message}</ConfirmDescription>}
                 </ConfirmHeader>
                 <ConfirmFooter>
-                    <ConfirmCancel>Vazgeç</ConfirmCancel>
+                    <ConfirmCancel>{t("sxCommonCancel")}</ConfirmCancel>
                     <ConfirmAction
                         variant={state?.danger ? "destructive" : "default"}
                         onClick={() => {
@@ -868,7 +818,7 @@ function useConfirmDialog() {
                             fn?.();
                         }}
                     >
-                        {state?.confirmLabel ?? "Onayla"}
+                        {state?.confirmLabel ?? t("sxCommonConfirm")}
                     </ConfirmAction>
                 </ConfirmFooter>
             </ConfirmContent>
@@ -877,137 +827,42 @@ function useConfirmDialog() {
     return [confirm, node] as const;
 }
 
-/** Flattens fragments so every row of a group gets its own separator. */
-function flattenRows(children: any, prefix = ""): any[] {
-    return Children.toArray(children).flatMap((c: any) =>
-        isValidElement(c) && c.type === Fragment
-            ? flattenRows((c.props as any).children, `${prefix}${c.key}/`)
-            : [prefix && isValidElement(c) ? cloneElement(c, { key: prefix + c.key }) : c]
-    );
-}
-
-/** Quiet caption above a group. */
-function GroupLabel({ children, className }: any) {
-    return (
-        <h3 className={cn("mb-2 ms-1 text-sm font-medium text-muted-foreground", className)}>
-            {children}
-        </h3>
-    );
-}
-
-/** Footnote below a group. */
-function GroupFooter({ children }: any) {
-    return <p className="mt-2 ms-1 text-sm text-muted-foreground">{children}</p>;
-}
-
-/** Inset list — rows separated by ItemSeparator. */
-function Group({ children, className }: any) {
-    const rows = flattenRows(children);
-    return (
-        <ItemGroup variant="inset" className={className}>
-            {rows.map((row: any, i: number) => (
-                <Fragment key={row?.key ?? i}>
-                    {i > 0 && <ItemSeparator />}
-                    {row}
-                </Fragment>
-            ))}
-        </ItemGroup>
-    );
-}
-
-/** Label-left / control-right row. */
-function Row({ label, hint, children }: any) {
-    return (
-        <Item size="sm">
-            <ItemContent className="flex-none">
-                <ItemTitle>{label}</ItemTitle>
-                {hint && <ItemDescription>{hint}</ItemDescription>}
-            </ItemContent>
-            <ItemActions className="min-w-0 flex-1 justify-end">{children}</ItemActions>
-        </Item>
-    );
-}
-
-/** Label on top, full-width control below. */
-function StackRow({ label, hint, children }: any) {
-    return (
-        <Item size="sm">
-            {(label || hint) && (
-                <ItemContent>
-                    {label && <ItemTitle>{label}</ItemTitle>}
-                    {hint && <ItemDescription>{hint}</ItemDescription>}
-                </ItemContent>
-            )}
-            <div className="basis-full">{children}</div>
-        </Item>
-    );
-}
-
-/** Switch row (label-left / switch-right). */
 function SwitchRow({ label, hint, checked, onChange, disabled }: any) {
     return (
-        <Item size="sm">
-            <ItemContent>
-                <ItemTitle>{label}</ItemTitle>
-                {hint && <ItemDescription>{hint}</ItemDescription>}
-            </ItemContent>
-            <ItemActions>
-                <Switch
-                    checked={!!checked}
-                    disabled={disabled}
-                    aria-label={typeof label === "string" ? label : undefined}
-                    onCheckedChange={(v: boolean) => onChange(v)}
-                />
-            </ItemActions>
-        </Item>
+        <li className="flex min-h-14 items-center justify-between gap-3 px-4 py-3">
+            <div className="min-w-0">
+                <div className="text-base">{label}</div>
+                {hint && <div className="mt-0.5 text-[13px] text-muted-foreground">{hint}</div>}
+            </div>
+            <Switch
+                checked={!!checked}
+                disabled={disabled}
+                aria-label={typeof label === "string" ? label : undefined}
+                onCheckedChange={(v: boolean) => onChange(v)}
+            />
+        </li>
     );
 }
 
-/** Full-width tappable action row. */
-function ActionRow({ onClick, disabled, danger, children }: any) {
+function OpenRow({ title, subtitle, onOpen, trailing, testId }: any) {
     return (
-        <Item size="sm" asChild>
-            <button type="button" onClick={onClick} disabled={disabled}>
-                <ItemContent>
-                    <ItemTitle className={danger ? "text-destructive" : "text-primary"}>
-                        {children}
-                    </ItemTitle>
-                </ItemContent>
+        <li
+            data-testid={testId}
+            className="flex items-center gap-3 pe-4 transition-colors hover:bg-black/3 dark:hover:bg-white/4"
+        >
+            <button
+                type="button"
+                onClick={onOpen}
+                className="flex min-h-16 min-w-0 flex-1 flex-col justify-center py-3 ps-4 text-left outline-none focus-visible:bg-black/5 dark:focus-visible:bg-white/6"
+            >
+                <span className="w-full truncate text-base font-medium">{title}</span>
+                {subtitle && (
+                    <span className="mt-0.5 w-full text-[13px] text-muted-foreground [overflow-wrap:anywhere]">
+                        {subtitle}
+                    </span>
+                )}
             </button>
-        </Item>
-    );
-}
-
-/** Delete icon button for list rows. */
-function RowDelete({ onClick, title = "Sil" }: any) {
-    return (
-        <Button variant="ghost" size="icon-sm" onClick={onClick} title={title} aria-label={title}>
-            <TrashIcon />
-        </Button>
-    );
-}
-
-/** Empty state. */
-function EmptyCard({ icon, title, desc, action }: any) {
-    return (
-        <Empty>
-            <EmptyHeader>
-                {icon && <EmptyMedia variant="icon">{icon}</EmptyMedia>}
-                <EmptyTitle>{title}</EmptyTitle>
-                {desc && <EmptyDescription>{desc}</EmptyDescription>}
-            </EmptyHeader>
-            {action && <EmptyContent>{action}</EmptyContent>}
-        </Empty>
-    );
-}
-
-/** "No items" placeholder row inside a group. */
-function EmptyRow({ children }: any) {
-    return (
-        <Item size="sm">
-            <ItemContent className="items-center">
-                <ItemDescription>{children}</ItemDescription>
-            </ItemContent>
-        </Item>
+            {trailing && <div className="flex shrink-0 items-center gap-3">{trailing}</div>}
+        </li>
     );
 }

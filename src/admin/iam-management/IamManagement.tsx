@@ -1,119 +1,81 @@
 // @ts-nocheck
-/**
- * Tek sayfadan IAM (yetki) yönetimi — shadcn tasarım dili, doğrudan Keycloak
- * Admin REST API (adminClient) üzerinden. Client OLUŞTURMA burada yok (client'lar
- * başka yerde yönetilir); geri kalan her şeyin oluşturma / listeleme / silme /
- * atama işlemleri burada:
- *
- *   1. İzinler     — bir client'ın "menü:aksiyon" rolleri (client roles)
- *   2. İş Rolleri  — composite realm rolleri (izinleri paketler)
- *   3. Birimler    — gruplar (departman) → iş rolü + üye
- *   4. Adminler    — kullanıcı → birim ataması
- *
- * Yetki modeli CANLI (PDP) olduğu için, buradaki her değişiklik anında geçerlidir.
- */
 
 import { CaretRightIcon, CheckIcon, PlusIcon, XIcon } from "@phosphor-icons/react";
-import { Badge } from "@ui/components/badge";
 import { Button } from "@ui/components/button";
-import {
-    Card as UiCard,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle
-} from "@ui/components/card";
-import {
-    Empty as UiEmpty,
-    EmptyDescription,
-    EmptyHeader
-} from "@ui/components/empty";
 import { Field, FieldLabel } from "@ui/components/field";
 import { Input } from "@ui/components/input";
-import {
-    Item,
-    ItemActions,
-    ItemContent,
-    ItemDescription,
-    ItemFooter,
-    ItemTitle
-} from "@ui/components/item";
 import { NativeSelect, NativeSelectOption } from "@ui/components/native-select";
-import { Separator } from "@ui/components/separator";
-import { Spinner as UiSpinner } from "@ui/components/spinner";
-import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow
-} from "@ui/components/table";
-import { Tabs, TabsList, TabsTrigger } from "@ui/components/tabs";
 import { cn } from "@ui/lib/utils";
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useState } from "react";
 import { AlertVariant, useAlerts } from "../../shared/keycloak-ui-shared";
 import { useAdminClient } from "../admin-client";
+import { useT } from "../ui/i18n";
+import {
+    AdminPage,
+    Chip,
+    GROUP,
+    Group,
+    ListSkeleton,
+    Notice,
+    Row,
+    SearchField,
+    SegmentTabs,
+    Section,
+    SEPARATOR,
+    TextAction
+} from "../ui/kit";
 
-// Keycloak'ın kendi/yerleşik rolleri — iş rolü listesinde gizlenir.
 const BUILTIN_ROLE = (n: string) =>
     n === "offline_access" || n === "uma_authorization" || n.startsWith("default-roles-");
 
 const TABS = [
-    { key: "overview", label: "Genel Bakış" },
-    { key: "perms", label: "İzinler" },
-    { key: "roles", label: "İş Rolleri" },
-    { key: "units", label: "Birimler" },
-    { key: "admins", label: "Adminler" }
+    { value: "overview", label: "sxIamTabOverview" },
+    { value: "perms", label: "sxIamTabPermissions" },
+    { value: "roles", label: "sxIamTabRoles" },
+    { value: "units", label: "sxIamTabUnits" },
+    { value: "admins", label: "sxIamTabAdmins" }
 ];
 
 export default function IamManagement() {
+    const t = useT();
     const [tab, setTab] = useState("overview");
 
     return (
-        <div className="px-5 py-6 sm:px-8 sm:py-8">
-            <div className="mx-auto w-full max-w-5xl space-y-6">
-                <header>
-                    <h1 className="font-semibold text-2xl tracking-tight">
-                        Yetki Yönetimi
-                    </h1>
-                    <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">
-                        İzinler, iş rolleri, birimler ve admin atamaları — tek yerden.
-                        Değişiklikler anında geçerli olur.
-                    </p>
-                </header>
+        <AdminPage
+            title={t("sxIamTitle")}
+            description={t("sxIamDescription")}
+            width="wide"
+        >
+            <SegmentTabs
+                value={tab}
+                onChange={setTab}
+                items={TABS.map(x => ({ value: x.value, label: t(x.label) }))}
+                ariaLabel={t("sxIamTitle")}
+            />
 
-                <Tabs value={tab} onValueChange={setTab}>
-                    <TabsList variant="line">
-                        {TABS.map(t => (
-                            <TabsTrigger key={t.key} value={t.key}>
-                                {t.label}
-                            </TabsTrigger>
-                        ))}
-                    </TabsList>
-                </Tabs>
-
-                {tab === "overview" && <OverviewTab onGo={setTab} />}
-                {tab === "perms" && <PermissionsTab />}
-                {tab === "roles" && <RolesTab />}
-                {tab === "units" && <UnitsTab />}
-                {tab === "admins" && <AdminsTab />}
-            </div>
-        </div>
+            {tab === "overview" && <OverviewTab onGo={setTab} />}
+            {tab === "perms" && <PermissionsTab />}
+            {tab === "roles" && <RolesTab />}
+            {tab === "units" && <UnitsTab />}
+            {tab === "admins" && <AdminsTab />}
+        </AdminPage>
     );
 }
 
-/* ────────────────────────── 0. GENEL BAKIŞ (dashboard) ───────────────────── */
 function OverviewTab({ onGo }: { onGo: (tab: string) => void }) {
     const { adminClient } = useAdminClient();
-    const { addError } = useAlerts();
+    const t = useT();
 
     const [loading, setLoading] = useState(true);
+    const [failed, setFailed] = useState(false);
     const [data, setData] = useState<any>(null);
+    const [attempt, setAttempt] = useState(0);
 
     useEffect(() => {
+        let alive = true;
         (async () => {
             setLoading(true);
+            setFailed(false);
             try {
                 const [clientsRaw, rolesRaw, groups] = await Promise.all([
                     adminClient.clients.find(),
@@ -125,7 +87,6 @@ function OverviewTab({ onGo }: { onGo: (tab: string) => void }) {
                 );
                 const jobRoles = rolesRaw.filter((r: any) => !BUILTIN_ROLE(r.name));
 
-                // Client izinleri: her client'ın rolleri (menü:aksiyon).
                 const clientRoleLists = await Promise.all(
                     clients.map((c: any) =>
                         adminClient.clients.listRoles({ id: c.id }).catch(() => [])
@@ -145,7 +106,6 @@ function OverviewTab({ onGo }: { onGo: (tab: string) => void }) {
                     0
                 );
 
-                // Gruplar: rol eşlemeleri + üyeler.
                 const groupInfo = await Promise.all(
                     groups.map(async (g: any) => {
                         const [rm, mem] = await Promise.all([
@@ -160,7 +120,6 @@ function OverviewTab({ onGo }: { onGo: (tab: string) => void }) {
                     })
                 );
 
-                // İş rolü kullanımı (kaç birim) + içerdiği izin sayısı.
                 const roleUsage: Record<string, number> = {};
                 groupInfo.forEach(gi =>
                     gi.roles.forEach(
@@ -181,7 +140,6 @@ function OverviewTab({ onGo }: { onGo: (tab: string) => void }) {
                     }))
                     .sort((a, b) => b.units - a.units || a.name.localeCompare(b.name));
 
-                // Adminler: birim üyeliklerinden türet (user → birimler + roller).
                 const adminMap = new Map<string, any>();
                 groupInfo.forEach(gi => {
                     gi.members.forEach((m: any) => {
@@ -209,6 +167,7 @@ function OverviewTab({ onGo }: { onGo: (tab: string) => void }) {
                     }))
                     .sort((a, b) => a.name.localeCompare(b.name));
 
+                if (!alive) return;
                 setData({
                     stats: {
                         clients: clients.length,
@@ -223,126 +182,149 @@ function OverviewTab({ onGo }: { onGo: (tab: string) => void }) {
                     admins
                 });
             } catch (e) {
-                addError("Genel bakış yüklenemedi", e as Error);
+                console.error("[iam] overview load failed:", e);
+                if (alive) setFailed(true);
             } finally {
-                setLoading(false);
+                if (alive) setLoading(false);
             }
         })();
-    }, [adminClient, addError]);
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, attempt]);
 
-    if (loading) {
+    if (loading) return <ListSkeleton rows={4} />;
+    if (failed || !data)
         return (
-            <Card title="Genel Bakış">
-                <Spinner />
-            </Card>
+            <Notice
+                title={t("sxIamOverviewLoadError")}
+                description={t("sxLoadErrorDescription")}
+                onRetry={() => setAttempt(n => n + 1)}
+            />
         );
-    }
-    if (!data) return <Empty>Veri yok.</Empty>;
 
     const { stats, clientPerms, unitRows, roleRows, admins } = data;
 
     return (
-        <div className="space-y-5">
+        <>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-                <StatCard
-                    label="Client (servis)"
-                    value={stats.clients}
-                    onClick={() => onGo("perms")}
-                />
-                <StatCard
-                    label="İzin"
-                    value={stats.perms}
-                    onClick={() => onGo("perms")}
-                />
-                <StatCard
-                    label="İş rolü"
-                    value={stats.roles}
-                    onClick={() => onGo("roles")}
-                />
-                <StatCard
-                    label="Birim"
-                    value={stats.units}
-                    onClick={() => onGo("units")}
-                />
-                <StatCard
-                    label="Admin"
-                    value={stats.admins}
-                    onClick={() => onGo("admins")}
-                />
+                <StatCard label={t("sxIamStatClients")} value={stats.clients} onClick={() => onGo("perms")} />
+                <StatCard label={t("sxIamStatPermissions")} value={stats.perms} onClick={() => onGo("perms")} />
+                <StatCard label={t("sxIamStatRoles")} value={stats.roles} onClick={() => onGo("roles")} />
+                <StatCard label={t("sxIamStatUnits")} value={stats.units} onClick={() => onGo("units")} />
+                <StatCard label={t("sxIamStatAdmins")} value={stats.admins} onClick={() => onGo("admins")} />
             </div>
 
-            <Card
-                title="Adminler"
-                desc="Kim, hangi birim(ler)de ve bu birimlerden gelen iş rolleri."
-            >
+            <Panel title={t("sxIamTabAdmins")} desc={t("sxIamOverviewAdminsDesc")}>
                 {admins.length === 0 ? (
-                    <Empty>Henüz birime atanmış admin yok.</Empty>
-                ) : (
-                    <DataTable
-                        head={["Kullanıcı", "E-posta", "Birimler", "İş rolleri"]}
-                        rows={admins.map((a: any) => [
-                            <span className="font-medium">{a.username}</span>,
-                            a.email || "—",
-                            <ChipList items={a.units} tone="amber" />,
-                            <ChipList items={a.roles} tone="blue" />
-                        ])}
+                    <Notice
+                        title={t("sxIamOverviewAdminsEmptyTitle")}
+                        description={t("sxIamOverviewAdminsEmptyDescription")}
+                        action={
+                            <Button size="sm" variant="plain" onClick={() => onGo("admins")}>
+                                {t("sxIamGoToAdmins")}
+                            </Button>
+                        }
                     />
+                ) : (
+                    <Group>
+                        {admins.map((a: any) => (
+                            <Row
+                                key={a.id}
+                                title={a.username}
+                                subtitle={
+                                    <>
+                                        {a.email || "—"}
+                                        <ChipLine label={t("sxIamTabUnits")} items={a.units} />
+                                        <ChipLine label={t("sxIamJobRoles")} items={a.roles} tone="info" />
+                                    </>
+                                }
+                            />
+                        ))}
+                    </Group>
                 )}
-            </Card>
+            </Panel>
 
-            <Card title="Birimler" desc="Her birimin iş rolleri ve üye sayısı.">
+            <Panel title={t("sxIamTabUnits")} desc={t("sxIamOverviewUnitsDesc")}>
                 {unitRows.length === 0 ? (
-                    <Empty>Henüz birim yok.</Empty>
-                ) : (
-                    <DataTable
-                        head={["Birim", "İş rolleri", "Üye"]}
-                        rows={unitRows.map((u: any) => [
-                            <span className="font-medium">{u.name}</span>,
-                            <ChipList items={u.roles} tone="blue" />,
-                            <span className="tabular-nums">{u.members}</span>
-                        ])}
+                    <Notice
+                        title={t("sxIamUnitsEmptyTitle")}
+                        description={t("sxIamUnitsEmptyDescription")}
+                        action={
+                            <Button size="sm" variant="plain" onClick={() => onGo("units")}>
+                                {t("sxIamGoToUnits")}
+                            </Button>
+                        }
                     />
+                ) : (
+                    <Group>
+                        {unitRows.map((u: any) => (
+                            <Row
+                                key={u.name}
+                                title={u.name}
+                                subtitle={<ChipLine label={t("sxIamJobRoles")} items={u.roles} tone="info" />}
+                                trailing={<Count value={u.members} label={t("sxIamCountMembers")} />}
+                            />
+                        ))}
+                    </Group>
                 )}
-            </Card>
+            </Panel>
 
-            <div className="grid gap-5 lg:grid-cols-2">
-                <Card
-                    title="Client izinleri"
-                    desc="Her servisin tanımlı izin ve menü sayısı."
-                >
+            <div className="grid gap-6 lg:grid-cols-2">
+                <Panel title={t("sxIamOverviewClientPerms")} desc={t("sxIamOverviewClientPermsDesc")}>
                     {clientPerms.length === 0 ? (
-                        <Empty>Client yok.</Empty>
-                    ) : (
-                        <DataTable
-                            head={["Client", "İzin", "Menü"]}
-                            rows={clientPerms.map((c: any) => [
-                                <span className="font-medium">{c.clientId}</span>,
-                                <span className="tabular-nums">{c.count}</span>,
-                                <span className="tabular-nums">{c.menus.length}</span>
-                            ])}
+                        <Notice
+                            title={t("sxIamClientsEmptyTitle")}
+                            description={t("sxIamClientsEmptyDescription")}
                         />
+                    ) : (
+                        <Group>
+                            {clientPerms.map((c: any) => (
+                                <Row
+                                    key={c.clientId}
+                                    title={c.clientId}
+                                    trailing={
+                                        <span className="flex gap-4">
+                                            <Count value={c.count} label={t("sxIamCountPermissions")} />
+                                            <Count value={c.menus.length} label={t("sxIamCountMenus")} />
+                                        </span>
+                                    }
+                                />
+                            ))}
+                        </Group>
                     )}
-                </Card>
+                </Panel>
 
-                <Card
-                    title="İş rolleri"
-                    desc="İçerdiği izin sayısı ve kaç birimde kullanıldığı."
-                >
+                <Panel title={t("sxIamJobRoles")} desc={t("sxIamOverviewRolesDesc")}>
                     {roleRows.length === 0 ? (
-                        <Empty>İş rolü yok.</Empty>
-                    ) : (
-                        <DataTable
-                            head={["Rol", "İzin", "Birim"]}
-                            rows={roleRows.map((r: any) => [
-                                <span className="font-medium">{r.name}</span>,
-                                <span className="tabular-nums">{r.perms}</span>,
-                                <span className="tabular-nums">{r.units}</span>
-                            ])}
+                        <Notice
+                            title={t("sxIamRolesEmptyTitle")}
+                            description={t("sxIamRolesEmptyDescription")}
+                            action={
+                                <Button size="sm" variant="plain" onClick={() => onGo("roles")}>
+                                    {t("sxIamGoToRoles")}
+                                </Button>
+                            }
                         />
+                    ) : (
+                        <Group>
+                            {roleRows.map((r: any) => (
+                                <Row
+                                    key={r.name}
+                                    title={r.name}
+                                    trailing={
+                                        <span className="flex gap-4">
+                                            <Count value={r.perms} label={t("sxIamCountPermissions")} />
+                                            <Count value={r.units} label={t("sxIamCountUnits")} />
+                                        </span>
+                                    }
+                                />
+                            ))}
+                        </Group>
                     )}
-                </Card>
+                </Panel>
             </div>
-        </div>
+        </>
     );
 }
 
@@ -356,91 +338,127 @@ function StatCard({
     onClick?: () => void;
 }) {
     return (
-        <Item variant="outline" asChild>
-            <button type="button" onClick={onClick}>
-                <ItemContent className="text-start">
-                    <ItemTitle className="text-2xl tabular-nums">{value}</ItemTitle>
-                    <ItemDescription>{label}</ItemDescription>
-                </ItemContent>
-            </button>
-        </Item>
+        <button
+            type="button"
+            onClick={onClick}
+            className={cn(
+                GROUP,
+                "px-4 py-3.5 outline-none transition-colors hover:bg-[#ebebef] focus-visible:ring-2 focus-visible:ring-ring/50 dark:hover:bg-[#242426]"
+            )}
+        >
+            <div className="text-[28px] leading-tight font-semibold tracking-[-0.02em] tabular-nums">
+                {value}
+            </div>
+            <div className="mt-0.5 text-[13px] text-muted-foreground">{label}</div>
+        </button>
     );
 }
 
-function ChipList({
+function Count({ value, label }: { value: number; label: string }) {
+    return (
+        <span className="flex flex-col items-end">
+            <span className="text-base font-medium tabular-nums">{value}</span>
+            <span className="text-[12px] text-muted-foreground">{label}</span>
+        </span>
+    );
+}
+
+function ChipLine({
+    label,
     items,
-    tone,
+    tone = "neutral",
     max = 5
 }: {
+    label: string;
     items: string[];
-    tone: "blue" | "amber" | "muted";
+    tone?: "neutral" | "info";
     max?: number;
 }) {
-    if (!items || items.length === 0)
-        return <span className="text-muted-foreground">—</span>;
-    const variant =
-        tone === "blue" ? "default" : tone === "amber" ? "outline" : "secondary";
-    const shown = items.slice(0, max);
-    const extra = items.length - shown.length;
+    const shown = (items || []).slice(0, max);
+    const extra = (items || []).length - shown.length;
     return (
-        <div className="flex flex-wrap gap-1.5">
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <span className="me-0.5">{label}:</span>
+            {shown.length === 0 && <span>—</span>}
             {shown.map(i => (
-                <Badge key={i} variant={variant}>
+                <Chip key={i} tone={tone}>
                     {i}
-                </Badge>
+                </Chip>
             ))}
             {extra > 0 && (
-                <Badge variant="secondary" title={items.join(", ")}>
-                    +{extra}
-                </Badge>
+                <span title={items.join(", ")}>
+                    <Chip>+{extra}</Chip>
+                </span>
             )}
         </div>
     );
 }
 
-/* ────────────────────────── 1. İZİNLER (client roles) ───────────────────── */
 function PermissionsTab() {
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
+    const t = useT();
 
     const [clients, setClients] = useState<any[]>([]);
+    const [clientsStatus, setClientsStatus] = useState<"loading" | "error" | "ready">("loading");
+    const [clientsAttempt, setClientsAttempt] = useState(0);
     const [clientId, setClientId] = useState("");
     const [roles, setRoles] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
+    const [rolesFailed, setRolesFailed] = useState(false);
     const [menu, setMenu] = useState("");
     const [action, setAction] = useState("");
+    const [reload, setReload] = useState(0);
 
     useEffect(() => {
+        let alive = true;
+        setClientsStatus("loading");
         adminClient.clients
             .find()
             .then((cs: any[]) => {
+                if (!alive) return;
                 const list = cs
                     .filter(c => !c.clientId.startsWith("$") && c.protocol !== "saml")
                     .sort((a, b) => a.clientId.localeCompare(b.clientId));
                 setClients(list);
+                setClientsStatus("ready");
             })
-            .catch(e => addError("Client'lar yüklenemedi", e as Error));
-    }, [adminClient, addError]);
-
-    const loadRoles = useCallback(
-        async (id: string) => {
-            if (!id) return setRoles([]);
-            setLoading(true);
-            try {
-                const r = await adminClient.clients.listRoles({ id });
-                setRoles(r.sort((a: any, b: any) => a.name.localeCompare(b.name)));
-            } catch (e) {
-                addError("İzinler yüklenemedi", e as Error);
-            } finally {
-                setLoading(false);
-            }
-        },
-        [adminClient, addError]
-    );
+            .catch(e => {
+                console.error("[iam] clients load failed:", e);
+                if (alive) setClientsStatus("error");
+            });
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, clientsAttempt]);
 
     useEffect(() => {
-        loadRoles(clientId);
-    }, [clientId, loadRoles]);
+        if (!clientId) {
+            setRoles([]);
+            setRolesFailed(false);
+            return;
+        }
+        let alive = true;
+        (async () => {
+            setLoading(true);
+            setRolesFailed(false);
+            try {
+                const r = await adminClient.clients.listRoles({ id: clientId });
+                if (alive) setRoles(r.sort((a: any, b: any) => a.name.localeCompare(b.name)));
+            } catch (e) {
+                console.error("[iam] permissions load failed:", e);
+                if (alive) {
+                    setRoles([]);
+                    setRolesFailed(true);
+                }
+            } finally {
+                if (alive) setLoading(false);
+            }
+        })();
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, clientId, reload]);
 
     const create = async () => {
         const m = menu.trim();
@@ -449,292 +467,337 @@ function PermissionsTab() {
         const name = `${m}:${a}`;
         try {
             await adminClient.clients.createRole({ id: clientId, name });
-            addAlert(`"${name}" izni oluşturuldu.`, AlertVariant.success);
+            addAlert(t("sxIamPermissionCreated", { name }), AlertVariant.success);
             setMenu("");
             setAction("");
-            await loadRoles(clientId);
+            setReload(n => n + 1);
         } catch (e) {
-            addError("İzin oluşturulamadı", e as Error);
+            addError(t("sxIamPermissionCreateError"), e as Error);
         }
     };
 
     const del = async (roleName: string) => {
         try {
             await adminClient.clients.delRole({ id: clientId, roleName });
-            addAlert(`"${roleName}" silindi.`, AlertVariant.success);
-            await loadRoles(clientId);
+            addAlert(t("sxIamDeleted", { name: roleName }), AlertVariant.success);
+            setReload(n => n + 1);
         } catch (e) {
-            addError("Silinemedi", e as Error);
+            addError(t("sxIamDeleteError"), e as Error);
         }
     };
 
-    // menü:aksiyon → menüye göre grupla
     const grouped: Record<string, string[]> = {};
     for (const r of roles) {
         const [m, ...rest] = r.name.split(":");
-        const a = rest.join(":") || "(aksiyon yok)";
+        const a = rest.join(":") || t("sxIamNoAction");
         (grouped[m] ||= []).push(a);
     }
 
     return (
-        <Card
-            title="İzinler"
-            desc="Bir client (servis) seçin; o servisin “menü:aksiyon” izinlerini yönetin."
-        >
-            <Field className="mb-4 max-w-sm">
-                <FieldLabel>Client (servis)</FieldLabel>
-                <NativeSelect
-                    value={clientId}
-                    onChange={e => setClientId(e.target.value)}
-                    className="w-full"
-                    size="sm"
-                >
-                    <NativeSelectOption value="">Client seçin…</NativeSelectOption>
-                    {clients.map(c => (
-                        <NativeSelectOption key={c.id} value={c.id}>
-                            {c.clientId}
-                        </NativeSelectOption>
-                    ))}
-                </NativeSelect>
-            </Field>
+        <>
+            <Intro>{t("sxIamPermissionsIntro")}</Intro>
 
-            {clientId && (
+            {clientsStatus === "loading" ? (
+                <ListSkeleton rows={1} />
+            ) : clientsStatus === "error" ? (
+                <Notice
+                    title={t("sxIamClientsLoadError")}
+                    description={t("sxLoadErrorDescription")}
+                    onRetry={() => setClientsAttempt(n => n + 1)}
+                />
+            ) : clients.length === 0 ? (
+                <Notice
+                    title={t("sxIamClientsEmptyTitle")}
+                    description={t("sxIamClientsEmptyDescription")}
+                />
+            ) : (
+                <Field size="lg" className="sm:max-w-sm">
+                    <FieldLabel htmlFor="iam-perm-client">{t("sxIamClientField")}</FieldLabel>
+                    <NativeSelect
+                        id="iam-perm-client"
+                        size="lg"
+                        value={clientId}
+                        onChange={e => setClientId(e.target.value)}
+                        className="w-full"
+                    >
+                        <NativeSelectOption value="">{t("sxIamSelectClient")}</NativeSelectOption>
+                        {clients.map(c => (
+                            <NativeSelectOption key={c.id} value={c.id}>
+                                {c.clientId}
+                            </NativeSelectOption>
+                        ))}
+                    </NativeSelect>
+                </Field>
+            )}
+
+            {clientsStatus === "ready" && clientId && (
                 <>
-                    <div className="mb-5 flex flex-wrap items-end gap-2">
-                        <Field className="w-auto">
-                            <FieldLabel>Menü</FieldLabel>
-                            <Input
-                                value={menu}
-                                onChange={e =>
-                                    setMenu(e.target.value.replace(/[^a-z0-9_-]/gi, ""))
-                                }
-                                placeholder="cards"
-                            />
-                        </Field>
-                        <span className="pb-2 text-muted-foreground">:</span>
-                        <Field className="w-auto">
-                            <FieldLabel>Aksiyon</FieldLabel>
-                            <Input
-                                value={action}
-                                onChange={e =>
-                                    setAction(e.target.value.replace(/[^a-z0-9_-]/gi, ""))
-                                }
-                                placeholder="freeze"
-                                onKeyDown={e => e.key === "Enter" && create()}
-                            />
-                        </Field>
-                        <Button
-                            type="button"
-                            disabled={!menu || !action}
-                            onClick={create}
-                        >
-                            İzin ekle
-                        </Button>
+                    <Section label={t("sxIamAddPermission")}>
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                            <Field size="lg" className="sm:w-48">
+                                <FieldLabel htmlFor="iam-perm-menu">{t("sxIamMenu")}</FieldLabel>
+                                <Input
+                                    id="iam-perm-menu"
+                                    value={menu}
+                                    onChange={e =>
+                                        setMenu(e.target.value.replace(/[^a-z0-9_-]/gi, ""))
+                                    }
+                                    placeholder="cards"
+                                />
+                            </Field>
+                            <span className="hidden pb-3 text-muted-foreground sm:block">:</span>
+                            <Field size="lg" className="sm:w-48">
+                                <FieldLabel htmlFor="iam-perm-action">{t("sxIamAction")}</FieldLabel>
+                                <Input
+                                    id="iam-perm-action"
+                                    value={action}
+                                    onChange={e =>
+                                        setAction(e.target.value.replace(/[^a-z0-9_-]/gi, ""))
+                                    }
+                                    placeholder="freeze"
+                                    onKeyDown={e => e.key === "Enter" && create()}
+                                />
+                            </Field>
+                            <Button
+                                type="button"
+                                size="lg"
+                                disabled={!menu || !action}
+                                onClick={create}
+                            >
+                                {t("sxIamAddPermission")}
+                            </Button>
+                        </div>
                         {menu && action && (
-                            <span className="pb-2 text-sm text-muted-foreground">
+                            <p className="mt-2 px-0.5 text-sm text-muted-foreground">
                                 →{" "}
                                 <code className="text-foreground">
                                     {menu}:{action}
                                 </code>
-                            </span>
+                            </p>
                         )}
-                    </div>
+                    </Section>
 
-                    {loading ? (
-                        <Spinner />
-                    ) : roles.length === 0 ? (
-                        <Empty>Bu client'ta henüz izin yok.</Empty>
-                    ) : (
-                        <div className="space-y-4">
-                            {Object.entries(grouped).map(([m, actions]) => (
-                                <Item key={m} variant="outline">
-                                    <ItemContent>
-                                        <ItemDescription className="font-semibold uppercase tracking-wide">
+                    <Section label={t("sxIamTabPermissions")}>
+                        {loading ? (
+                            <ListSkeleton />
+                        ) : rolesFailed ? (
+                            <Notice
+                                title={t("sxIamPermissionsLoadError")}
+                                description={t("sxLoadErrorDescription")}
+                                onRetry={() => setReload(n => n + 1)}
+                            />
+                        ) : roles.length === 0 ? (
+                            <Notice
+                                title={t("sxIamPermissionsEmptyTitle")}
+                                description={t("sxIamPermissionsEmptyDescription")}
+                            />
+                        ) : (
+                            <ListGroup>
+                                {Object.entries(grouped).map(([m, actions]) => (
+                                    <li key={m} className="px-4 py-3">
+                                        <div className="text-[13px] font-semibold tracking-wide text-muted-foreground uppercase">
                                             {m}
-                                        </ItemDescription>
-                                    <div className="flex flex-wrap gap-1.5">
-                                        {actions.map(a => (
-                                            <Chip
-                                                key={a}
-                                                onRemove={() => del(`${m}:${a}`)}
-                                            >
-                                                {a}
-                                            </Chip>
-                                        ))}
-                                    </div>
-                                    </ItemContent>
-                                </Item>
-                            ))}
-                        </div>
-                    )}
+                                        </div>
+                                        <div className="mt-2 flex flex-wrap gap-1.5">
+                                            {actions.map(a => (
+                                                <RemovableChip
+                                                    key={a}
+                                                    onRemove={() => del(`${m}:${a}`)}
+                                                >
+                                                    {a}
+                                                </RemovableChip>
+                                            ))}
+                                        </div>
+                                    </li>
+                                ))}
+                            </ListGroup>
+                        )}
+                    </Section>
                 </>
             )}
-        </Card>
+        </>
     );
 }
 
-/* ──────────────────── 2. İŞ ROLLERİ (composite realm roles) ─────────────── */
 function RolesTab() {
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
+    const t = useT();
 
     const [roles, setRoles] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
+    const [failed, setFailed] = useState(false);
     const [name, setName] = useState("");
     const [open, setOpen] = useState<string | null>(null);
-
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            const all = await adminClient.roles.find();
-            setRoles(
-                all
-                    .filter((r: any) => !BUILTIN_ROLE(r.name))
-                    .sort((a, b) => a.name.localeCompare(b.name))
-            );
-        } catch (e) {
-            addError("Roller yüklenemedi", e as Error);
-        } finally {
-            setLoading(false);
-        }
-    }, [adminClient, addError]);
+    const [reload, setReload] = useState(0);
 
     useEffect(() => {
-        load();
-    }, [load]);
+        let alive = true;
+        (async () => {
+            setLoading(true);
+            setFailed(false);
+            try {
+                const all = await adminClient.roles.find();
+                if (!alive) return;
+                setRoles(
+                    all
+                        .filter((r: any) => !BUILTIN_ROLE(r.name))
+                        .sort((a, b) => a.name.localeCompare(b.name))
+                );
+            } catch (e) {
+                console.error("[iam] roles load failed:", e);
+                if (alive) setFailed(true);
+            } finally {
+                if (alive) setLoading(false);
+            }
+        })();
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, reload]);
 
     const create = async () => {
         const n = name.trim();
         if (!n) return;
         try {
             await adminClient.roles.create({ name: n });
-            addAlert(`"${n}" iş rolü oluşturuldu.`, AlertVariant.success);
+            addAlert(t("sxIamRoleCreated", { name: n }), AlertVariant.success);
             setName("");
-            await load();
+            setReload(x => x + 1);
         } catch (e) {
-            addError("Rol oluşturulamadı", e as Error);
+            addError(t("sxIamRoleCreateError"), e as Error);
         }
     };
 
     const del = async (roleName: string) => {
         try {
             await adminClient.roles.delByName({ name: roleName });
-            addAlert(`"${roleName}" silindi.`, AlertVariant.success);
+            addAlert(t("sxIamDeleted", { name: roleName }), AlertVariant.success);
             if (open === roleName) setOpen(null);
-            await load();
+            setReload(x => x + 1);
         } catch (e) {
-            addError("Silinemedi", e as Error);
+            addError(t("sxIamDeleteError"), e as Error);
         }
     };
 
     return (
-        <Card
-            title="İş Rolleri"
-            desc="İzinleri paketleyen composite roller. Bir rolü açıp hangi izinleri içerdiğini düzenleyin."
-        >
-            <div className="mb-5 flex gap-2">
-                <Input
-                    value={name}
-                    onChange={e => setName(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && create()}
-                    placeholder="Rol adı (örn. card-ops)"
-                    className="max-w-xs"
-                />
-                <Button type="button" disabled={!name.trim()} onClick={create}>
-                    Rol oluştur
-                </Button>
-            </div>
+        <>
+            <Intro>{t("sxIamRolesIntro")}</Intro>
 
-            {loading ? (
-                <Spinner />
-            ) : roles.length === 0 ? (
-                <Empty>Henüz iş rolü yok.</Empty>
-            ) : (
-                <div className="space-y-2">
-                    {roles.map(r => (
-                        <Item key={r.name} variant="outline" size="sm">
-                            <ItemContent>
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    className="w-fit"
-                                    aria-expanded={open === r.name}
-                                    onClick={() => setOpen(open === r.name ? null : r.name)}
-                                >
-                                    <CaretRightIcon
-                                        className={cn(
-                                            "text-muted-foreground transition-transform",
-                                            open === r.name && "rotate-90"
-                                        )}
-                                    />
-                                    {r.name}
-                                </Button>
-                            </ItemContent>
-                            <ItemActions>
-                                <Button
-                                    type="button"
-                                    variant="destructive"
-                                    size="sm"
-                                    onClick={() => del(r.name)}
-                                >
-                                    Sil
-                                </Button>
-                            </ItemActions>
-                            {open === r.name && (
-                                <ItemFooter className="block">
-                                    <Separator className="mb-4" />
-                                    <RolePermissions role={r} />
-                                </ItemFooter>
-                            )}
-                        </Item>
-                    ))}
-                </div>
-            )}
-        </Card>
+            <CreateRow
+                value={name}
+                onChange={setName}
+                onSubmit={create}
+                placeholder={t("sxIamRoleNamePlaceholder")}
+                label={t("sxIamCreateRole")}
+            />
+
+            <Section label={t("sxIamTabRoles")}>
+                {loading ? (
+                    <ListSkeleton />
+                ) : failed ? (
+                    <Notice
+                        title={t("sxIamRolesLoadError")}
+                        description={t("sxLoadErrorDescription")}
+                        onRetry={() => setReload(x => x + 1)}
+                    />
+                ) : roles.length === 0 ? (
+                    <Notice
+                        title={t("sxIamRolesEmptyTitle")}
+                        description={t("sxIamRolesEmptyDescription")}
+                    />
+                ) : (
+                    <ListGroup>
+                        {roles.map(r => (
+                            <ExpandRow
+                                key={r.name}
+                                title={r.name}
+                                open={open === r.name}
+                                onToggle={() => setOpen(open === r.name ? null : r.name)}
+                                onDelete={() => del(r.name)}
+                            >
+                                <RolePermissions role={r} />
+                            </ExpandRow>
+                        ))}
+                    </ListGroup>
+                )}
+            </Section>
+        </>
     );
 }
 
-/** Bir composite role'ün içerdiği client izinlerini (client roles) düzenler. */
 function RolePermissions({ role }: { role: any }) {
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
+    const t = useT();
 
     const [clients, setClients] = useState<any[]>([]);
     const [clientId, setClientId] = useState("");
     const [clientRoles, setClientRoles] = useState<any[]>([]);
-    const [included, setIncluded] = useState<Set<string>>(new Set()); // composite role id'leri
+    const [included, setIncluded] = useState<Set<string>>(new Set());
     const [busy, setBusy] = useState(false);
+    const [baseStatus, setBaseStatus] = useState<"loading" | "error" | "ready">("loading");
+    const [baseAttempt, setBaseAttempt] = useState(0);
+    const [rolesStatus, setRolesStatus] = useState<"loading" | "error" | "ready">("ready");
+    const [rolesAttempt, setRolesAttempt] = useState(0);
 
     useEffect(() => {
-        adminClient.clients
-            .find()
-            .then((cs: any[]) =>
+        let alive = true;
+        setBaseStatus("loading");
+        Promise.all([
+            adminClient.clients.find(),
+            adminClient.roles.getCompositeRoles({ id: role.id })
+        ])
+            .then(([cs, comps]: any[]) => {
+                if (!alive) return;
                 setClients(
                     cs
                         .filter(c => !c.clientId.startsWith("$"))
                         .sort((a, b) => a.clientId.localeCompare(b.clientId))
-                )
-            );
-    }, [adminClient]);
+                );
+                setIncluded(new Set(comps.map((c: any) => c.id)));
+                setBaseStatus("ready");
+            })
+            .catch(e => {
+                console.error("[iam] role permissions load failed:", e);
+                if (alive) setBaseStatus("error");
+            });
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, role.id, baseAttempt]);
 
-    const refreshIncluded = useCallback(async () => {
+    const refreshIncluded = async () => {
         const comps = await adminClient.roles.getCompositeRoles({ id: role.id });
         setIncluded(new Set(comps.map((c: any) => c.id)));
-    }, [adminClient, role.id]);
+    };
 
     useEffect(() => {
-        refreshIncluded();
-    }, [refreshIncluded]);
-
-    useEffect(() => {
-        if (!clientId) return setClientRoles([]);
+        if (!clientId) {
+            setClientRoles([]);
+            setRolesStatus("ready");
+            return;
+        }
+        let alive = true;
+        setRolesStatus("loading");
         adminClient.clients
             .listRoles({ id: clientId })
-            .then((r: any[]) =>
-                setClientRoles(r.sort((a, b) => a.name.localeCompare(b.name)))
-            );
-    }, [clientId, adminClient]);
+            .then((r: any[]) => {
+                if (!alive) return;
+                setClientRoles(r.sort((a, b) => a.name.localeCompare(b.name)));
+                setRolesStatus("ready");
+            })
+            .catch(e => {
+                console.error("[iam] client permissions load failed:", e);
+                if (alive) {
+                    setClientRoles([]);
+                    setRolesStatus("error");
+                }
+            });
+        return () => {
+            alive = false;
+        };
+    }, [clientId, adminClient, rolesAttempt]);
 
     const toggle = async (cr: any, on: boolean) => {
         setBusy(true);
@@ -743,27 +806,48 @@ function RolePermissions({ role }: { role: any }) {
             else await adminClient.roles.delCompositeRoles({ id: role.id }, [cr]);
             await refreshIncluded();
             addAlert(
-                on ? `"${cr.name}" eklendi.` : `"${cr.name}" çıkarıldı.`,
+                on
+                    ? t("sxIamItemAdded", { name: cr.name })
+                    : t("sxIamItemRemoved", { name: cr.name }),
                 AlertVariant.success
             );
         } catch (e) {
-            addError("İşlem başarısız", e as Error);
+            addError(t("sxIamActionFailed"), e as Error);
         } finally {
             setBusy(false);
         }
     };
 
+    if (baseStatus === "loading") return <InlineSkeleton />;
+    if (baseStatus === "error")
+        return (
+            <Notice
+                title={t("sxIamRolePermissionsLoadError")}
+                description={t("sxLoadErrorDescription")}
+                onRetry={() => setBaseAttempt(n => n + 1)}
+            />
+        );
+    if (clients.length === 0)
+        return (
+            <Notice
+                title={t("sxIamClientsEmptyTitle")}
+                description={t("sxIamClientsEmptyDescription")}
+            />
+        );
+
     return (
-        <div>
-            <Field className="mb-3 max-w-xs">
-                <FieldLabel>İzin eklemek için client seçin</FieldLabel>
+        <div className="flex flex-col gap-3">
+            <Field className="sm:max-w-xs">
+                <FieldLabel htmlFor={`iam-role-client-${role.id}`}>
+                    {t("sxIamSelectClientToAdd")}
+                </FieldLabel>
                 <NativeSelect
+                    id={`iam-role-client-${role.id}`}
                     value={clientId}
                     onChange={e => setClientId(e.target.value)}
                     className="w-full"
-                    size="sm"
                 >
-                    <NativeSelectOption value="">Client seçin…</NativeSelectOption>
+                    <NativeSelectOption value="">{t("sxIamSelectClient")}</NativeSelectOption>
                     {clients.map(c => (
                         <NativeSelectOption key={c.id} value={c.id}>
                             {c.clientId}
@@ -772,11 +856,19 @@ function RolePermissions({ role }: { role: any }) {
                 </NativeSelect>
             </Field>
 
-            {clientId && (
+            {clientId && rolesStatus === "loading" && <InlineSkeleton />}
+            {clientId && rolesStatus === "error" && (
+                <Notice
+                    title={t("sxIamPermissionsLoadError")}
+                    description={t("sxLoadErrorDescription")}
+                    onRetry={() => setRolesAttempt(n => n + 1)}
+                />
+            )}
+            {clientId && rolesStatus === "ready" && (
                 <div className="flex flex-wrap gap-1.5">
                     {clientRoles.length === 0 && (
                         <span className="text-sm text-muted-foreground">
-                            Bu client'ta izin yok.
+                            {t("sxIamClientHasNoPermissions")}
                         </span>
                     )}
                     {clientRoles.map(cr => {
@@ -790,9 +882,10 @@ function RolePermissions({ role }: { role: any }) {
                                 aria-pressed={on}
                                 disabled={busy}
                                 onClick={() => toggle(cr, !on)}
+                                className="max-w-full"
                             >
                                 {on ? <CheckIcon /> : <PlusIcon />}
-                                {cr.name}
+                                <span className="truncate">{cr.name}</span>
                             </Button>
                         );
                     })}
@@ -802,217 +895,215 @@ function RolePermissions({ role }: { role: any }) {
     );
 }
 
-/* ────────────────────────── 3. BİRİMLER (groups) ────────────────────────── */
 function UnitsTab() {
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
+    const t = useT();
 
     const [groups, setGroups] = useState<any[]>([]);
     const [roles, setRoles] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
+    const [failed, setFailed] = useState(false);
     const [name, setName] = useState("");
     const [open, setOpen] = useState<string | null>(null);
-
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            const [g, r] = await Promise.all([
-                adminClient.groups.find(),
-                adminClient.roles.find()
-            ]);
-            setGroups(g.sort((a: any, b: any) => a.name.localeCompare(b.name)));
-            setRoles(
-                r
-                    .filter((x: any) => !BUILTIN_ROLE(x.name))
-                    .sort((a, b) => a.name.localeCompare(b.name))
-            );
-        } catch (e) {
-            addError("Birimler yüklenemedi", e as Error);
-        } finally {
-            setLoading(false);
-        }
-    }, [adminClient, addError]);
+    const [reload, setReload] = useState(0);
 
     useEffect(() => {
-        load();
-    }, [load]);
+        let alive = true;
+        (async () => {
+            setLoading(true);
+            setFailed(false);
+            try {
+                const [g, r] = await Promise.all([
+                    adminClient.groups.find(),
+                    adminClient.roles.find()
+                ]);
+                if (!alive) return;
+                setGroups(g.sort((a: any, b: any) => a.name.localeCompare(b.name)));
+                setRoles(
+                    r
+                        .filter((x: any) => !BUILTIN_ROLE(x.name))
+                        .sort((a, b) => a.name.localeCompare(b.name))
+                );
+            } catch (e) {
+                console.error("[iam] units load failed:", e);
+                if (alive) setFailed(true);
+            } finally {
+                if (alive) setLoading(false);
+            }
+        })();
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, reload]);
 
     const create = async () => {
         const n = name.trim();
         if (!n) return;
         try {
             await adminClient.groups.create({ name: n });
-            addAlert(`"${n}" birimi oluşturuldu.`, AlertVariant.success);
+            addAlert(t("sxIamUnitCreated", { name: n }), AlertVariant.success);
             setName("");
-            await load();
+            setReload(x => x + 1);
         } catch (e) {
-            addError("Birim oluşturulamadı", e as Error);
+            addError(t("sxIamUnitCreateError"), e as Error);
         }
     };
 
     const del = async (g: any) => {
         try {
             await adminClient.groups.del({ id: g.id });
-            addAlert(`"${g.name}" silindi.`, AlertVariant.success);
+            addAlert(t("sxIamDeleted", { name: g.name }), AlertVariant.success);
             if (open === g.id) setOpen(null);
-            await load();
+            setReload(x => x + 1);
         } catch (e) {
-            addError("Silinemedi", e as Error);
+            addError(t("sxIamDeleteError"), e as Error);
         }
     };
 
     return (
-        <Card
-            title="Birimler"
-            desc="Departmanlar (gruplar). Bir birimi açıp iş rollerini ve üyelerini yönetin."
-        >
-            <div className="mb-5 flex gap-2">
-                <Input
-                    value={name}
-                    onChange={e => setName(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && create()}
-                    placeholder="Birim adı (örn. Kart Operasyonları)"
-                    className="max-w-xs"
-                />
-                <Button type="button" disabled={!name.trim()} onClick={create}>
-                    Birim oluştur
-                </Button>
-            </div>
+        <>
+            <Intro>{t("sxIamUnitsIntro")}</Intro>
 
-            {loading ? (
-                <Spinner />
-            ) : groups.length === 0 ? (
-                <Empty>Henüz birim yok.</Empty>
-            ) : (
-                <div className="space-y-2">
-                    {groups.map(g => (
-                        <Item key={g.id} variant="outline" size="sm">
-                            <ItemContent>
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    className="w-fit"
-                                    aria-expanded={open === g.id}
-                                    onClick={() => setOpen(open === g.id ? null : g.id)}
-                                >
-                                    <CaretRightIcon
-                                        className={cn(
-                                            "text-muted-foreground transition-transform",
-                                            open === g.id && "rotate-90"
-                                        )}
-                                    />
-                                    {g.name}
-                                </Button>
-                            </ItemContent>
-                            <ItemActions>
-                                <Button
-                                    type="button"
-                                    variant="destructive"
-                                    size="sm"
-                                    onClick={() => del(g)}
-                                >
-                                    Sil
-                                </Button>
-                            </ItemActions>
-                            {open === g.id && (
-                                <ItemFooter className="block">
-                                    <Separator className="mb-4" />
-                                    <UnitDetail group={g} roles={roles} />
-                                </ItemFooter>
-                            )}
-                        </Item>
-                    ))}
-                </div>
-            )}
-        </Card>
+            <CreateRow
+                value={name}
+                onChange={setName}
+                onSubmit={create}
+                placeholder={t("sxIamUnitNamePlaceholder")}
+                label={t("sxIamCreateUnit")}
+            />
+
+            <Section label={t("sxIamTabUnits")}>
+                {loading ? (
+                    <ListSkeleton />
+                ) : failed ? (
+                    <Notice
+                        title={t("sxIamUnitsLoadError")}
+                        description={t("sxLoadErrorDescription")}
+                        onRetry={() => setReload(x => x + 1)}
+                    />
+                ) : groups.length === 0 ? (
+                    <Notice
+                        title={t("sxIamUnitsEmptyTitle")}
+                        description={t("sxIamUnitsEmptyDescription")}
+                    />
+                ) : (
+                    <ListGroup>
+                        {groups.map(g => (
+                            <ExpandRow
+                                key={g.id}
+                                title={g.name}
+                                open={open === g.id}
+                                onToggle={() => setOpen(open === g.id ? null : g.id)}
+                                onDelete={() => del(g)}
+                            >
+                                <UnitDetail group={g} roles={roles} />
+                            </ExpandRow>
+                        ))}
+                    </ListGroup>
+                )}
+            </Section>
+        </>
     );
 }
 
-/** Bir birimin iş rolleri + üyeleri. */
 function UnitDetail({ group, roles }: { group: any; roles: any[] }) {
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
+    const t = useT();
 
     const [mapped, setMapped] = useState<any[]>([]);
     const [members, setMembers] = useState<any[]>([]);
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
+    const [reload, setReload] = useState(0);
     const roleByName = (n: string) => roles.find(r => r.name === n);
 
-    const refresh = useCallback(async () => {
-        const [rm, mem] = await Promise.all([
+    useEffect(() => {
+        let alive = true;
+        Promise.all([
             adminClient.groups.listRealmRoleMappings({ id: group.id }),
             adminClient.groups.listMembers({ id: group.id })
-        ]);
-        setMapped(rm);
-        setMembers(mem);
-    }, [adminClient, group.id]);
-
-    useEffect(() => {
-        refresh();
-    }, [refresh]);
+        ])
+            .then(([rm, mem]) => {
+                if (!alive) return;
+                setMapped(rm);
+                setMembers(mem);
+                setStatus("ready");
+            })
+            .catch(e => {
+                console.error("[iam] unit load failed:", e);
+                if (alive) setStatus("error");
+            });
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, group.id, reload]);
 
     const addRole = async (n: string) => {
         const r = roleByName(n);
         if (!r) return;
         try {
             await adminClient.groups.addRealmRoleMappings({ id: group.id, roles: [r] });
-            addAlert(`"${n}" rolü birime eklendi.`, AlertVariant.success);
-            await refresh();
+            addAlert(t("sxIamUnitRoleAdded", { name: n }), AlertVariant.success);
+            setReload(x => x + 1);
         } catch (e) {
-            addError("Eklenemedi", e as Error);
+            addError(t("sxIamAddError"), e as Error);
         }
     };
 
     const removeRole = async (r: any) => {
         try {
             await adminClient.groups.delRealmRoleMappings({ id: group.id, roles: [r] });
-            addAlert(`"${r.name}" rolü çıkarıldı.`, AlertVariant.success);
-            await refresh();
+            addAlert(t("sxIamUnitRoleRemoved", { name: r.name }), AlertVariant.success);
+            setReload(x => x + 1);
         } catch (e) {
-            addError("Çıkarılamadı", e as Error);
+            addError(t("sxIamRemoveError"), e as Error);
         }
     };
 
     const mappedNames = mapped.map(r => r.name);
 
+    if (status === "loading") return <InlineSkeleton />;
+    if (status === "error")
+        return (
+            <Notice
+                title={t("sxIamUnitLoadError")}
+                description={t("sxLoadErrorDescription")}
+                onRetry={() => {
+                    setStatus("loading");
+                    setReload(x => x + 1);
+                }}
+            />
+        );
+
     return (
-        <div className="space-y-4">
+        <div className="flex flex-col gap-4">
             <div>
-                <Label>İş rolleri</Label>
-                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <Label>{t("sxIamJobRoles")}</Label>
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
                     {mapped.length === 0 && (
-                        <span className="text-sm text-muted-foreground">
-                            Rol yok.{" "}
-                        </span>
+                        <span className="text-sm text-muted-foreground">{t("sxIamNoRoles")} </span>
                     )}
                     {mapped.map(r => (
-                        <Chip key={r.id} onRemove={() => removeRole(r)}>
+                        <RemovableChip key={r.id} onRemove={() => removeRole(r)}>
                             {r.name}
-                        </Chip>
+                        </RemovableChip>
                     ))}
                     <Picker
-                        options={roles
-                            .map(r => r.name)
-                            .filter(n => !mappedNames.includes(n))}
-                        placeholder="Rol ekle…"
+                        options={roles.map(r => r.name).filter(n => !mappedNames.includes(n))}
+                        placeholder={t("sxIamAddRolePlaceholder")}
                         onPick={addRole}
                     />
                 </div>
             </div>
 
             <div>
-                <Label>Üyeler ({members.length})</Label>
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                <Label>{t("sxIamMembersCount", { n: members.length })}</Label>
+                <div className="mt-2 flex flex-wrap gap-1.5">
                     {members.length === 0 ? (
-                        <span className="text-sm text-muted-foreground">
-                            Üye yok.
-                        </span>
+                        <span className="text-sm text-muted-foreground">{t("sxIamNoMembers")}</span>
                     ) : (
-                        members.map(m => (
-                            <Badge key={m.id} variant="secondary">
-                                {m.username}
-                            </Badge>
-                        ))
+                        members.map(m => <Chip key={m.id}>{m.username}</Chip>)
                     )}
                 </div>
             </div>
@@ -1020,191 +1111,311 @@ function UnitDetail({ group, roles }: { group: any; roles: any[] }) {
     );
 }
 
-/* ────────────────────────── 4. ADMİNLER (user → unit) ───────────────────── */
 function AdminsTab() {
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
+    const t = useT();
 
     const [groups, setGroups] = useState<any[]>([]);
+    const [groupsStatus, setGroupsStatus] = useState<"loading" | "error" | "ready">("loading");
+    const [groupsAttempt, setGroupsAttempt] = useState(0);
     const [search, setSearch] = useState("");
+    const [query, setQuery] = useState("");
+    const [searchStatus, setSearchStatus] = useState<"idle" | "loading" | "error" | "ready">("idle");
     const [results, setResults] = useState<any[]>([]);
     const [userGroups, setUserGroups] = useState<Record<string, any[]>>({});
 
     useEffect(() => {
+        let alive = true;
+        setGroupsStatus("loading");
         adminClient.groups
             .find()
-            .then((g: any[]) =>
-                setGroups(g.sort((a, b) => a.name.localeCompare(b.name)))
-            );
-    }, [adminClient]);
+            .then((g: any[]) => {
+                if (!alive) return;
+                setGroups(g.sort((a, b) => a.name.localeCompare(b.name)));
+                setGroupsStatus("ready");
+            })
+            .catch(e => {
+                console.error("[iam] units load failed:", e);
+                if (alive) setGroupsStatus("error");
+            });
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, groupsAttempt]);
 
-    const loadUserGroups = useCallback(
-        async (users: any[]) => {
-            const map: Record<string, any[]> = {};
-            for (const u of users) {
-                map[u.id] = await adminClient.users.listGroups({ id: u.id });
-            }
-            setUserGroups(map);
-        },
-        [adminClient]
-    );
+    const loadUserGroups = async (users: any[]) => {
+        const map: Record<string, any[]> = {};
+        for (const u of users) {
+            map[u.id] = await adminClient.users.listGroups({ id: u.id });
+        }
+        setUserGroups(map);
+    };
 
     const doSearch = async () => {
-        if (!search.trim()) return setResults([]);
+        const q = search.trim();
+        setQuery(q);
+        if (!q) {
+            setResults([]);
+            setSearchStatus("idle");
+            return;
+        }
+        setSearchStatus("loading");
         try {
             const users = await adminClient.users.find({
-                search: search.trim(),
+                search: q,
                 max: 10
             });
-            setResults(users);
             await loadUserGroups(users);
+            setResults(users);
+            setSearchStatus("ready");
         } catch (e) {
-            addError("Arama başarısız", e as Error);
+            console.error("[iam] user search failed:", e);
+            setResults([]);
+            setSearchStatus("error");
         }
     };
 
     const join = async (userId: string, groupId: string, groupName: string) => {
         try {
             await adminClient.users.addToGroup({ id: userId, groupId });
-            addAlert(`"${groupName}" birimine eklendi.`, AlertVariant.success);
+            addAlert(t("sxIamAddedToUnit", { name: groupName }), AlertVariant.success);
             await loadUserGroups(results);
         } catch (e) {
-            addError("Eklenemedi", e as Error);
+            addError(t("sxIamAddError"), e as Error);
         }
     };
 
     const leave = async (userId: string, g: any) => {
         try {
             await adminClient.users.delFromGroup({ id: userId, groupId: g.id });
-            addAlert(`"${g.name}" biriminden çıkarıldı.`, AlertVariant.success);
+            addAlert(t("sxIamRemovedFromUnit", { name: g.name }), AlertVariant.success);
             await loadUserGroups(results);
         } catch (e) {
-            addError("Çıkarılamadı", e as Error);
+            addError(t("sxIamRemoveError"), e as Error);
         }
     };
 
     return (
-        <Card
-            title="Adminler"
-            desc="Kullanıcı arayın ve birim(ler)e atayın. Bir kişi birime girince o birimin tüm yetkilerini alır."
-        >
-            <div className="mb-4 flex gap-2">
-                <Input
+        <>
+            <Intro>{t("sxIamAdminsIntro")}</Intro>
+
+            <div className="flex gap-2">
+                <SearchField
                     value={search}
-                    onChange={e => setSearch(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && doSearch()}
-                    placeholder="Kullanıcı adı / e-posta ara…"
-                    className="max-w-md flex-1"
+                    onChange={setSearch}
+                    onEnter={doSearch}
+                    placeholder={t("sxIamUserSearchPlaceholder")}
+                    className="min-w-0 flex-1"
                 />
-                <Button type="button" variant="secondary" onClick={doSearch}>
-                    Ara
+                <Button
+                    type="button"
+                    variant="secondary"
+                    size="lg"
+                    className="h-13.5"
+                    onClick={doSearch}
+                >
+                    {t("sxIamSearch")}
                 </Button>
             </div>
 
-            {results.length === 0 ? (
-                <Empty>Aramak için bir şey yazın.</Empty>
-            ) : (
-                <DataTable
-                    head={["Kullanıcı", "E-posta", "Birimler", "Birime ekle"]}
-                    rows={results.map(u => {
-                        const gs = userGroups[u.id] || [];
-                        const inIds = gs.map(g => g.id);
-                        return [
-                            <span className="font-medium">{u.username}</span>,
-                            u.email || "—",
-                            <div className="flex flex-wrap gap-1.5">
-                                {gs.length === 0 && (
-                                    <span className="text-muted-foreground">—</span>
-                                )}
-                                {gs.map(g => (
-                                    <Chip key={g.id} onRemove={() => leave(u.id, g)}>
-                                        {g.name}
-                                    </Chip>
-                                ))}
-                            </div>,
-                            <Picker
-                                options={groups
-                                    .filter(g => !inIds.includes(g.id))
-                                    .map(g => g.name)}
-                                placeholder="Birim seç…"
-                                onPick={name => {
-                                    const g = groups.find(x => x.name === name);
-                                    if (g) join(u.id, g.id, g.name);
-                                }}
-                            />
-                        ];
-                    })}
-                />
-            )}
-        </Card>
+            <Section label={t("sxIamTabAdmins")}>
+                {groupsStatus === "loading" || searchStatus === "loading" ? (
+                    <ListSkeleton />
+                ) : groupsStatus === "error" ? (
+                    <Notice
+                        title={t("sxIamUnitsLoadError")}
+                        description={t("sxLoadErrorDescription")}
+                        onRetry={() => setGroupsAttempt(n => n + 1)}
+                    />
+                ) : searchStatus === "error" ? (
+                    <Notice
+                        title={t("sxIamSearchError")}
+                        description={t("sxLoadErrorDescription")}
+                        onRetry={doSearch}
+                    />
+                ) : searchStatus === "idle" ? (
+                    <Notice
+                        title={t("sxIamSearchPromptTitle")}
+                        description={t("sxIamSearchPromptDescription")}
+                    />
+                ) : results.length === 0 ? (
+                    <Notice
+                        title={t("sxIamSearchNoResultsTitle")}
+                        description={t("sxIamSearchNoResultsDescription", { query })}
+                    />
+                ) : (
+                    <ListGroup>
+                        {results.map(u => {
+                            const gs = userGroups[u.id] || [];
+                            const inIds = gs.map(g => g.id);
+                            return (
+                                <li key={u.id} className="px-4 py-3">
+                                    <div className="truncate text-base font-medium">{u.username}</div>
+                                    <div className="mt-0.5 text-[13px] text-muted-foreground [overflow-wrap:anywhere]">
+                                        {u.email || "—"}
+                                    </div>
+                                    <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                                        {gs.length === 0 && (
+                                            <span className="text-sm text-muted-foreground">—</span>
+                                        )}
+                                        {gs.map(g => (
+                                            <RemovableChip key={g.id} onRemove={() => leave(u.id, g)}>
+                                                {g.name}
+                                            </RemovableChip>
+                                        ))}
+                                        <Picker
+                                            options={groups
+                                                .filter(g => !inIds.includes(g.id))
+                                                .map(g => g.name)}
+                                            placeholder={t("sxIamSelectUnit")}
+                                            onPick={name => {
+                                                const g = groups.find(x => x.name === name);
+                                                if (g) join(u.id, g.id, g.name);
+                                            }}
+                                        />
+                                    </div>
+                                </li>
+                            );
+                        })}
+                    </ListGroup>
+                )}
+            </Section>
+        </>
     );
 }
 
-/* ────────────────────────────── ortak parçalar ──────────────────────────── */
-function Card({
-    title,
-    desc,
-    children
-}: {
-    title: string;
-    desc?: string;
-    children: React.ReactNode;
-}) {
+function Panel({ title, desc, children }: { title: string; desc?: string; children: ReactNode }) {
     return (
-        <UiCard>
-            <CardHeader>
-                <CardTitle>{title}</CardTitle>
-                {desc && <CardDescription>{desc}</CardDescription>}
-            </CardHeader>
-            <CardContent>{children}</CardContent>
-        </UiCard>
+        <Section label={title}>
+            {desc && <p className="-mt-1 mb-2.5 px-0.5 text-[13px] text-muted-foreground">{desc}</p>}
+            {children}
+        </Section>
     );
 }
 
-function Label({ children }: { children: React.ReactNode }) {
-    return <p className="text-xs font-medium text-muted-foreground">{children}</p>;
+function Intro({ children }: { children: ReactNode }) {
+    return <p className="-mb-2 px-0.5 text-sm leading-[1.45] text-muted-foreground">{children}</p>;
 }
 
-function Empty({ children }: { children: React.ReactNode }) {
+function InlineSkeleton() {
     return (
-        <UiEmpty>
-            <EmptyHeader>
-                <EmptyDescription>{children}</EmptyDescription>
-            </EmptyHeader>
-        </UiEmpty>
-    );
-}
-
-function Spinner() {
-    return (
-        <div className="grid place-items-center py-12">
-            <UiSpinner />
+        <div aria-busy="true" className="flex flex-col gap-2 py-1">
+            <div aria-hidden className="h-3.5 w-2/5 animate-pulse rounded-md bg-[#e5e5ea] dark:bg-[#2c2c2e]" />
+            <div aria-hidden className="h-2.5 w-3/5 animate-pulse rounded-md bg-[#e5e5ea] dark:bg-[#2c2c2e]" />
         </div>
     );
 }
 
-function Chip({
-    children,
-    onRemove
+function Label({ children }: { children: ReactNode }) {
+    return <p className="text-[13px] font-medium text-muted-foreground">{children}</p>;
+}
+
+function ListGroup({ children }: { children: ReactNode }) {
+    const items = (Array.isArray(children) ? children.flat() : [children]).filter(Boolean);
+    return (
+        <ul className={GROUP}>
+            {items.map((child: any, i: number) => (
+                <Fragment key={child?.key ?? i}>
+                    {i > 0 && <li aria-hidden className={SEPARATOR} />}
+                    {child}
+                </Fragment>
+            ))}
+        </ul>
+    );
+}
+
+function ExpandRow({
+    title,
+    open,
+    onToggle,
+    onDelete,
+    children
 }: {
-    children: React.ReactNode;
-    onRemove: () => void;
+    title: string;
+    open: boolean;
+    onToggle: () => void;
+    onDelete: () => void;
+    children: ReactNode;
+}) {
+    const t = useT();
+    return (
+        <li>
+            <div className="flex min-h-13 items-stretch">
+                <button
+                    type="button"
+                    aria-expanded={open}
+                    onClick={onToggle}
+                    className="flex min-w-0 flex-1 items-center gap-2.5 py-3 ps-4 pe-3 text-left outline-none transition-colors hover:bg-black/3 focus-visible:bg-black/5 dark:hover:bg-white/4 dark:focus-visible:bg-white/6"
+                >
+                    <CaretRightIcon
+                        className={cn(
+                            "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                            open && "rotate-90"
+                        )}
+                    />
+                    <span className="truncate text-base font-medium">{title}</span>
+                </button>
+                <div className="flex shrink-0 items-center pe-4">
+                    <TextAction tone="danger" onClick={onDelete}>
+                        {t("sxIamDelete")}
+                    </TextAction>
+                </div>
+            </div>
+            {open && (
+                <div className="border-t border-[#e5e5ea] px-4 pt-3.5 pb-4 dark:border-[#38383a]">
+                    {children}
+                </div>
+            )}
+        </li>
+    );
+}
+
+function CreateRow({
+    value,
+    onChange,
+    onSubmit,
+    placeholder,
+    label
+}: {
+    value: string;
+    onChange: (v: string) => void;
+    onSubmit: () => void;
+    placeholder: string;
+    label: string;
 }) {
     return (
-        <Badge className="pe-0.5">
-            {children}
-            <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                onClick={onRemove}
-                title="Kaldır"
-                aria-label="Kaldır"
-                className="size-4"
-            >
-                <XIcon />
+        <div className="flex flex-col gap-2 sm:flex-row">
+            <Input
+                value={value}
+                onChange={e => onChange(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && onSubmit()}
+                placeholder={placeholder}
+                aria-label={placeholder}
+                className="sm:max-w-sm"
+            />
+            <Button type="button" size="lg" disabled={!value.trim()} onClick={onSubmit}>
+                {label}
             </Button>
-        </Badge>
+        </div>
+    );
+}
+
+function RemovableChip({ children, onRemove }: { children: ReactNode; onRemove: () => void }) {
+    const t = useT();
+    return (
+        <span className="inline-flex h-6.5 max-w-full items-center gap-0.5 rounded-full border border-[#d2d2d7] ps-2.5 pe-0.5 text-[13px] font-medium dark:border-[#48484a]">
+            <span className="truncate">{children}</span>
+            <button
+                type="button"
+                onClick={onRemove}
+                title={t("sxIamRemove")}
+                aria-label={t("sxIamRemove")}
+                className="grid size-5 shrink-0 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-black/5 hover:text-[#d70015] focus-visible:ring-2 focus-visible:ring-ring/50 dark:hover:bg-white/8 dark:hover:text-[#ff453a]"
+            >
+                <XIcon className="size-3" weight="bold" />
+            </button>
+        </span>
     );
 }
 
@@ -1230,6 +1441,7 @@ function Picker({
                 } else setValue(v);
             }}
             size="sm"
+            aria-label={placeholder}
         >
             <NativeSelectOption value="">{placeholder}</NativeSelectOption>
             {options.map(o => (
@@ -1238,36 +1450,5 @@ function Picker({
                 </NativeSelectOption>
             ))}
         </NativeSelect>
-    );
-}
-
-function DataTable({
-    head,
-    rows,
-    className
-}: {
-    head: string[];
-    rows: React.ReactNode[][];
-    className?: string;
-}) {
-    return (
-        <Table className={className}>
-            <TableHeader>
-                <TableRow>
-                    {head.map(h => (
-                        <TableHead key={h}>{h}</TableHead>
-                    ))}
-                </TableRow>
-            </TableHeader>
-            <TableBody>
-                {rows.map((cells, i) => (
-                    <TableRow key={i}>
-                        {cells.map((c, j) => (
-                            <TableCell key={j}>{c}</TableCell>
-                        ))}
-                    </TableRow>
-                ))}
-            </TableBody>
-        </Table>
     );
 }

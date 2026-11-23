@@ -2,20 +2,14 @@
 
 import {
     ArrowsClockwiseIcon,
-    CaretLeftIcon,
-    CaretRightIcon,
     DatabaseIcon,
     DotsThreeIcon,
     FlowArrowIcon,
     KeyIcon,
-    LightningIcon,
     PlugsConnectedIcon,
-    PlusIcon,
-    SlidersHorizontalIcon,
     StackIcon,
     TrashIcon
 } from "@phosphor-icons/react";
-import { Badge } from "@ui/components/badge";
 import { Button } from "@ui/components/button";
 import {
     DropdownMenu,
@@ -24,24 +18,7 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger
 } from "@ui/components/dropdown-menu";
-import {
-    Empty,
-    EmptyDescription,
-    EmptyHeader,
-    EmptyMedia,
-    EmptyTitle
-} from "@ui/components/empty";
 import { Input } from "@ui/components/input";
-import {
-    Item,
-    ItemActions,
-    ItemContent,
-    ItemDescription,
-    ItemGroup,
-    ItemMedia,
-    ItemSeparator,
-    ItemTitle
-} from "@ui/components/item";
 import {
     Select,
     SelectContent,
@@ -49,7 +26,6 @@ import {
     SelectTrigger,
     SelectValue
 } from "@ui/components/select";
-import { Spinner } from "@ui/components/spinner";
 import { Switch } from "@ui/components/switch";
 import {
     Confirm,
@@ -69,24 +45,41 @@ import {
     ModalHeader,
     ModalTitle
 } from "@ui/patterns/modal";
-import { SegmentPicker, SegmentPickerItem } from "@ui/patterns/segment-picker";
 import {
     Children,
     Fragment,
     isValidElement,
     type ReactNode,
-    useCallback,
     useEffect,
     useMemo,
     useState
 } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AlertVariant, useAlerts } from "../../shared/keycloak-ui-shared";
 import { useAdminClient } from "../admin-client";
+import { i18n } from "../i18n/i18n";
+import { useT } from "../ui/i18n";
+import {
+    AdminPage,
+    Chip,
+    GROUP,
+    ListSkeleton,
+    Notice,
+    SegmentTabs,
+    Section,
+    SEPARATOR,
+    TextAction
+} from "../ui/kit";
 import { useRealm } from "../ui/realm";
-import { fmtDate } from "../ui/util";
 
 const PROVIDER_TYPE = "org.keycloak.storage.UserStorageProvider";
 const MAPPER_TYPE = "org.keycloak.storage.ldap.mappers.LDAPStorageMapper";
+const PAGE_TITLE = "sxFederationTitle";
+
+const fmtDate = (v: any) =>
+    v
+        ? new Date(typeof v === "number" ? v : Number(v) || v).toLocaleString(i18n.language)
+        : "—";
 
 const get = (cfg: any, k: string, d = "") => cfg?.[k]?.[0] ?? d;
 const arr = (v: any) => [v == null ? "" : String(v)];
@@ -95,201 +88,206 @@ const bool = (cfg: any, k: string, d = false) => {
     return v == null ? d : v === "true";
 };
 
-/* ── Root page ────────────────────────────────────────────────────────── */
 export default function UserFederation() {
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
     const { addAlert, addError } = useAlerts();
+    const t = useT();
     const [confirm, confirmNode] = useConfirm();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const selectedId = searchParams.get("provider");
 
-    const [loading, setLoading] = useState(true);
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
+    const [attempt, setAttempt] = useState(0);
     const [parentId, setParentId] = useState<string | undefined>();
     const [providers, setProviders] = useState<any[]>([]);
-    const [selected, setSelected] = useState<any>(null);
-    const [creating, setCreating] = useState<string | null>(null); // "ldap" | "kerberos"
+    const [creating, setCreating] = useState<string | null>(null);
 
-    const load = useCallback(
-        async (pId?: string) => {
-            const pid = pId ?? parentId;
-            if (!pid) {
-                setProviders([]);
-                return [];
-            }
-            try {
-                const list = await adminClient.components
-                    .find({ type: PROVIDER_TYPE, parent: pid })
-                    .catch(() => []);
-                const safe = Array.isArray(list) ? list : [];
-                setProviders(safe);
-                return safe;
-            } catch (e) {
-                addError("Federasyon sağlayıcılar yüklenemedi.", e);
-                setProviders([]);
-                return [];
-            }
-        },
-        [adminClient, parentId, addError]
-    );
+    const load = async () => {
+        if (!parentId) {
+            setProviders([]);
+            return [];
+        }
+        try {
+            const list = await adminClient.components.find({
+                type: PROVIDER_TYPE,
+                parent: parentId
+            });
+            const safe = Array.isArray(list) ? list : [];
+            setProviders(safe);
+            return safe;
+        } catch (e) {
+            addError(t("sxFederationProvidersLoadError"), e);
+            return providers;
+        }
+    };
 
     useEffect(() => {
         let alive = true;
         (async () => {
-            setLoading(true);
+            setStatus("loading");
             try {
-                const realmRep = await adminClient.realms
-                    .findOne({ realm })
-                    .catch(() => null);
+                const realmRep = await adminClient.realms.findOne({ realm });
                 const pid = realmRep?.id;
                 if (!alive) return;
                 setParentId(pid);
                 const list = pid
-                    ? await adminClient.components
-                          .find({ type: PROVIDER_TYPE, parent: pid })
-                          .catch(() => [])
+                    ? await adminClient.components.find({ type: PROVIDER_TYPE, parent: pid })
                     : [];
                 if (!alive) return;
                 setProviders(Array.isArray(list) ? list : []);
+                setStatus("ready");
             } catch (e) {
-                if (alive) addError("Federasyon sağlayıcılar yüklenemedi.", e);
-            } finally {
-                if (alive) setLoading(false);
+                console.error("[user-federation] load failed:", e);
+                if (!alive) return;
+                setStatus("error");
             }
         })();
         return () => {
             alive = false;
         };
-    }, [adminClient, realm, addError]);
+    }, [adminClient, realm, attempt]);
+
+    const openProvider = (id?: string) =>
+        setSearchParams(id ? { provider: id } : {});
 
     const remove = (p: any) =>
         confirm({
-            title: "Sağlayıcı silinsin mi?",
-            message: `“${p.name}” federasyon sağlayıcısı ve içe aktarılan kullanıcılar etkilenebilir.`,
-            confirmLabel: "Sil",
+            title: t("sxFederationDeleteProviderTitle"),
+            message: t("sxFederationDeleteProviderMessage", { name: p.name }),
+            confirmLabel: t("sxFederationDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.components.del({ id: p.id });
-                    addAlert("Federasyon sağlayıcı silindi.", AlertVariant.success);
-                    if (selected?.id === p.id) setSelected(null);
+                    addAlert(t("sxFederationProviderDeleted"), AlertVariant.success);
+                    if (selectedId === p.id) openProvider();
                     await load();
                 } catch (e) {
-                    addError("Federasyon sağlayıcı silinemedi.", e);
+                    addError(t("sxFederationProviderDeleteError"), e);
                 }
             }
         });
 
-    if (loading)
-        return (
-            <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-                <div className="flex justify-center py-16">
-                    <Spinner className="size-6" />
-                </div>
-            </div>
-        );
+    const listPath = `/${realm}/user-federation`;
+    const selected = selectedId ? providers.find(p => p.id === selectedId) : null;
 
-    if (selected)
+    if (selectedId && status === "ready" && selected)
         return (
             <ProviderDetail
+                key={selected.id}
                 parentId={parentId}
                 provider={selected}
-                onBack={() => setSelected(null)}
+                backTo={listPath}
                 onChanged={async () => {
-                    const list = await load();
-                    const fresh = list.find((p: any) => p.id === selected.id);
-                    if (fresh) setSelected(fresh);
+                    await load();
                 }}
                 onDeleted={async () => {
-                    setSelected(null);
+                    openProvider();
                     await load();
                 }}
             />
+        );
+
+    if (selectedId && status !== "error")
+        return (
+            <AdminPage title={t(PAGE_TITLE)} back={{ label: t(PAGE_TITLE), to: listPath }}>
+                {status === "loading" ? (
+                    <ListSkeleton />
+                ) : (
+                    <Notice
+                        title={t("sxFederationProviderNotFoundTitle")}
+                        description={t("sxFederationProviderNotFoundDescription")}
+                        action={
+                            <Button size="sm" variant="plain" onClick={() => openProvider()}>
+                                {t("sxFederationBackToProviders")}
+                            </Button>
+                        }
+                    />
+                )}
+            </AdminPage>
         );
 
     const sorted = [...providers].sort((a, b) =>
         (a.name || "").localeCompare(b.name || "")
     );
 
+    const addMenu = (size?: string) => (
+        <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+                <Button size={size}>{t("sxFederationAddProvider")}</Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align={size ? "center" : "end"}>
+                <DropdownMenuItem onClick={() => setCreating("ldap")}>
+                    <DatabaseIcon /> LDAP
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setCreating("kerberos")}>
+                    <KeyIcon /> Kerberos
+                </DropdownMenuItem>
+            </DropdownMenuContent>
+        </DropdownMenu>
+    );
+
     return (
-        <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-            <div className="mb-6 flex flex-wrap items-center justify-end gap-2">
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <Button>
-                            <PlusIcon /> Sağlayıcı ekle
-                        </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => setCreating("ldap")}>
-                            <DatabaseIcon /> LDAP
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setCreating("kerberos")}>
-                            <KeyIcon /> Kerberos
-                        </DropdownMenuItem>
-                    </DropdownMenuContent>
-                </DropdownMenu>
-            </div>
-            {sorted.length === 0 ? (
-                <Empty>
-                    <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                            <DatabaseIcon />
-                        </EmptyMedia>
-                        <EmptyTitle>Federasyon sağlayıcı yok</EmptyTitle>
-                        <EmptyDescription>
-                            LDAP veya Kerberos ekleyerek harici kullanıcı kaynaklarını
-                            bağla.
-                        </EmptyDescription>
-                    </EmptyHeader>
-                </Empty>
-            ) : (
-                <div className="grid gap-3 sm:grid-cols-2">
-                    {sorted.map(p => {
-                        const enabled = get(p.config, "enabled", "true") !== "false";
-                        const isKerberos = p.providerId === "kerberos";
-                        return (
-                            <Item key={p.id} variant="outline" size="sm">
-                                <ItemMedia variant="icon">
-                                    {isKerberos ? <KeyIcon /> : <DatabaseIcon />}
-                                </ItemMedia>
-                                <ItemContent className="min-w-0">
-                                    <ItemTitle>
-                                        <Button
-                                            variant="link"
-                                            className="h-auto p-0"
-                                            onClick={() => setSelected(p)}
-                                        >
-                                            {p.name}
-                                        </Button>
-                                    </ItemTitle>
-                                    <ItemDescription className="truncate">
-                                        {p.providerId} ·{" "}
-                                        {enabled ? "Etkin" : "Kapalı"}
-                                    </ItemDescription>
-                                </ItemContent>
-                                <ItemActions>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        title="Sil"
-                                        aria-label="Sil"
-                                        onClick={() => remove(p)}
-                                    >
-                                        <TrashIcon />
-                                    </Button>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        aria-label={p.name}
-                                        onClick={() => setSelected(p)}
-                                    >
-                                        <CaretRightIcon className="rtl:rotate-180" />
-                                    </Button>
-                                </ItemActions>
-                            </Item>
-                        );
-                    })}
-                </div>
-            )}
+        <AdminPage
+            title={t(PAGE_TITLE)}
+            description={t("sxFederationDescription")}
+            actions={status === "ready" && addMenu()}
+        >
+            <Section label={t("sxFederationProviders")}>
+                {status === "loading" && <ListSkeleton />}
+                {status === "error" && (
+                    <Notice
+                        title={t("sxFederationProvidersLoadError")}
+                        description={t("sxLoadErrorDescription")}
+                        onRetry={() => setAttempt(n => n + 1)}
+                    />
+                )}
+                {status === "ready" && sorted.length === 0 && (
+                    <Notice
+                        title={t("sxFederationEmptyTitle")}
+                        description={t("sxFederationEmptyDescription")}
+                        action={parentId ? addMenu("sm") : undefined}
+                    />
+                )}
+                {status === "ready" && sorted.length > 0 && (
+                    <SettingsGroup>
+                        {sorted.map(p => {
+                            const enabled = get(p.config, "enabled", "true") !== "false";
+                            const isKerberos = p.providerId === "kerberos";
+                            return (
+                                <ListRow
+                                    key={p.id}
+                                    onOpen={() => openProvider(p.id)}
+                                    leading={
+                                        <span className="grid size-8 place-items-center rounded-full bg-[#6e6e73] text-white dark:bg-[#48484a]">
+                                            {isKerberos ? (
+                                                <KeyIcon className="size-4" />
+                                            ) : (
+                                                <DatabaseIcon className="size-4" />
+                                            )}
+                                        </span>
+                                    }
+                                    title={p.name}
+                                    subtitle={p.providerId}
+                                    trailing={
+                                        <>
+                                            <span className="hidden sm:inline-flex">
+                                                <Chip tone={enabled ? "success" : "danger"}>
+                                                    {enabled ? t("sxFederationEnabled") : t("sxFederationDisabled")}
+                                                </Chip>
+                                            </span>
+                                            <TextAction tone="danger" onClick={() => remove(p)}>
+                                                {t("sxFederationDelete")}
+                                            </TextAction>
+                                        </>
+                                    }
+                                />
+                            );
+                        })}
+                    </SettingsGroup>
+                )}
+            </Section>
 
             {creating && parentId && (
                 <CreateProviderModal
@@ -299,20 +297,19 @@ export default function UserFederation() {
                     onCreated={async id => {
                         setCreating(null);
                         const list = await load();
-                        const fresh = list.find((p: any) => p.id === id);
-                        if (fresh) setSelected(fresh);
+                        if (id && list.some((p: any) => p.id === id)) openProvider(id);
                     }}
                 />
             )}
             {confirmNode}
-        </div>
+        </AdminPage>
     );
 }
 
-/* ── Create modal ─────────────────────────────────────────────────────── */
 function CreateProviderModal({ kind, parentId, onClose, onCreated }: any) {
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
+    const t = useT();
     const [name, setName] = useState(kind);
     const [saving, setSaving] = useState(false);
     const isLdap = kind === "ldap";
@@ -340,7 +337,7 @@ function CreateProviderModal({ kind, parentId, onClose, onCreated }: any) {
     const create = async () => {
         const n = name.trim();
         if (!n) {
-            addAlert("Ad zorunludur.", AlertVariant.warning);
+            addAlert(t("sxFederationNameRequired"), AlertVariant.warning);
             return;
         }
         const config = isLdap
@@ -377,10 +374,10 @@ function CreateProviderModal({ kind, parentId, onClose, onCreated }: any) {
                 parentId,
                 config
             });
-            addAlert("Federasyon sağlayıcı oluşturuldu.", AlertVariant.success);
+            addAlert(t("sxFederationProviderCreated"), AlertVariant.success);
             onCreated(res?.id);
         } catch (e) {
-            addError("Federasyon sağlayıcı oluşturulamadı.", e);
+            addError(t("sxFederationProviderCreateError"), e);
             setSaving(false);
         }
     };
@@ -390,12 +387,12 @@ function CreateProviderModal({ kind, parentId, onClose, onCreated }: any) {
             <ModalContent className="sm:max-w-2xl">
                 <ModalHeader>
                     <ModalTitle>
-                        {isLdap ? "LDAP sağlayıcı ekle" : "Kerberos sağlayıcı ekle"}
+                        {isLdap ? t("sxFederationAddLdapTitle") : t("sxFederationAddKerberosTitle")}
                     </ModalTitle>
                 </ModalHeader>
                 <ModalBody className="flex flex-col gap-4">
                 <SettingsGroup>
-                    <StackField label="Görünen ad">
+                    <StackField label={t("sxFederationDisplayName")}>
                         <Input
                             size="md"
                             autoFocus
@@ -407,7 +404,7 @@ function CreateProviderModal({ kind, parentId, onClose, onCreated }: any) {
 
                 {isLdap ? (
                     <SettingsGroup>
-                        <StackField label="Bağlantı URL'i">
+                        <StackField label={t("sxFederationConnectionUrl")}>
                             <Input
                                 size="md"
                                 value={f.connectionUrl}
@@ -417,7 +414,7 @@ function CreateProviderModal({ kind, parentId, onClose, onCreated }: any) {
                                 placeholder="ldap://host:389"
                             />
                         </StackField>
-                        <StackField label="Bind DN">
+                        <StackField label={t("sxFederationBindDn")}>
                             <Input
                                 size="md"
                                 value={f.bindDn}
@@ -425,7 +422,7 @@ function CreateProviderModal({ kind, parentId, onClose, onCreated }: any) {
                                 placeholder="cn=admin,dc=example,dc=org"
                             />
                         </StackField>
-                        <StackField label="Bind kimlik bilgisi">
+                        <StackField label={t("sxFederationBindCredential")}>
                             <Input
                                 size="md"
                                 type="password"
@@ -435,7 +432,7 @@ function CreateProviderModal({ kind, parentId, onClose, onCreated }: any) {
                                 }
                             />
                         </StackField>
-                        <StackField label="Kullanıcılar DN">
+                        <StackField label={t("sxFederationUsersDn")}>
                             <Input
                                 size="md"
                                 value={f.usersDn}
@@ -443,7 +440,7 @@ function CreateProviderModal({ kind, parentId, onClose, onCreated }: any) {
                                 placeholder="ou=users,dc=example,dc=org"
                             />
                         </StackField>
-                        <StackField label="Kullanıcı adı LDAP özniteliği">
+                        <StackField label={t("sxFederationUsernameAttribute")}>
                             <Input
                                 size="md"
                                 value={f.usernameLDAPAttribute}
@@ -455,7 +452,7 @@ function CreateProviderModal({ kind, parentId, onClose, onCreated }: any) {
                     </SettingsGroup>
                 ) : (
                     <SettingsGroup>
-                        <StackField label="Kerberos realm">
+                        <StackField label={t("sxFederationKerberosRealm")}>
                             <Input
                                 size="md"
                                 value={f.kerberosRealm}
@@ -465,7 +462,7 @@ function CreateProviderModal({ kind, parentId, onClose, onCreated }: any) {
                                 placeholder="EXAMPLE.ORG"
                             />
                         </StackField>
-                        <StackField label="Server principal">
+                        <StackField label={t("sxFederationServerPrincipal")}>
                             <Input
                                 size="md"
                                 value={f.serverPrincipal}
@@ -475,7 +472,7 @@ function CreateProviderModal({ kind, parentId, onClose, onCreated }: any) {
                                 placeholder="HTTP/host@EXAMPLE.ORG"
                             />
                         </StackField>
-                        <StackField label="Keytab">
+                        <StackField label={t("sxFederationKeytab")}>
                             <Input
                                 size="md"
                                 value={f.keyTab}
@@ -488,7 +485,7 @@ function CreateProviderModal({ kind, parentId, onClose, onCreated }: any) {
                 </ModalBody>
                 <ModalFooter>
                     <Button disabled={saving || !name.trim()} onClick={create}>
-                        {saving ? "Oluşturuluyor…" : "Oluştur"}
+                        {saving ? t("sxFederationCreating") : t("sxFederationCreate")}
                     </Button>
                 </ModalFooter>
             </ModalContent>
@@ -496,40 +493,40 @@ function CreateProviderModal({ kind, parentId, onClose, onCreated }: any) {
     );
 }
 
-/* ── Provider detail ──────────────────────────────────────────────────── */
 const LDAP_TABS = [
-    { value: "connection", label: "Bağlantı" },
-    { value: "searching", label: "Arama" },
-    { value: "sync", label: "Senkron" },
-    { value: "cache", label: "Önbellek" },
-    { value: "advanced", label: "Gelişmiş" },
-    { value: "mappers", label: "Eşleyiciler" }
+    { value: "connection", label: "sxFederationTabConnection" },
+    { value: "searching", label: "sxFederationTabSearching" },
+    { value: "sync", label: "sxFederationTabSync" },
+    { value: "cache", label: "sxFederationTabCache" },
+    { value: "advanced", label: "sxFederationTabAdvanced" },
+    { value: "mappers", label: "sxFederationTabMappers" }
 ];
 const KERBEROS_TABS = [
-    { value: "connection", label: "Genel" },
-    { value: "cache", label: "Önbellek" }
+    { value: "connection", label: "sxFederationTabGeneral" },
+    { value: "cache", label: "sxFederationTabCache" }
 ];
 
-function ProviderDetail({ parentId, provider, onBack, onChanged, onDeleted }: any) {
+function ProviderDetail({ parentId, provider, backTo, onChanged, onDeleted }: any) {
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
+    const t = useT();
     const [confirm, confirmNode] = useConfirm();
     const isLdap = provider.providerId === "ldap";
     const [tab, setTab] = useState("connection");
 
     const remove = () =>
         confirm({
-            title: "Sağlayıcı silinsin mi?",
-            message: `“${provider.name}” kalıcı olarak silinecek.`,
-            confirmLabel: "Sil",
+            title: t("sxFederationDeleteProviderTitle"),
+            message: t("sxFederationDeleteProviderPermanent", { name: provider.name }),
+            confirmLabel: t("sxFederationDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.components.del({ id: provider.id });
-                    addAlert("Federasyon sağlayıcı silindi.", AlertVariant.success);
+                    addAlert(t("sxFederationProviderDeleted"), AlertVariant.success);
                     onDeleted();
                 } catch (e) {
-                    addError("Silinemedi.", e);
+                    addError(t("sxFederationDeleteError"), e);
                 }
             }
         });
@@ -541,120 +538,109 @@ function ProviderDetail({ parentId, provider, onBack, onChanged, onDeleted }: an
                 action
             });
             addAlert(
-                `Senkronizasyon tamamlandı: ${res?.added ?? 0} eklendi, ${res?.updated ?? 0} güncellendi, ${res?.removed ?? 0} kaldırıldı, ${res?.failed ?? 0} hata.`,
+                t("sxFederationSyncResult", {
+                    added: res?.added ?? 0,
+                    updated: res?.updated ?? 0,
+                    removed: res?.removed ?? 0,
+                    failed: res?.failed ?? 0
+                }),
                 res?.failed ? AlertVariant.warning : AlertVariant.success
             );
             onChanged();
         } catch (e) {
-            addError("Senkronizasyon başarısız.", e);
+            addError(t("sxFederationSyncError"), e);
         }
     };
 
     const removeImported = () =>
         confirm({
-            title: "İçe aktarılan kullanıcıları kaldır",
-            message:
-                "Bu sağlayıcıdan içe aktarılmış tüm kullanıcılar Keycloak'tan kaldırılacak.",
-            confirmLabel: "Kaldır",
+            title: t("sxFederationRemoveImportedTitle"),
+            message: t("sxFederationRemoveImportedMessage"),
+            confirmLabel: t("sxFederationRemove"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.userStorageProvider.removeImportedUsers({
                         id: provider.id
                     });
-                    addAlert(
-                        "İçe aktarılan kullanıcılar kaldırıldı.",
-                        AlertVariant.success
-                    );
+                    addAlert(t("sxFederationImportedRemoved"), AlertVariant.success);
                 } catch (e) {
-                    addError("Kaldırılamadı.", e);
+                    addError(t("sxFederationRemoveError"), e);
                 }
             }
         });
 
     const unlink = () =>
         confirm({
-            title: "Kullanıcı bağlantılarını çöz",
-            message:
-                "İçe aktarılan kullanıcıların federasyon bağlantısı kaldırılır; yerel hesap olarak kalırlar.",
-            confirmLabel: "Bağlantıları çöz",
+            title: t("sxFederationUnlinkTitle"),
+            message: t("sxFederationUnlinkMessage"),
+            confirmLabel: t("sxFederationUnlinkConfirm"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.userStorageProvider.unlinkUsers({
                         id: provider.id
                     });
-                    addAlert("Kullanıcı bağlantıları çözüldü.", AlertVariant.success);
+                    addAlert(t("sxFederationUnlinked"), AlertVariant.success);
                 } catch (e) {
-                    addError("İşlem başarısız.", e);
+                    addError(t("sxFederationActionFailed"), e);
                 }
             }
         });
 
-    const tabs = isLdap ? LDAP_TABS : KERBEROS_TABS;
+    const tabs = (isLdap ? LDAP_TABS : KERBEROS_TABS).map(x => ({
+        value: x.value,
+        label: t(x.label)
+    }));
     const enabled = get(provider.config, "enabled", "true") !== "false";
 
-    return (
-        <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-            <div className="relative mb-6 flex items-center">
-                <Button
-                    variant="secondary"
-                    size="icon"
-                    onClick={onBack}
-                    aria-label="Geri"
-                >
-                    <CaretLeftIcon weight="bold" />
-                </Button>
-                <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-2 text-center">
-                    <p className="font-semibold">{provider.name}</p>
-                    {!enabled && <Badge variant="destructive">Kapalı</Badge>}
-                </div>
-                <div className="ms-auto">
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <Button variant="secondary" size="icon" aria-label="Eylemler">
-                                <DotsThreeIcon className="size-5" weight="bold" />
-                            </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                            {isLdap && (
-                                <>
-                                    <DropdownMenuItem
-                                        onClick={() => runSync("triggerFullSync")}
-                                    >
-                                        <ArrowsClockwiseIcon /> Tüm kullanıcıları
-                                        senkronize et
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                        onClick={() => runSync("triggerChangedUsersSync")}
-                                    >
-                                        <ArrowsClockwiseIcon /> Değişenleri senkronize et
-                                    </DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                </>
-                            )}
-                            <DropdownMenuItem onClick={unlink}>
-                                <FlowArrowIcon /> Kullanıcı bağlantılarını çöz
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={removeImported}>
-                                <StackIcon /> İçe aktarılanları kaldır
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem variant="destructive" onClick={remove}>
-                                <TrashIcon /> Sil
-                            </DropdownMenuItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
-                </div>
-            </div>
 
-            <div className="mb-5 flex justify-center">
-                <SegmentPicker value={tab} onValueChange={setTab} aria-label="Sekmeler">
-                    {tabs.map(t => (
-                        <SegmentPickerItem key={t.value} value={t.value} label={t.label} />
-                    ))}
-                </SegmentPicker>
-            </div>
+    return (
+        <AdminPage
+            title={provider.name}
+            description={
+                <span className="inline-flex flex-wrap items-center gap-2">
+                    {provider.providerId}
+                    {!enabled && <Chip tone="danger">{t("sxFederationDisabled")}</Chip>}
+                </span>
+            }
+            back={{ label: t(PAGE_TITLE), to: backTo }}
+            actions={
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <Button variant="secondary" size="icon" aria-label={t("sxFederationActions")}>
+                            <DotsThreeIcon className="size-5" weight="bold" />
+                        </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                        {isLdap && (
+                            <>
+                                <DropdownMenuItem onClick={() => runSync("triggerFullSync")}>
+                                    <ArrowsClockwiseIcon /> {t("sxFederationSyncAll")}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                    onClick={() => runSync("triggerChangedUsersSync")}
+                                >
+                                    <ArrowsClockwiseIcon /> {t("sxFederationSyncChangedShort")}
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                            </>
+                        )}
+                        <DropdownMenuItem onClick={unlink}>
+                            <FlowArrowIcon /> {t("sxFederationUnlinkTitle")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={removeImported}>
+                            <StackIcon /> {t("sxFederationRemoveImportedShort")}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem variant="destructive" onClick={remove}>
+                            <TrashIcon /> {t("sxFederationDelete")}
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
+            }
+        >
+            <SegmentTabs value={tab} onChange={setTab} items={tabs} ariaLabel={t("sxFederationTabs")} />
 
             {tab === "connection" &&
                 (isLdap ? (
@@ -677,14 +663,14 @@ function ProviderDetail({ parentId, provider, onBack, onChanged, onDeleted }: an
             )}
 
             {confirmNode}
-        </div>
+        </AdminPage>
     );
 }
 
-/* ── Save helper ──────────────────────────────────────────────────────── */
 function useSaver(provider: any, onChanged: any) {
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
+    const t = useT();
     const [saving, setSaving] = useState(false);
     const save = async (patch: Record<string, string[]>) => {
         setSaving(true);
@@ -693,10 +679,10 @@ function useSaver(provider: any, onChanged: any) {
                 { id: provider.id },
                 { ...provider, config: { ...(provider.config ?? {}), ...patch } }
             );
-            addAlert("Kaydedildi.", AlertVariant.success);
+            addAlert(t("sxFederationSaved"), AlertVariant.success);
             await onChanged();
         } catch (e) {
-            addError("Kaydedilemedi.", e);
+            addError(t("sxFederationSaveError"), e);
         } finally {
             setSaving(false);
         }
@@ -704,11 +690,11 @@ function useSaver(provider: any, onChanged: any) {
     return { save, saving };
 }
 
-/* ── LDAP: Connection ─────────────────────────────────────────────────── */
 function ConnectionTab({ provider, onChanged }: any) {
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
     const { addAlert, addError } = useAlerts();
+    const t = useT();
     const { save, saving } = useSaver(provider, onChanged);
     const c = provider.config ?? {};
 
@@ -745,15 +731,15 @@ function ConnectionTab({ provider, onChanged }: any) {
             );
             addAlert(
                 action === "testConnection"
-                    ? "Bağlantı başarılı."
-                    : "Kimlik doğrulama başarılı.",
+                    ? t("sxFederationTestConnectionOk")
+                    : t("sxFederationTestAuthOk"),
                 AlertVariant.success
             );
         } catch (e) {
             addError(
                 action === "testConnection"
-                    ? "Bağlantı başarısız."
-                    : "Kimlik doğrulama başarısız.",
+                    ? t("sxFederationTestConnectionFailed")
+                    : t("sxFederationTestAuthFailed"),
                 e
             );
         } finally {
@@ -762,16 +748,15 @@ function ConnectionTab({ provider, onChanged }: any) {
     };
 
     return (
-        <div className="mx-auto max-w-xl space-y-6">
-            <div>
-                <Caption>Bağlantı</Caption>
+        <div className="flex flex-col gap-6">
+            <Section label={t("sxFederationTabConnection")}>
                 <SettingsGroup>
                     <ToggleRow
-                        label="Etkin"
+                        label={t("sxFederationEnabled")}
                         checked={f.enabled}
                         onCheckedChange={(v: boolean) => set("enabled", v)}
                     />
-                    <StackField label="Bağlantı URL'i">
+                    <StackField label={t("sxFederationConnectionUrl")}>
                         <Input
                             size="md"
                             value={f.connectionUrl}
@@ -779,7 +764,7 @@ function ConnectionTab({ provider, onChanged }: any) {
                             placeholder="ldap://host:389"
                         />
                     </StackField>
-                    <SettingRow label="Kimlik doğrulama türü">
+                    <SettingRow label={t("sxFederationAuthType")}>
                         <Select
                             value={f.authType}
                             onValueChange={(v: string) => set("authType", v)}
@@ -795,14 +780,14 @@ function ConnectionTab({ provider, onChanged }: any) {
                     </SettingRow>
                     {f.authType === "simple" && (
                         <>
-                            <StackField label="Bind DN">
+                            <StackField label={t("sxFederationBindDn")}>
                                 <Input
                                     size="md"
                                     value={f.bindDn}
                                     onChange={(e: any) => set("bindDn", e.target.value)}
                                 />
                             </StackField>
-                            <StackField label="Bind kimlik bilgisi">
+                            <StackField label={t("sxFederationBindCredential")}>
                                 <Input
                                     size="md"
                                     type="password"
@@ -814,7 +799,7 @@ function ConnectionTab({ provider, onChanged }: any) {
                             </StackField>
                         </>
                     )}
-                    <SettingRow label="Truststore SPI">
+                    <SettingRow label={t("sxFederationTruststoreSpi")}>
                         <Select
                             value={f.useTruststoreSpi}
                             onValueChange={(v: string) => set("useTruststoreSpi", v)}
@@ -823,27 +808,26 @@ function ConnectionTab({ provider, onChanged }: any) {
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="always">Her zaman</SelectItem>
-                                <SelectItem value="ldapsOnly">Yalnızca ldaps</SelectItem>
-                                <SelectItem value="never">Asla</SelectItem>
+                                <SelectItem value="always">{t("sxFederationTruststoreAlways")}</SelectItem>
+                                <SelectItem value="ldapsOnly">{t("sxFederationTruststoreLdapsOnly")}</SelectItem>
+                                <SelectItem value="never">{t("sxFederationTruststoreNever")}</SelectItem>
                             </SelectContent>
                         </Select>
                     </SettingRow>
                     <ToggleRow
-                        label="StartTLS"
+                        label={t("sxFederationStartTls")}
                         checked={f.startTls}
                         onCheckedChange={(v: boolean) => set("startTls", v)}
                     />
                     <ToggleRow
-                        label="Bağlantı havuzu"
+                        label={t("sxFederationConnectionPooling")}
                         checked={f.connectionPooling}
                         onCheckedChange={(v: boolean) => set("connectionPooling", v)}
                     />
                 </SettingsGroup>
-            </div>
+            </Section>
 
-            <div>
-                <Caption>Doğrulama</Caption>
+            <Section label={t("sxFederationVerification")}>
                 <SettingsGroup>
                     <ActionItem
                         disabled={!!testing}
@@ -851,8 +835,8 @@ function ConnectionTab({ provider, onChanged }: any) {
                     >
                         <PlugsConnectedIcon />
                         {testing === "testConnection"
-                            ? "Test ediliyor…"
-                            : "Bağlantıyı test et"}
+                            ? t("sxFederationTesting")
+                            : t("sxFederationTestConnection")}
                     </ActionItem>
                     <ActionItem
                         disabled={!!testing}
@@ -860,17 +844,18 @@ function ConnectionTab({ provider, onChanged }: any) {
                     >
                         <KeyIcon />
                         {testing === "testAuthentication"
-                            ? "Test ediliyor…"
-                            : "Kimlik doğrulamayı test et"}
+                            ? t("sxFederationTesting")
+                            : t("sxFederationTestAuth")}
                     </ActionItem>
                 </SettingsGroup>
                 <Footnote>
-                    Test, kaydetmeden önce mevcut form değerlerini kullanır.
+                    {t("sxFederationTestHint")}
                 </Footnote>
-            </div>
+            </Section>
 
             <div className="flex justify-end">
                 <Button
+                    size="form"
                     disabled={saving}
                     onClick={() =>
                         save({
@@ -885,15 +870,15 @@ function ConnectionTab({ provider, onChanged }: any) {
                         })
                     }
                 >
-                    {saving ? "Kaydediliyor…" : "Kaydet"}
+                    {saving ? t("sxFederationSaving") : t("sxFederationSave")}
                 </Button>
             </div>
         </div>
     );
 }
 
-/* ── LDAP: Searching ──────────────────────────────────────────────────── */
 function SearchingTab({ provider, onChanged }: any) {
+    const t = useT();
     const { save, saving } = useSaver(provider, onChanged);
     const c = provider.config ?? {};
     const [f, setF] = useState({
@@ -912,10 +897,10 @@ function SearchingTab({ provider, onChanged }: any) {
     const set = (k: string, v: any) => setF(p => ({ ...p, [k]: v }));
 
     return (
-        <div className="mx-auto max-w-xl space-y-3">
-            <Caption>Arama ve kullanıcı eşleme</Caption>
+        <div className="flex flex-col gap-6">
+            <Section label={t("sxFederationSearchingSection")}>
             <SettingsGroup>
-                <SettingRow label="Düzenleme modu">
+                <SettingRow label={t("sxFederationEditMode")}>
                     <Select
                         value={f.editMode}
                         onValueChange={(v: string) => set("editMode", v)}
@@ -930,7 +915,7 @@ function SearchingTab({ provider, onChanged }: any) {
                         </SelectContent>
                     </Select>
                 </SettingRow>
-                <StackField label="Kullanıcılar DN">
+                <StackField label={t("sxFederationUsersDn")}>
                     <Input
                         size="md"
                         value={f.usersDn}
@@ -938,7 +923,7 @@ function SearchingTab({ provider, onChanged }: any) {
                         placeholder="ou=users,dc=example,dc=org"
                     />
                 </StackField>
-                <StackField label="Kullanıcı adı LDAP özniteliği">
+                <StackField label={t("sxFederationUsernameAttribute")}>
                     <Input
                         size="md"
                         value={f.usernameLDAPAttribute}
@@ -947,28 +932,28 @@ function SearchingTab({ provider, onChanged }: any) {
                         }
                     />
                 </StackField>
-                <StackField label="RDN LDAP özniteliği">
+                <StackField label={t("sxFederationRdnAttribute")}>
                     <Input
                         size="md"
                         value={f.rdnLDAPAttribute}
                         onChange={(e: any) => set("rdnLDAPAttribute", e.target.value)}
                     />
                 </StackField>
-                <StackField label="UUID LDAP özniteliği">
+                <StackField label={t("sxFederationUuidAttribute")}>
                     <Input
                         size="md"
                         value={f.uuidLDAPAttribute}
                         onChange={(e: any) => set("uuidLDAPAttribute", e.target.value)}
                     />
                 </StackField>
-                <StackField label="Kullanıcı nesne sınıfları" hint="Virgülle ayrılmış.">
+                <StackField label={t("sxFederationUserObjectClasses")} hint={t("sxFederationCommaSeparated")}>
                     <Input
                         size="md"
                         value={f.userObjectClasses}
                         onChange={(e: any) => set("userObjectClasses", e.target.value)}
                     />
                 </StackField>
-                <SettingRow label="Arama kapsamı">
+                <SettingRow label={t("sxFederationSearchScope")}>
                     <Select
                         value={f.searchScope}
                         onValueChange={(v: string) => set("searchScope", v)}
@@ -977,14 +962,16 @@ function SearchingTab({ provider, onChanged }: any) {
                             <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                            <SelectItem value="1">Tek seviye</SelectItem>
-                            <SelectItem value="2">Alt ağaç</SelectItem>
+                            <SelectItem value="1">{t("sxFederationScopeOneLevel")}</SelectItem>
+                            <SelectItem value="2">{t("sxFederationScopeSubtree")}</SelectItem>
                         </SelectContent>
                     </Select>
                 </SettingRow>
             </SettingsGroup>
+            </Section>
             <div className="flex justify-end">
                 <Button
+                    size="form"
                     disabled={saving}
                     onClick={() =>
                         save({
@@ -998,15 +985,15 @@ function SearchingTab({ provider, onChanged }: any) {
                         })
                     }
                 >
-                    {saving ? "Kaydediliyor…" : "Kaydet"}
+                    {saving ? t("sxFederationSaving") : t("sxFederationSave")}
                 </Button>
             </div>
         </div>
     );
 }
 
-/* ── LDAP: Sync ───────────────────────────────────────────────────────── */
 function SyncTab({ provider, onChanged, onRunSync }: any) {
+    const t = useT();
     const { save, saving } = useSaver(provider, onChanged);
     const c = provider.config ?? {};
     const [f, setF] = useState({
@@ -1019,21 +1006,20 @@ function SyncTab({ provider, onChanged, onRunSync }: any) {
     const set = (k: string, v: any) => setF(p => ({ ...p, [k]: v }));
 
     return (
-        <div className="mx-auto max-w-xl space-y-6">
-            <div>
-                <Caption>Senkronizasyon ayarları</Caption>
+        <div className="flex flex-col gap-6">
+            <Section label={t("sxFederationSyncSettings")}>
                 <SettingsGroup>
                     <ToggleRow
-                        label="İçe aktarma etkin"
+                        label={t("sxFederationImportEnabled")}
                         checked={f.importEnabled}
                         onCheckedChange={(v: boolean) => set("importEnabled", v)}
                     />
                     <ToggleRow
-                        label="Kayıtları senkronize et"
+                        label={t("sxFederationSyncRegistrations")}
                         checked={f.syncRegistrations}
                         onCheckedChange={(v: boolean) => set("syncRegistrations", v)}
                     />
-                    <SettingRow label="Senkron parti boyutu">
+                    <SettingRow label={t("sxFederationBatchSize")}>
                         <Input
                             size="md"
                             type="number"
@@ -1042,7 +1028,7 @@ function SyncTab({ provider, onChanged, onRunSync }: any) {
                             onChange={(e: any) => set("batchSizeForSync", e.target.value)}
                         />
                     </SettingRow>
-                    <SettingRow label="Tam senkron periyodu (sn)" hint="-1 = kapalı">
+                    <SettingRow label={t("sxFederationFullSyncPeriod")} hint={t("sxFederationPeriodHint")}>
                         <Input
                             size="md"
                             type="number"
@@ -1051,7 +1037,7 @@ function SyncTab({ provider, onChanged, onRunSync }: any) {
                             onChange={(e: any) => set("fullSyncPeriod", e.target.value)}
                         />
                     </SettingRow>
-                    <SettingRow label="Değişen senkron periyodu (sn)" hint="-1 = kapalı">
+                    <SettingRow label={t("sxFederationChangedSyncPeriod")} hint={t("sxFederationPeriodHint")}>
                         <Input
                             size="md"
                             type="number"
@@ -1063,8 +1049,9 @@ function SyncTab({ provider, onChanged, onRunSync }: any) {
                         />
                     </SettingRow>
                 </SettingsGroup>
-                <div className="mt-3 flex justify-end">
+                <div className="mt-4 flex justify-end">
                     <Button
+                        size="form"
                         disabled={saving}
                         onClick={() =>
                             save({
@@ -1076,30 +1063,27 @@ function SyncTab({ provider, onChanged, onRunSync }: any) {
                             })
                         }
                     >
-                        {saving ? "Kaydediliyor…" : "Kaydet"}
+                        {saving ? t("sxFederationSaving") : t("sxFederationSave")}
                     </Button>
                 </div>
-            </div>
+            </Section>
 
-            <div>
-                <Caption>Manuel senkronizasyon</Caption>
+            <Section label={t("sxFederationManualSync")}>
                 <SettingsGroup>
                     <ActionItem onClick={() => onRunSync("triggerFullSync")}>
-                        <ArrowsClockwiseIcon /> Tüm kullanıcıları
-                        senkronize et
+                        <ArrowsClockwiseIcon /> {t("sxFederationSyncAll")}
                     </ActionItem>
                     <ActionItem onClick={() => onRunSync("triggerChangedUsersSync")}>
-                        <ArrowsClockwiseIcon /> Değişen
-                        kullanıcıları senkronize et
+                        <ArrowsClockwiseIcon /> {t("sxFederationSyncChanged")}
                     </ActionItem>
                 </SettingsGroup>
-            </div>
+            </Section>
         </div>
     );
 }
 
-/* ── Cache (LDAP + Kerberos) ──────────────────────────────────────────── */
 function CacheTab({ provider, onChanged }: any) {
+    const t = useT();
     const { save, saving } = useSaver(provider, onChanged);
     const c = provider.config ?? {};
     const [policy, setPolicy] = useState(get(c, "cachePolicy", "DEFAULT"));
@@ -1109,10 +1093,10 @@ function CacheTab({ provider, onChanged }: any) {
     const [maxLifespan, setMaxLifespan] = useState(get(c, "maxLifespan"));
 
     return (
-        <div className="mx-auto max-w-xl space-y-3">
-            <Caption>Önbellek politikası</Caption>
+        <div className="flex flex-col gap-6">
+            <Section label={t("sxFederationCachePolicy")}>
             <SettingsGroup>
-                <SettingRow label="Önbellek politikası">
+                <SettingRow label={t("sxFederationCachePolicy")}>
                     <Select value={policy} onValueChange={setPolicy}>
                         <SelectTrigger size="sm" className="w-44">
                             <SelectValue />
@@ -1127,7 +1111,7 @@ function CacheTab({ provider, onChanged }: any) {
                     </Select>
                 </SettingRow>
                 {policy === "EVICT_WEEKLY" && (
-                    <SettingRow label="Tahliye günü (1-7)">
+                    <SettingRow label={t("sxFederationEvictionDay")}>
                         <Input
                             size="md"
                             type="number"
@@ -1139,7 +1123,7 @@ function CacheTab({ provider, onChanged }: any) {
                 )}
                 {(policy === "EVICT_DAILY" || policy === "EVICT_WEEKLY") && (
                     <>
-                        <SettingRow label="Tahliye saati (0-23)">
+                        <SettingRow label={t("sxFederationEvictionHour")}>
                             <Input
                                 size="md"
                                 type="number"
@@ -1148,7 +1132,7 @@ function CacheTab({ provider, onChanged }: any) {
                                 onChange={(e: any) => setEvictionHour(e.target.value)}
                             />
                         </SettingRow>
-                        <SettingRow label="Tahliye dakikası (0-59)">
+                        <SettingRow label={t("sxFederationEvictionMinute")}>
                             <Input
                                 size="md"
                                 type="number"
@@ -1160,7 +1144,7 @@ function CacheTab({ provider, onChanged }: any) {
                     </>
                 )}
                 {policy === "MAX_LIFESPAN" && (
-                    <SettingRow label="Maks. ömür (ms)">
+                    <SettingRow label={t("sxFederationMaxLifespan")}>
                         <Input
                             size="md"
                             type="number"
@@ -1171,8 +1155,10 @@ function CacheTab({ provider, onChanged }: any) {
                     </SettingRow>
                 )}
             </SettingsGroup>
+            </Section>
             <div className="flex justify-end">
                 <Button
+                    size="form"
                     disabled={saving}
                     onClick={() =>
                         save({
@@ -1184,15 +1170,15 @@ function CacheTab({ provider, onChanged }: any) {
                         })
                     }
                 >
-                    {saving ? "Kaydediliyor…" : "Kaydet"}
+                    {saving ? t("sxFederationSaving") : t("sxFederationSave")}
                 </Button>
             </div>
         </div>
     );
 }
 
-/* ── LDAP: Advanced ───────────────────────────────────────────────────── */
 function AdvancedTab({ provider, onChanged }: any) {
+    const t = useT();
     const { save, saving } = useSaver(provider, onChanged);
     const c = provider.config ?? {};
     const [f, setF] = useState({
@@ -1206,31 +1192,31 @@ function AdvancedTab({ provider, onChanged }: any) {
     const set = (k: string, v: any) => setF(p => ({ ...p, [k]: v }));
 
     return (
-        <div className="mx-auto max-w-xl space-y-3">
-            <Caption>Gelişmiş</Caption>
+        <div className="flex flex-col gap-6">
+            <Section label={t("sxFederationTabAdvanced")}>
             <SettingsGroup>
                 <ToggleRow
-                    label="Şifre politikasını doğrula"
+                    label={t("sxFederationValidatePasswordPolicy")}
                     checked={f.validatePasswordPolicy}
                     onCheckedChange={(v: boolean) => set("validatePasswordPolicy", v)}
                 />
                 <ToggleRow
-                    label="E-postaya güven"
-                    hint="LDAP'tan gelen e-postayı doğrulanmış say."
+                    label={t("sxFederationTrustEmail")}
+                    hint={t("sxFederationTrustEmailHint")}
                     checked={f.trustEmail}
                     onCheckedChange={(v: boolean) => set("trustEmail", v)}
                 />
                 <ToggleRow
-                    label="Sayfalama"
+                    label={t("sxFederationPagination")}
                     checked={f.pagination}
                     onCheckedChange={(v: boolean) => set("pagination", v)}
                 />
                 <ToggleRow
-                    label="Password Modify uzantısı"
+                    label={t("sxFederationPasswordModify")}
                     checked={f.usePasswordModifyExtendedOp}
                     onCheckedChange={(v: boolean) => set("usePasswordModifyExtendedOp", v)}
                 />
-                <SettingRow label="Öncelik">
+                <SettingRow label={t("sxFederationPriority")}>
                     <Input
                         size="md"
                         type="number"
@@ -1240,8 +1226,10 @@ function AdvancedTab({ provider, onChanged }: any) {
                     />
                 </SettingRow>
             </SettingsGroup>
+            </Section>
             <div className="flex justify-end">
                 <Button
+                    size="form"
                     disabled={saving}
                     onClick={() =>
                         save({
@@ -1255,15 +1243,15 @@ function AdvancedTab({ provider, onChanged }: any) {
                         })
                     }
                 >
-                    {saving ? "Kaydediliyor…" : "Kaydet"}
+                    {saving ? t("sxFederationSaving") : t("sxFederationSave")}
                 </Button>
             </div>
         </div>
     );
 }
 
-/* ── Kerberos: General ────────────────────────────────────────────────── */
 function KerberosTab({ provider, onChanged }: any) {
+    const t = useT();
     const { save, saving } = useSaver(provider, onChanged);
     const c = provider.config ?? {};
     const [f, setF] = useState({
@@ -1278,15 +1266,15 @@ function KerberosTab({ provider, onChanged }: any) {
     const set = (k: string, v: any) => setF(p => ({ ...p, [k]: v }));
 
     return (
-        <div className="mx-auto max-w-xl space-y-3">
-            <Caption>Kerberos</Caption>
+        <div className="flex flex-col gap-6">
+            <Section label={t("sxFederationKerberos")}>
             <SettingsGroup>
                 <ToggleRow
-                    label="Etkin"
+                    label={t("sxFederationEnabled")}
                     checked={f.enabled}
                     onCheckedChange={(v: boolean) => set("enabled", v)}
                 />
-                <StackField label="Kerberos realm">
+                <StackField label={t("sxFederationKerberosRealm")}>
                     <Input
                         size="md"
                         value={f.kerberosRealm}
@@ -1294,7 +1282,7 @@ function KerberosTab({ provider, onChanged }: any) {
                         placeholder="EXAMPLE.ORG"
                     />
                 </StackField>
-                <StackField label="Server principal">
+                <StackField label={t("sxFederationServerPrincipal")}>
                     <Input
                         size="md"
                         value={f.serverPrincipal}
@@ -1302,7 +1290,7 @@ function KerberosTab({ provider, onChanged }: any) {
                         placeholder="HTTP/host@EXAMPLE.ORG"
                     />
                 </StackField>
-                <StackField label="Keytab">
+                <StackField label={t("sxFederationKeytab")}>
                     <Input
                         size="md"
                         value={f.keyTab}
@@ -1311,23 +1299,25 @@ function KerberosTab({ provider, onChanged }: any) {
                     />
                 </StackField>
                 <ToggleRow
-                    label="Şifre kimlik doğrulamasına izin ver"
+                    label={t("sxFederationAllowPasswordAuth")}
                     checked={f.allowPasswordAuthentication}
                     onCheckedChange={(v: boolean) => set("allowPasswordAuthentication", v)}
                 />
                 <ToggleRow
-                    label="İlk girişte profili güncelle"
+                    label={t("sxFederationUpdateProfileFirstLogin")}
                     checked={f.updateProfileFirstLogin}
                     onCheckedChange={(v: boolean) => set("updateProfileFirstLogin", v)}
                 />
                 <ToggleRow
-                    label="Hata ayıklama"
+                    label={t("sxFederationDebug")}
                     checked={f.debug}
                     onCheckedChange={(v: boolean) => set("debug", v)}
                 />
             </SettingsGroup>
+            </Section>
             <div className="flex justify-end">
                 <Button
+                    size="form"
                     disabled={saving}
                     onClick={() =>
                         save({
@@ -1343,65 +1333,84 @@ function KerberosTab({ provider, onChanged }: any) {
                         })
                     }
                 >
-                    {saving ? "Kaydediliyor…" : "Kaydet"}
+                    {saving ? t("sxFederationSaving") : t("sxFederationSave")}
                 </Button>
             </div>
         </div>
     );
 }
 
-/* ── Mappers ──────────────────────────────────────────────────────────── */
 function MappersTab({ provider, parentId }: any) {
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
+    const t = useT();
     const [confirm, confirmNode] = useConfirm();
     const [mappers, setMappers] = useState<any[]>([]);
     const [types, setTypes] = useState<any[]>([]);
+    const [typesStatus, setTypesStatus] = useState<"loading" | "error" | "ready">("loading");
+    const [typesAttempt, setTypesAttempt] = useState(0);
     const [loading, setLoading] = useState(true);
-    const [editing, setEditing] = useState<any>(null); // mapper or {__new:true}
-
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            const list = await adminClient.components
-                .find({ type: MAPPER_TYPE, parent: provider.id })
-                .catch(() => []);
-            setMappers(Array.isArray(list) ? list : []);
-        } catch (e) {
-            addError("Eşleyiciler yüklenemedi.", e);
-        } finally {
-            setLoading(false);
-        }
-    }, [adminClient, provider.id, addError]);
+    const [failed, setFailed] = useState(false);
+    const [editing, setEditing] = useState<any>(null);
+    const [attempt, setAttempt] = useState(0);
 
     useEffect(() => {
-        load();
-    }, [load]);
-
-    useEffect(() => {
+        let alive = true;
         (async () => {
+            setLoading(true);
+            setFailed(false);
             try {
-                const si = await adminClient.serverInfo.find();
-                setTypes(si?.componentTypes?.[MAPPER_TYPE] ?? []);
-            } catch {
-                setTypes([]);
+                const list = await adminClient.components.find({
+                    type: MAPPER_TYPE,
+                    parent: provider.id
+                });
+                if (alive) setMappers(Array.isArray(list) ? list : []);
+            } catch (e) {
+                console.error("[user-federation] mappers load failed:", e);
+                if (alive) setFailed(true);
+            } finally {
+                if (alive) setLoading(false);
             }
         })();
-    }, [adminClient]);
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, provider.id, attempt]);
+
+    useEffect(() => {
+        let alive = true;
+        (async () => {
+            setTypesStatus("loading");
+            try {
+                const si = await adminClient.serverInfo.find();
+                if (!alive) return;
+                setTypes(si?.componentTypes?.[MAPPER_TYPE] ?? []);
+                setTypesStatus("ready");
+            } catch (e) {
+                console.error("[user-federation] mapper types load failed:", e);
+                if (!alive) return;
+                setTypes([]);
+                setTypesStatus("error");
+            }
+        })();
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, typesAttempt]);
 
     const del = (m: any) =>
         confirm({
-            title: "Eşleyici silinsin mi?",
-            message: `“${m.name}” eşleyicisi silinecek.`,
-            confirmLabel: "Sil",
+            title: t("sxFederationDeleteMapperTitle"),
+            message: t("sxFederationDeleteMapperMessage", { name: m.name }),
+            confirmLabel: t("sxFederationDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.components.del({ id: m.id });
-                    addAlert("Eşleyici silindi.", AlertVariant.success);
+                    addAlert(t("sxFederationMapperDeleted"), AlertVariant.success);
                     setMappers(mappers.filter(x => x.id !== m.id));
                 } catch (e) {
-                    addError("Silinemedi.", e);
+                    addError(t("sxFederationDeleteError"), e);
                 }
             }
         });
@@ -1414,128 +1423,117 @@ function MappersTab({ provider, parentId }: any) {
                 direction
             });
             addAlert(
-                `Eşleyici senkronu: ${res?.added ?? 0} eklendi, ${res?.updated ?? 0} güncellendi, ${res?.failed ?? 0} hata.`,
+                t("sxFederationMapperSyncResult", {
+                    added: res?.added ?? 0,
+                    updated: res?.updated ?? 0,
+                    failed: res?.failed ?? 0
+                }),
                 res?.failed ? AlertVariant.warning : AlertVariant.success
             );
         } catch (e) {
-            addError("Eşleyici senkronu başarısız.", e);
+            addError(t("sxFederationMapperSyncError"), e);
         }
     };
 
     const syncable = (m: any) =>
         ["group-ldap-mapper", "role-ldap-mapper"].includes(m.providerId);
 
-    if (loading)
-        return (
-            <div className="flex justify-center py-16">
-                <Spinner className="size-6" />
-            </div>
-        );
+    const sortedMappers = [...mappers].sort((a, b) =>
+        (a.name || "").localeCompare(b.name || "")
+    );
 
     return (
-        <div className="mx-auto max-w-xl space-y-3">
-            <div className="flex items-center justify-between">
-                <h3 className="ms-1 text-sm font-medium text-muted-foreground">
-                    {mappers.length} eşleyici
-                </h3>
-                <Button
-                    variant="plain"
-                    size="sm"
-                    onClick={() => setEditing({ __new: true })}
-                >
-                    <PlusIcon /> Eşleyici ekle
-                </Button>
-            </div>
-            {mappers.length === 0 ? (
-                <Empty>
-                    <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                            <SlidersHorizontalIcon />
-                        </EmptyMedia>
-                        <EmptyTitle>Eşleyici yok</EmptyTitle>
-                        <EmptyDescription>
-                            LDAP öznitelikleri ile Keycloak alanlarını bağlamak için
-                            eşleyici ekle.
-                        </EmptyDescription>
-                    </EmptyHeader>
-                </Empty>
-            ) : (
-                <SettingsGroup>
-                    {[...mappers]
-                        .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
-                        .map(m => (
-                            <Item key={m.id} size="sm">
-                                <ItemMedia variant="icon">
-                                    <SlidersHorizontalIcon />
-                                </ItemMedia>
-                                <ItemContent className="min-w-0">
-                                    <ItemTitle>
-                                        <Button
-                                            variant="link"
-                                            className="h-auto p-0"
-                                            onClick={() => setEditing(m)}
-                                        >
-                                            {m.name}
-                                        </Button>
-                                    </ItemTitle>
-                                    <ItemDescription className="truncate">
-                                        {m.providerId}
-                                    </ItemDescription>
-                                </ItemContent>
-                                <ItemActions>
-                                {syncable(m) && (
-                                    <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon-sm"
-                                                aria-label="Senkronize et"
-                                            >
-                                                <LightningIcon />
-                                            </Button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="end">
-                                            <DropdownMenuItem
-                                                onClick={() =>
-                                                    syncMapper(m, "fedToKeycloak")
-                                                }
-                                            >
-                                                <ArrowsClockwiseIcon /> LDAP → Keycloak
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem
-                                                onClick={() =>
-                                                    syncMapper(m, "keycloakToFed")
-                                                }
-                                            >
-                                                <ArrowsClockwiseIcon /> Keycloak → LDAP
-                                            </DropdownMenuItem>
-                                        </DropdownMenuContent>
-                                    </DropdownMenu>
-                                )}
-                                <Button
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    title="Sil"
-                                    aria-label="Sil"
-                                    onClick={() => del(m)}
-                                >
-                                    <TrashIcon />
-                                </Button>
-                                </ItemActions>
-                            </Item>
+        <div className="flex flex-col gap-6">
+            <Section
+                label={
+                    loading || failed
+                        ? t("sxFederationTabMappers")
+                        : t("sxFederationMappersCount", { n: mappers.length })
+                }
+                action={
+                    !loading &&
+                    !failed && (
+                        <TextAction onClick={() => setEditing({ __new: true })}>
+                            {t("sxFederationAddMapper")}
+                        </TextAction>
+                    )
+                }
+            >
+                {loading ? (
+                    <ListSkeleton />
+                ) : failed ? (
+                    <Notice
+                        title={t("sxFederationMappersLoadError")}
+                        description={t("sxLoadErrorDescription")}
+                        onRetry={() => setAttempt(n => n + 1)}
+                    />
+                ) : sortedMappers.length === 0 ? (
+                    <Notice
+                        title={t("sxFederationMappersEmptyTitle")}
+                        description={t("sxFederationMappersEmptyDescription")}
+                        action={
+                            <Button size="sm" onClick={() => setEditing({ __new: true })}>
+                                {t("sxFederationAddMapper")}
+                            </Button>
+                        }
+                    />
+                ) : (
+                    <SettingsGroup>
+                        {sortedMappers.map(m => (
+                            <ListRow
+                                key={m.id}
+                                onOpen={() => setEditing(m)}
+                                title={m.name}
+                                subtitle={m.providerId}
+                                trailing={
+                                    <>
+                                        {syncable(m) && (
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <TextAction aria-label={t("sxFederationSync")}>
+                                                        {t("sxFederationSync")}
+                                                    </TextAction>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end">
+                                                    <DropdownMenuItem
+                                                        onClick={() =>
+                                                            syncMapper(m, "fedToKeycloak")
+                                                        }
+                                                    >
+                                                        <ArrowsClockwiseIcon /> LDAP → Keycloak
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem
+                                                        onClick={() =>
+                                                            syncMapper(m, "keycloakToFed")
+                                                        }
+                                                    >
+                                                        <ArrowsClockwiseIcon /> Keycloak → LDAP
+                                                    </DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        )}
+                                        <TextAction tone="danger" onClick={() => del(m)}>
+                                            {t("sxFederationDelete")}
+                                        </TextAction>
+                                    </>
+                                }
+                            />
                         ))}
-                </SettingsGroup>
-            )}
+                    </SettingsGroup>
+                )}
+            </Section>
 
             {editing && (
                 <MapperModal
                     provider={provider}
                     types={types}
+                    typesStatus={typesStatus}
+                    onRetryTypes={() => setTypesAttempt(n => n + 1)}
                     mapper={editing.__new ? null : editing}
                     onClose={() => setEditing(null)}
                     onSaved={() => {
                         setEditing(null);
-                        load();
+                        setAttempt(n => n + 1);
                     }}
                 />
             )}
@@ -1544,9 +1542,10 @@ function MappersTab({ provider, parentId }: any) {
     );
 }
 
-function MapperModal({ provider, types, mapper, onClose, onSaved }: any) {
+function MapperModal({ provider, types, typesStatus, onRetryTypes, mapper, onClose, onSaved }: any) {
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
+    const t = useT();
     const isNew = !mapper;
 
     const sortedTypes = useMemo(
@@ -1568,12 +1567,16 @@ function MapperModal({ provider, types, mapper, onClose, onSaved }: any) {
     });
     const [saving, setSaving] = useState(false);
 
-    const type = sortedTypes.find(t => t.id === providerId);
+    const type = sortedTypes.find(x => x.id === providerId);
     const props = type?.properties ?? [];
 
     const setCfg = (k: string, v: any) => setConfig(p => ({ ...p, [k]: String(v) }));
 
     // seed defaults when switching type on a new mapper
+    useEffect(() => {
+        if (isNew && !providerId && sortedTypes[0]?.id) setProviderId(sortedTypes[0].id);
+    }, [isNew, providerId, sortedTypes.length]);
+
     useEffect(() => {
         if (!isNew || !type) return;
         setConfig(prev => {
@@ -1592,7 +1595,7 @@ function MapperModal({ provider, types, mapper, onClose, onSaved }: any) {
     const save = async () => {
         const n = name.trim();
         if (!n) {
-            addAlert("Ad zorunludur.", AlertVariant.warning);
+            addAlert(t("sxFederationNameRequired"), AlertVariant.warning);
             return;
         }
         const cfg: Record<string, string[]> = {};
@@ -1610,17 +1613,17 @@ function MapperModal({ provider, types, mapper, onClose, onSaved }: any) {
                     parentId: provider.id,
                     config: cfg
                 });
-                addAlert("Eşleyici oluşturuldu.", AlertVariant.success);
+                addAlert(t("sxFederationMapperCreated"), AlertVariant.success);
             } else {
                 await adminClient.components.update(
                     { id: mapper.id },
                     { ...mapper, name: n, config: { ...(mapper.config ?? {}), ...cfg } }
                 );
-                addAlert("Eşleyici güncellendi.", AlertVariant.success);
+                addAlert(t("sxFederationMapperUpdated"), AlertVariant.success);
             }
             onSaved();
         } catch (e) {
-            addError("Eşleyici kaydedilemedi.", e);
+            addError(t("sxFederationMapperSaveError"), e);
             setSaving(false);
         }
     };
@@ -1676,20 +1679,35 @@ function MapperModal({ provider, types, mapper, onClose, onSaved }: any) {
         <Modal open onOpenChange={o => !o && onClose()}>
             <ModalContent className="sm:max-w-2xl">
                 <ModalHeader>
-                    <ModalTitle>{isNew ? "Eşleyici ekle" : "Eşleyici düzenle"}</ModalTitle>
+                    <ModalTitle>{isNew ? t("sxFederationAddMapper") : t("sxFederationEditMapper")}</ModalTitle>
                 </ModalHeader>
                 <ModalBody className="flex flex-col gap-4">
+                {isNew && typesStatus === "loading" ? (
+                    <ListSkeleton rows={2} />
+                ) : isNew && typesStatus === "error" ? (
+                    <Notice
+                        title={t("sxFederationMapperTypesLoadError")}
+                        description={t("sxLoadErrorDescription")}
+                        onRetry={onRetryTypes}
+                    />
+                ) : isNew && sortedTypes.length === 0 ? (
+                    <Notice
+                        title={t("sxFederationMapperTypesEmptyTitle")}
+                        description={t("sxFederationMapperTypesEmptyDescription")}
+                    />
+                ) : (
+                <>
                 <SettingsGroup>
-                    <SettingRow label="Eşleyici türü">
+                    <SettingRow label={t("sxFederationMapperType")}>
                         {isNew ? (
                             <Select value={providerId} onValueChange={setProviderId}>
                                 <SelectTrigger size="sm" className="w-56">
-                                    <SelectValue placeholder="Tür seç…" />
+                                    <SelectValue placeholder={t("sxFederationSelectType")} />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {sortedTypes.map(t => (
-                                        <SelectItem key={t.id} value={t.id}>
-                                            {t.id}
+                                    {sortedTypes.map(x => (
+                                        <SelectItem key={x.id} value={x.id}>
+                                            {x.id}
                                         </SelectItem>
                                     ))}
                                 </SelectContent>
@@ -1700,7 +1718,7 @@ function MapperModal({ provider, types, mapper, onClose, onSaved }: any) {
                             </span>
                         )}
                     </SettingRow>
-                    <StackField label="Ad">
+                    <StackField label={t("sxFederationName")}>
                         <Input
                             size="md"
                             value={name}
@@ -1715,20 +1733,31 @@ function MapperModal({ provider, types, mapper, onClose, onSaved }: any) {
                     <SettingsGroup>{props.map(renderProp)}</SettingsGroup>
                 ) : (
                     <SettingsGroup>
-                        <NoteRow>Bu eşleyici türü için yapılandırma alanı yok.</NoteRow>
+                        <NoteRow>{t("sxFederationMapperNoConfig")}</NoteRow>
                     </SettingsGroup>
                 )}
 
                 {!isNew && (
                     <Footnote>
-                        Eşleyici ID: {mapper.id} · Oluşturuldu{" "}
-                        {fmtDate(provider.createdTimestamp)}
+                        {t("sxFederationMapperMeta", {
+                            id: mapper.id,
+                            date: fmtDate(provider.createdTimestamp)
+                        })}
                     </Footnote>
+                )}
+                </>
                 )}
                 </ModalBody>
                 <ModalFooter>
-                    <Button disabled={saving || !name.trim()} onClick={save}>
-                        {saving ? "Kaydediliyor…" : isNew ? "Oluştur" : "Kaydet"}
+                    <Button
+                        disabled={saving || !name.trim() || (isNew && !type)}
+                        onClick={save}
+                    >
+                        {saving
+                            ? t("sxFederationSaving")
+                            : isNew
+                              ? t("sxFederationCreate")
+                              : t("sxFederationSave")}
                     </Button>
                 </ModalFooter>
             </ModalContent>
@@ -1736,7 +1765,6 @@ function MapperModal({ provider, types, mapper, onClose, onSaved }: any) {
     );
 }
 
-/* ── Local layout helpers (composed only from esuiss components) ──────── */
 function flatChildren(children: ReactNode): ReactNode[] {
     const out: ReactNode[] = [];
     Children.toArray(children).forEach(c => {
@@ -1749,101 +1777,114 @@ function flatChildren(children: ReactNode): ReactNode[] {
     return out;
 }
 
-/** Inset list of rows separated by ItemSeparator. */
+const ROW = "flex min-h-13 items-center justify-between gap-3 px-4 py-3";
+
 function SettingsGroup({ children }: { children?: ReactNode }) {
     const items = flatChildren(children);
     return (
-        <ItemGroup variant="inset">
+        <ul className={GROUP}>
             {items.map((c: any, i) => (
                 <Fragment key={c?.key ?? i}>
-                    {i > 0 && <ItemSeparator />}
+                    {i > 0 && <li aria-hidden className={SEPARATOR} />}
                     {c}
                 </Fragment>
             ))}
-        </ItemGroup>
+        </ul>
     );
 }
 
-/** Caption above a group. */
-function Caption({ children }: { children?: ReactNode }) {
-    return <h3 className="mb-2 ms-1 text-sm font-medium text-muted-foreground">{children}</h3>;
-}
-
-/** Footnote below a group. */
 function Footnote({ children }: { children?: ReactNode }) {
-    return <p className="mt-2 ms-1 text-sm text-muted-foreground">{children}</p>;
+    return <p className="mt-2 px-0.5 text-[13px] text-muted-foreground">{children}</p>;
 }
 
-/** Label-left / control-right row. */
+function RowLabel({ label, hint }: any) {
+    return (
+        <div className="min-w-0">
+            <div className="text-[15px] [overflow-wrap:anywhere]">{label}</div>
+            {hint && (
+                <div className="mt-0.5 text-[13px] text-muted-foreground [overflow-wrap:anywhere]">
+                    {hint}
+                </div>
+            )}
+        </div>
+    );
+}
+
 function SettingRow({ label, hint, children }: any) {
     return (
-        <Item size="sm">
-            <ItemContent>
-                <ItemTitle className="text-sm font-normal">{label}</ItemTitle>
-                {hint && <ItemDescription>{hint}</ItemDescription>}
-            </ItemContent>
-            <ItemActions>{children}</ItemActions>
-        </Item>
+        <li className={ROW}>
+            <RowLabel label={label} hint={hint} />
+            <div className="flex shrink-0 items-center">{children}</div>
+        </li>
     );
 }
 
-/** Label on top, full-width control below. */
 function StackField({ label, hint, children }: any) {
     return (
-        <Item size="sm">
-            <ItemContent className="min-w-0">
-                {label && <ItemTitle className="text-sm font-normal">{label}</ItemTitle>}
-                {hint && <ItemDescription>{hint}</ItemDescription>}
-                <div className="mt-1.5">{children}</div>
-            </ItemContent>
-        </Item>
+        <li className="px-4 py-3">
+            {(label || hint) && <RowLabel label={label} hint={hint} />}
+            <div className="mt-2">{children}</div>
+        </li>
     );
 }
 
-/** Switch row. */
 function ToggleRow({ label, hint, checked, onCheckedChange, disabled }: any) {
     return (
-        <Item size="sm">
-            <ItemContent>
-                <ItemTitle className="text-sm font-normal">{label}</ItemTitle>
-                {hint && <ItemDescription>{hint}</ItemDescription>}
-            </ItemContent>
-            <ItemActions>
-                <Switch
-                    checked={!!checked}
-                    onCheckedChange={onCheckedChange}
-                    disabled={disabled}
-                    aria-label={typeof label === "string" ? label : undefined}
-                />
-            </ItemActions>
-        </Item>
+        <SettingRow label={label} hint={hint}>
+            <Switch
+                checked={!!checked}
+                onCheckedChange={onCheckedChange}
+                disabled={disabled}
+                aria-label={typeof label === "string" ? label : undefined}
+            />
+        </SettingRow>
     );
 }
 
-/** Full-width action row inside a group. */
 function ActionItem({ onClick, disabled, children }: any) {
     return (
-        <Item size="sm">
-            <Button variant="plain" size="sm" onClick={onClick} disabled={disabled}>
+        <li>
+            <button
+                type="button"
+                onClick={onClick}
+                disabled={disabled}
+                className="flex min-h-13 w-full items-center gap-2 px-4 py-3 text-left text-[15px] font-medium text-primary outline-none transition-colors hover:bg-black/3 focus-visible:bg-black/5 disabled:pointer-events-none disabled:opacity-40 dark:hover:bg-white/4 dark:focus-visible:bg-white/6 [&_svg]:size-4.5 [&_svg]:shrink-0"
+            >
                 {children}
-            </Button>
-        </Item>
+            </button>
+        </li>
     );
 }
 
-/** "No items" placeholder row inside a group. */
 function NoteRow({ children }: { children?: ReactNode }) {
+    return <li className="px-4 py-4 text-center text-sm text-muted-foreground">{children}</li>;
+}
+
+function ListRow({ title, subtitle, leading, trailing, onOpen }: any) {
     return (
-        <Item size="sm">
-            <ItemContent>
-                <ItemDescription className="text-center">{children}</ItemDescription>
-            </ItemContent>
-        </Item>
+        <li className="flex min-h-16 items-stretch">
+            <button
+                type="button"
+                onClick={onOpen}
+                className="flex min-w-0 flex-1 items-center gap-3 py-3 ps-4 pe-3 text-left outline-none transition-colors hover:bg-black/3 focus-visible:bg-black/5 dark:hover:bg-white/4 dark:focus-visible:bg-white/6"
+            >
+                {leading && <span className="grid size-10 shrink-0 place-items-center">{leading}</span>}
+                <div className="min-w-0">
+                    <div className="truncate text-base font-medium">{title}</div>
+                    {subtitle && (
+                        <div className="mt-0.5 truncate text-[13px] text-muted-foreground">
+                            {subtitle}
+                        </div>
+                    )}
+                </div>
+            </button>
+            {trailing && <div className="flex shrink-0 items-center gap-3 pe-4">{trailing}</div>}
+        </li>
     );
 }
 
-/** Confirm dialog — returns a [confirm(opts), node] pair (built on @ui/patterns/confirm). */
 function useConfirm() {
+    const t = useT();
     const [opts, setOpts] = useState<any>(null);
     const [open, setOpen] = useState(false);
     const confirm = (o: {
@@ -1864,12 +1905,12 @@ function useConfirm() {
                     {opts?.message && <ConfirmDescription>{opts.message}</ConfirmDescription>}
                 </ConfirmHeader>
                 <ConfirmFooter>
-                    <ConfirmCancel>Vazgeç</ConfirmCancel>
+                    <ConfirmCancel>{t("sxFederationCancel")}</ConfirmCancel>
                     <ConfirmAction
                         variant={opts?.danger ? "destructive" : "default"}
                         onClick={() => opts?.onConfirm?.()}
                     >
-                        {opts?.confirmLabel ?? "Onayla"}
+                        {opts?.confirmLabel ?? t("sxFederationConfirm")}
                     </ConfirmAction>
                 </ConfirmFooter>
             </ConfirmContent>

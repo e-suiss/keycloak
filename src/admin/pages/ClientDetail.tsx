@@ -2,31 +2,16 @@
 
 import {
     CaretLeftIcon,
-    CaretRightIcon,
     CheckIcon,
-    ClockCounterClockwiseIcon,
-    CopyIcon,
     DotsThreeIcon,
     DownloadSimpleIcon,
     ExportIcon,
-    MagnifyingGlassIcon,
     PowerIcon,
     ProhibitIcon,
-    ShieldCheckIcon,
     StackIcon,
-    TrashIcon,
-    UsersThreeIcon
+    TrashIcon
 } from "@phosphor-icons/react";
-import { Avatar, AvatarFallback } from "@ui/components/avatar";
-import { Badge } from "@ui/components/badge";
 import { Button } from "@ui/components/button";
-import {
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle
-} from "@ui/components/card";
 import { CodeBlock, CodeBlockContent } from "@ui/components/code-block";
 import {
     DropdownMenu,
@@ -42,40 +27,10 @@ import {
     SelectTrigger,
     SelectValue
 } from "@ui/components/select";
-import {
-    Empty,
-    EmptyContent,
-    EmptyDescription,
-    EmptyHeader,
-    EmptyMedia,
-    EmptyTitle
-} from "@ui/components/empty";
 import { Field, FieldDescription, FieldLabel } from "@ui/components/field";
 import { Input } from "@ui/components/input";
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@ui/components/input-group";
-import {
-    Item,
-    ItemActions,
-    ItemContent,
-    ItemDescription,
-    ItemGroup,
-    ItemMedia,
-    ItemSeparator,
-    ItemTitle
-} from "@ui/components/item";
 import { NativeSelect, NativeSelectOption } from "@ui/components/native-select";
-import { Separator } from "@ui/components/separator";
-import { Spinner } from "@ui/components/spinner";
 import { Switch } from "@ui/components/switch";
-import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow
-} from "@ui/components/table";
-import { Tabs, TabsList, TabsTrigger } from "@ui/components/tabs";
 import { Textarea } from "@ui/components/textarea";
 import { cn } from "@ui/lib/utils";
 import {
@@ -108,12 +63,29 @@ import {
     useRef,
     useState
 } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Trans } from "react-i18next";
+import { useNavigate, useParams } from "react-router-dom";
 import { AlertVariant, useAlerts } from "../../shared/keycloak-ui-shared";
 import { useAdminClient } from "../admin-client";
 import { ConfigForm } from "../components/ConfigForm";
 import { MultiLineInput } from "../components/MultiLineInput";
+import {
+    AdminPage,
+    Chip,
+    GROUP,
+    Group as ListGroup,
+    ListSkeleton,
+    Notice,
+    Row as ListRow,
+    SearchField,
+    Section,
+    SegmentTabs,
+    SEPARATOR,
+    TextAction
+} from "../ui/kit";
 import { useRealm } from "../ui/realm";
+import { useT } from "../ui/i18n";
+import { i18n } from "../i18n/i18n";
 import ClientAuthorization from "./ClientAuthorization";
 
 const lines = (s: string) =>
@@ -124,7 +96,7 @@ const lines = (s: string) =>
 const _arr = (v: any) => (Array.isArray(v) ? v.join("\n") : "");
 const fmtDate = (v: any) =>
     v
-        ? new Date(typeof v === "number" ? v : Number(v) || v).toLocaleString("tr-TR")
+        ? new Date(typeof v === "number" ? v : Number(v) || v).toLocaleString(i18n.language)
         : "—";
 
 export default function ClientDetail() {
@@ -133,53 +105,67 @@ export default function ClientDetail() {
     const { id, tab: tabParam } = useParams();
     const navigate = useNavigate();
     const { addAlert, addError } = useAlerts();
+    const t = useT();
     const [confirm, confirmNode] = useConfirmDialog();
 
     const [loading, setLoading] = useState(true);
-    // The active tab is a real route — each is its own page (deep-linkable).
+    const [loadError, setLoadError] = useState(false);
+    const [attempt, setAttempt] = useState(0);
     const tab = tabParam || "settings";
     const setTab = (key: string) => navigate(`/${realm}/clients/${id}/${key}`);
 
     const [client, setClient] = useState<any>(null);
     const [edited, setEdited] = useState<any>(null);
 
+    const fetchClient = useCallback(async () => {
+        const found = await adminClient.clients.findOne({ id });
+        setClient(found ?? null);
+        setEdited(found ? JSON.parse(JSON.stringify(found)) : null);
+        return found;
+    }, [adminClient, id]);
+
     const loadClient = useCallback(async () => {
         try {
-            const found = await adminClient.clients.findOne({ id });
-            setClient(found ?? null);
-            setEdited(found ? JSON.parse(JSON.stringify(found)) : null);
-            return found;
+            return await fetchClient();
         } catch (err) {
-            addError("İstemci yüklenemedi.", err);
+            addError(t("sxClientDetailLoadFailed"), err);
             return null;
         }
-    }, [adminClient, id, addError]);
+    }, [fetchClient, addError, t]);
+
+    const fetchClientRef = useRef(fetchClient);
+    fetchClientRef.current = fetchClient;
 
     useEffect(() => {
         let alive = true;
         (async () => {
             setLoading(true);
-            await loadClient();
+            setLoadError(false);
+            try {
+                await fetchClientRef.current();
+            } catch {
+                if (alive) setLoadError(true);
+            }
             if (alive) setLoading(false);
         })();
         return () => {
             alive = false;
         };
-    }, [loadClient]);
+    }, [adminClient, id, attempt]);
 
     const handleDelete = () =>
         confirm({
-            title: "İstemciyi sil",
-            message: `“${client?.clientId ?? id}” kalıcı olarak silinecek. Emin misiniz?`,
-            confirmLabel: "Sil",
+            title: t("sxClientDetailDeleteTitle"),
+            message: t("sxClientDetailDeleteMessage", { name: client?.clientId ?? id }),
+            confirmLabel: t("sxCommonDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.clients.del({ id });
-                    addAlert("İstemci silindi.", AlertVariant.success);
+                    addAlert(t("sxClientDetailDeleted"), AlertVariant.success);
                     navigate(`/${realm}/clients`);
                 } catch (err) {
-                    addError("İstemci silinemedi.", err);
+                    addError(t("sxClientDetailDeleteFailed"), err);
                 }
             }
         });
@@ -193,13 +179,13 @@ export default function ClientDetail() {
             );
             addAlert(
                 client.enabled
-                    ? "İstemci devre dışı bırakıldı."
-                    : "İstemci etkinleştirildi.",
+                    ? t("sxClientDetailDisabledToast")
+                    : t("sxClientDetailEnabledToast"),
                 AlertVariant.success
             );
             await loadClient();
         } catch (err) {
-            addError("İstemci durumu güncellenemedi.", err);
+            addError(t("sxClientDetailToggleFailed"), err);
         }
     };
 
@@ -219,9 +205,9 @@ export default function ClientDetail() {
         try {
             const rep = await adminClient.clients.findOne({ id });
             downloadBlob(JSON.stringify(rep, null, 2), `${client?.clientId ?? id}.json`);
-            addAlert("İstemci dışa aktarıldı.", AlertVariant.success);
+            addAlert(t("sxClientDetailExported"), AlertVariant.success);
         } catch (err) {
-            addError("İstemci dışa aktarılamadı.", err);
+            addError(t("sxClientDetailExportFailed"), err);
         }
     };
 
@@ -233,243 +219,217 @@ export default function ClientDetail() {
             });
             const data = typeof cfg === "string" ? cfg : JSON.stringify(cfg, null, 2);
             downloadBlob(data, "keycloak.json");
-            addAlert("Adapter yapılandırması indirildi.", AlertVariant.success);
+            addAlert(t("sxClientDetailAdapterDownloaded"), AlertVariant.success);
         } catch (err) {
-            addError("Adapter yapılandırması indirilemedi.", err);
+            addError(t("sxClientDetailAdapterDownloadFailed"), err);
         }
     };
 
-    const backBtn = (
-        <Button variant="secondary" size="icon" asChild>
-            <Link to={`/${realm}/clients`} aria-label="İstemcilere dön">
-                <CaretLeftIcon weight="bold" />
-            </Link>
-        </Button>
-    );
+    const back = { label: t("sxNavClients"), to: `/${realm}/clients` };
 
     if (loading) {
         return (
-            <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-                <div className="mb-5">{backBtn}</div>
-                <div className="flex justify-center py-16">
-                    <Spinner className="size-6" />
-                </div>
-            </div>
+            <AdminPage width="wide" title={t("sxClientDetailTitle")} back={back}>
+                <ListSkeleton rows={4} />
+            </AdminPage>
+        );
+    }
+
+    if (loadError) {
+        return (
+            <AdminPage width="wide" title={t("sxClientDetailTitle")} back={back}>
+                <Notice
+                    title={t("sxClientDetailLoadErrorTitle")}
+                    description={t("sxLoadErrorDescription")}
+                    onRetry={() => setAttempt(n => n + 1)}
+                />
+            </AdminPage>
         );
     }
 
     if (!client) {
         return (
-            <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-                <div className="mb-5">{backBtn}</div>
-                <Card>
-                    <CardHeader>
-                        <CardTitle>İstemci bilgileri</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <p className="text-sm text-muted-foreground">
-                            İstemci bulunamadı.
-                        </p>
-                    </CardContent>
-                </Card>
-            </div>
+            <AdminPage width="wide" title={t("sxClientDetailTitle")} back={back}>
+                <Notice
+                    title={t("sxClientDetailNotFoundTitle")}
+                    description={t("sxClientDetailNotFoundDescription")}
+                    onRetry={() => setAttempt(n => n + 1)}
+                />
+            </AdminPage>
         );
     }
 
     const protocol = client.protocol || "openid-connect";
     const oidc = protocol === "openid-connect";
-    const _confidential = !client.publicClient && !client.bearerOnly;
 
     const tabs = [
-        { key: "settings", label: "Ayarlar" },
+        { key: "settings", label: t("sxClientDetailTabSettings") },
         ...(!client.publicClient
-            ? [{ key: "credentials", label: "Kimlik Bilgileri" }]
+            ? [{ key: "credentials", label: t("sxClientDetailTabCredentials") }]
             : []),
-        { key: "roles", label: "Roller" },
-        { key: "scopes", label: "İstemci Kapsamları" },
+        { key: "roles", label: t("sxClientDetailTabRoles") },
+        { key: "scopes", label: t("sxNavClientScopes") },
         ...(client.authorizationServicesEnabled
-            ? [{ key: "authz", label: "Yetkilendirme" }]
+            ? [{ key: "authz", label: t("sxClientDetailTabAuthorization") }]
             : []),
         ...(client.serviceAccountsEnabled
-            ? [{ key: "service", label: "Servis Hesabı Rolleri" }]
+            ? [{ key: "service", label: t("sxClientDetailTabServiceAccount") }]
             : []),
-        { key: "sessions", label: "Oturumlar" },
-        ...(oidc ? [{ key: "keys", label: "Keys" }] : []),
-        { key: "advanced", label: "Gelişmiş" },
-        { key: "events", label: "Olaylar" },
-        { key: "adminperm", label: "Yönetici İzinleri" }
+        { key: "sessions", label: t("sxNavSessions") },
+        ...(oidc ? [{ key: "keys", label: t("sxClientDetailTabKeys") }] : []),
+        { key: "advanced", label: t("sxClientDetailTabAdvanced") },
+        { key: "events", label: t("sxNavEvents") },
+        { key: "adminperm", label: t("sxNavAdminPermissions") }
     ];
 
     const isSaml = client.protocol === "saml";
-    const _protocolName = isSaml ? "SAML" : "OpenID Connect";
-    const _monogram =
-        (client.clientId ?? id ?? "?").trim().charAt(0).toUpperCase() || "?";
+    const protocolName = isSaml ? "SAML" : "OpenID Connect";
+    const title = client.clientId || client.name || id;
 
     return (
         <>
-            <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-                {/* Nav bar — back (left) · clientId (absolutely centered) · actions (right) */}
-                <div className="relative mb-8 flex items-center">
-                    {backBtn}
-                    <h1 className="pointer-events-none absolute left-1/2 max-w-[55%] -translate-x-1/2 truncate text-center font-mono text-base font-semibold tracking-tight">
-                        {client.clientId || id}
-                    </h1>
-                    <div className="ms-auto">
-                        <ActionsMenu
-                            enabled={!!client.enabled}
-                            onToggleEnabled={toggleEnabled}
-                            onExport={exportClient}
-                            onAdapterConfig={downloadAdapterConfig}
-                            onDelete={handleDelete}
+            <AdminPage
+                width="wide"
+                title={title}
+                back={back}
+                description={
+                    <span className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                        <span className="[overflow-wrap:anywhere]">
+                            {[client.name && client.name !== title && !/^\$\{.*\}$/.test(client.name) ? client.name : null, protocolName]
+                                .filter(Boolean)
+                                .join(" · ")}
+                        </span>
+                        {!client.enabled && <Chip tone="danger">{t("sxCommonDisabled")}</Chip>}
+                    </span>
+                }
+                actions={
+                    <ActionsMenu
+                        enabled={!!client.enabled}
+                        onToggleEnabled={toggleEnabled}
+                        onExport={exportClient}
+                        onAdapterConfig={downloadAdapterConfig}
+                        onDelete={handleDelete}
+                    />
+                }
+            >
+                <SegmentTabs
+                    ariaLabel={t("sxClientDetailSectionAria")}
+                    value={tab}
+                    onChange={setTab}
+                    items={tabs.map(item => ({ value: item.key, label: item.label }))}
+                />
+
+                <div className="flex min-w-0 flex-col gap-6">
+                    {tab === "settings" && (
+                        <SettingsTab
+                            id={id}
+                            client={client}
+                            edited={edited}
+                            setEdited={setEdited}
+                            oidc={oidc}
+                            protocol={protocol}
+                            adminClient={adminClient}
+                            addAlert={addAlert}
+                            addError={addError}
+                            reload={loadClient}
                         />
-                    </div>
+                    )}
+                    {tab === "credentials" && !client.publicClient && (
+                        <CredentialsTab
+                            id={id}
+                            client={client}
+                            adminClient={adminClient}
+                            addAlert={addAlert}
+                            addError={addError}
+                            reload={loadClient}
+                        />
+                    )}
+                    {tab === "roles" && (
+                        <RolesTab
+                            id={id}
+                            adminClient={adminClient}
+                            addAlert={addAlert}
+                            addError={addError}
+                            confirm={confirm}
+                        />
+                    )}
+                    {tab === "scopes" && (
+                        <ScopesTab
+                            id={id}
+                            clientId={client.clientId}
+                            adminClient={adminClient}
+                            addAlert={addAlert}
+                            addError={addError}
+                            reload={loadClient}
+                        />
+                    )}
+                    {tab === "authz" && client.authorizationServicesEnabled && (
+                        <ClientAuthorization id={id} />
+                    )}
+                    {tab === "service" && client.serviceAccountsEnabled && (
+                        <ServiceAccountTab
+                            id={id}
+                            adminClient={adminClient}
+                            addAlert={addAlert}
+                            addError={addError}
+                        />
+                    )}
+                    {tab === "sessions" && (
+                        <SessionsTab
+                            id={id}
+                            adminClient={adminClient}
+                            addError={addError}
+                        />
+                    )}
+                    {tab === "keys" && oidc && (
+                        <KeysTab
+                            id={id}
+                            edited={edited}
+                            setEdited={setEdited}
+                            adminClient={adminClient}
+                            addAlert={addAlert}
+                            addError={addError}
+                            reload={loadClient}
+                            confirm={confirm}
+                        />
+                    )}
+                    {tab === "advanced" && (
+                        <AdvancedTab
+                            id={id}
+                            edited={edited}
+                            setEdited={setEdited}
+                            adminClient={adminClient}
+                            addAlert={addAlert}
+                            addError={addError}
+                            reload={loadClient}
+                        />
+                    )}
+                    {tab === "events" && (
+                        <ClientEventsTab
+                            id={id}
+                            clientId={client.clientId}
+                            adminClient={adminClient}
+                            realm={realm}
+                            addError={addError}
+                        />
+                    )}
+                    {tab === "adminperm" && (
+                        <AdminPermissionsTab
+                            id={id}
+                            adminClient={adminClient}
+                            addAlert={addAlert}
+                            addError={addError}
+                        />
+                    )}
                 </div>
-
-                <div className="flex flex-col gap-6 lg:flex-row lg:gap-10">
-                    {/* Section navigation — quiet sidebar list on desktop, dropdown on mobile (macOS System Settings) */}
-                    <div className="lg:w-56 lg:shrink-0">
-                        <div className="lg:hidden">
-                            <Select value={tab} onValueChange={setTab}>
-                                <SelectTrigger className="w-full" aria-label="Bölüm">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {tabs.map(t => (
-                                        <SelectItem key={t.key} value={t.key}>
-                                            {t.label}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <Tabs
-                            value={tab}
-                            onValueChange={setTab}
-                            orientation="vertical"
-                            className="sticky top-20 hidden lg:flex"
-                        >
-                            <TabsList className="w-full">
-                                {tabs.map(t => (
-                                    <TabsTrigger key={t.key} value={t.key}>
-                                        {t.label}
-                                    </TabsTrigger>
-                                ))}
-                            </TabsList>
-                        </Tabs>
-                    </div>
-
-                    <div className="min-w-0 flex-1 space-y-6">
-                        {tab === "settings" && (
-                            <SettingsTab
-                                id={id}
-                                client={client}
-                                edited={edited}
-                                setEdited={setEdited}
-                                oidc={oidc}
-                                protocol={protocol}
-                                adminClient={adminClient}
-                                addAlert={addAlert}
-                                addError={addError}
-                                reload={loadClient}
-                            />
-                        )}
-                        {tab === "credentials" && !client.publicClient && (
-                            <CredentialsTab
-                                id={id}
-                                client={client}
-                                adminClient={adminClient}
-                                addAlert={addAlert}
-                                addError={addError}
-                                reload={loadClient}
-                            />
-                        )}
-                        {tab === "roles" && (
-                            <RolesTab
-                                id={id}
-                                adminClient={adminClient}
-                                addAlert={addAlert}
-                                addError={addError}
-                                confirm={confirm}
-                            />
-                        )}
-                        {tab === "scopes" && (
-                            <ScopesTab
-                                id={id}
-                                clientId={client.clientId}
-                                adminClient={adminClient}
-                                addAlert={addAlert}
-                                addError={addError}
-                                reload={loadClient}
-                            />
-                        )}
-                        {tab === "authz" && client.authorizationServicesEnabled && (
-                            <ClientAuthorization id={id} />
-                        )}
-                        {tab === "service" && client.serviceAccountsEnabled && (
-                            <ServiceAccountTab
-                                id={id}
-                                adminClient={adminClient}
-                                addAlert={addAlert}
-                                addError={addError}
-                            />
-                        )}
-                        {tab === "sessions" && (
-                            <SessionsTab
-                                id={id}
-                                adminClient={adminClient}
-                                addError={addError}
-                            />
-                        )}
-                        {tab === "keys" && oidc && (
-                            <KeysTab
-                                id={id}
-                                edited={edited}
-                                setEdited={setEdited}
-                                adminClient={adminClient}
-                                addAlert={addAlert}
-                                addError={addError}
-                                reload={loadClient}
-                                confirm={confirm}
-                            />
-                        )}
-                        {tab === "advanced" && (
-                            <AdvancedTab
-                                id={id}
-                                edited={edited}
-                                setEdited={setEdited}
-                                adminClient={adminClient}
-                                addAlert={addAlert}
-                                addError={addError}
-                                reload={loadClient}
-                            />
-                        )}
-                        {tab === "events" && (
-                            <ClientEventsTab
-                                id={id}
-                                clientId={client.clientId}
-                                adminClient={adminClient}
-                                realm={realm}
-                                addError={addError}
-                            />
-                        )}
-                        {tab === "adminperm" && (
-                            <AdminPermissionsTab
-                                id={id}
-                                adminClient={adminClient}
-                                addAlert={addAlert}
-                                addError={addError}
-                            />
-                        )}
-                    </div>
-                </div>
-            </div>
+            </AdminPage>
             {confirmNode}
         </>
     );
 }
 
-/** Confirm dialog — returns a [confirm(opts), node] pair (built on @ui/patterns/confirm). */
 function useConfirmDialog() {
+    const t = useT();
     const [open, setOpen] = useState(false);
     const [state, setState] = useState<any>(null);
     const confirm = (opts: {
@@ -492,7 +452,7 @@ function useConfirmDialog() {
                     )}
                 </ConfirmHeader>
                 <ConfirmFooter>
-                    <ConfirmCancel>Vazgeç</ConfirmCancel>
+                    <ConfirmCancel>{t("sxCommonCancel")}</ConfirmCancel>
                     <ConfirmAction
                         variant={state?.danger ? "destructive" : "default"}
                         onClick={() => {
@@ -501,7 +461,7 @@ function useConfirmDialog() {
                             fn?.();
                         }}
                     >
-                        {state?.confirmLabel ?? "Onayla"}
+                        {state?.confirmLabel ?? t("sxCommonConfirm")}
                     </ConfirmAction>
                 </ConfirmFooter>
             </ConfirmContent>
@@ -510,7 +470,10 @@ function useConfirmDialog() {
     return [confirm, node] as const;
 }
 
-/** Flattens fragments so every row of a group gets its own separator. */
+const DANGER_BUTTON =
+    "bg-[#d70015] text-white hover:bg-[#d70015]/90 dark:bg-[#ff453a] dark:hover:bg-[#ff453a]/90";
+const FIELD_CARD = `${GROUP} flex flex-col gap-4 p-4`;
+
 function flattenRows(children: any, prefix = ""): any[] {
     return Children.toArray(children).flatMap((c: any) =>
         isValidElement(c) && c.type === Fragment
@@ -519,146 +482,205 @@ function flattenRows(children: any, prefix = ""): any[] {
     );
 }
 
-/** Quiet caption above a group. */
-function GroupLabel({ children, className }: any) {
+function Stack({ children, className }: any) {
+    return <div className={cn("flex flex-col gap-3", className)}>{children}</div>;
+}
+
+function FieldCard({ children, className }: any) {
+    return <div className={cn(FIELD_CARD, className)}>{children}</div>;
+}
+
+function GroupFooter({ children }: any) {
     return (
-        <h3 className={cn("mb-2 ms-1 text-sm font-medium text-muted-foreground", className)}>
+        <p className="mt-2 px-0.5 text-[13px] leading-[1.4] text-muted-foreground">
             {children}
-        </h3>
+        </p>
     );
 }
 
-/** Footnote below a group. */
-function GroupFooter({ children }: any) {
-    return <p className="mt-2 ms-1 text-sm text-muted-foreground">{children}</p>;
-}
-
-/** Inset list — rows separated by ItemSeparator. */
 function Group({ children, className }: any) {
-    const rows = flattenRows(children);
+    const rows = flattenRows(children).filter(Boolean);
     return (
-        <ItemGroup variant="inset" className={className}>
+        <div className={cn(GROUP, className)}>
             {rows.map((row: any, i: number) => (
                 <Fragment key={row?.key ?? i}>
-                    {i > 0 && <ItemSeparator />}
+                    {i > 0 && <div aria-hidden className={SEPARATOR} />}
                     {row}
                 </Fragment>
             ))}
-        </ItemGroup>
+        </div>
     );
 }
 
-/** Label-left / control-right row. */
+function RowText({ label, hint }: any) {
+    return (
+        <div className="min-w-0">
+            <div className="text-[15px] font-medium [overflow-wrap:anywhere]">{label}</div>
+            {hint && (
+                <div className="mt-0.5 text-[13px] leading-[1.4] text-muted-foreground [overflow-wrap:anywhere]">
+                    {hint}
+                </div>
+            )}
+        </div>
+    );
+}
+
 function Row({ label, hint, children }: any) {
     return (
-        <Item size="sm">
-            <ItemContent className="flex-none">
-                <ItemTitle>{label}</ItemTitle>
-                {hint && <ItemDescription>{hint}</ItemDescription>}
-            </ItemContent>
-            <ItemActions className="min-w-0 flex-1 justify-end">{children}</ItemActions>
-        </Item>
+        <div className="flex min-h-14 flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+            <RowText label={label} hint={hint} />
+            <div className="flex min-w-0 items-center sm:max-w-[60%] sm:shrink-0 sm:justify-end [&>*]:max-w-full">
+                {children}
+            </div>
+        </div>
     );
 }
 
-/** Label on top, full-width control below. */
+function ValueRow({ label, children }: any) {
+    return (
+        <div className="flex min-h-12 items-center justify-between gap-4 px-4 py-3">
+            <span className="shrink-0 text-[15px] font-medium">{label}</span>
+            <span className="min-w-0 truncate text-[15px] text-muted-foreground">{children}</span>
+        </div>
+    );
+}
+
 function StackRow({ label, hint, children }: any) {
     return (
-        <Item size="sm">
-            {(label || hint) && (
-                <ItemContent>
-                    {label && <ItemTitle>{label}</ItemTitle>}
-                    {hint && <ItemDescription>{hint}</ItemDescription>}
-                </ItemContent>
-            )}
-            <div className="basis-full">{children}</div>
-        </Item>
+        <div className="flex flex-col gap-2 px-4 py-3">
+            {(label || hint) && <RowText label={label} hint={hint} />}
+            <div className="min-w-0">{children}</div>
+        </div>
     );
 }
 
-/** Switch row (label-left / switch-right). */
 function SwitchRow({ label, hint, checked, onChange, disabled }: any) {
     return (
-        <Item size="sm">
-            <ItemContent>
-                <ItemTitle>{label}</ItemTitle>
-                {hint && <ItemDescription>{hint}</ItemDescription>}
-            </ItemContent>
-            <ItemActions>
-                <Switch
-                    checked={!!checked}
-                    disabled={disabled}
-                    aria-label={typeof label === "string" ? label : undefined}
-                    onCheckedChange={(v: boolean) => onChange(v)}
-                />
-            </ItemActions>
-        </Item>
+        <div className="flex min-h-14 items-center justify-between gap-4 px-4 py-3">
+            <RowText label={label} hint={hint} />
+            <Switch
+                checked={!!checked}
+                disabled={disabled}
+                aria-label={typeof label === "string" ? label : undefined}
+                onCheckedChange={(v: boolean) => onChange(v)}
+                className="shrink-0"
+            />
+        </div>
     );
 }
 
-/** Full-width tappable action row. */
 function ActionRow({ onClick, disabled, danger, children }: any) {
     return (
-        <Item size="sm" asChild>
-            <button type="button" onClick={onClick} disabled={disabled}>
-                <ItemContent>
-                    <ItemTitle className={danger ? "text-destructive" : "text-primary"}>
-                        {children}
-                    </ItemTitle>
-                </ItemContent>
-            </button>
-        </Item>
+        <button
+            type="button"
+            onClick={onClick}
+            disabled={disabled}
+            className={cn(
+                "flex min-h-12 w-full items-center px-4 py-3 text-left text-[15px] font-medium outline-none transition-colors hover:bg-black/3 focus-visible:bg-black/5 disabled:pointer-events-none disabled:opacity-40 dark:hover:bg-white/4 dark:focus-visible:bg-white/6",
+                danger ? "text-[#d70015] dark:text-[#ff453a]" : "text-primary"
+            )}
+        >
+            {children}
+        </button>
     );
 }
 
-/** Delete icon button for list rows. */
-function RowDelete({ onClick, title = "Sil" }: any) {
+function RowDelete({ onClick, title }: any) {
+    const t = useT();
     return (
-        <Button variant="ghost" size="icon-sm" onClick={onClick} title={title} aria-label={title}>
-            <TrashIcon />
-        </Button>
+        <TextAction tone="danger" onClick={onClick}>
+            {title ?? t("sxCommonDelete")}
+        </TextAction>
     );
 }
 
-/** Empty state. */
-function EmptyCard({ icon, title, desc, action }: any) {
+function ItemRow({ title, subtitle, leading, trailing, onClick }: any) {
+    const body = (
+        <>
+            {leading && <span className="grid size-10 shrink-0 place-items-center">{leading}</span>}
+            <div className="min-w-0">
+                <div className="truncate text-base font-medium">{title}</div>
+                {subtitle && (
+                    <div className="mt-0.5 text-[13px] text-muted-foreground [overflow-wrap:anywhere]">
+                        {subtitle}
+                    </div>
+                )}
+            </div>
+        </>
+    );
     return (
-        <Empty>
-            <EmptyHeader>
-                {icon && <EmptyMedia variant="icon">{icon}</EmptyMedia>}
-                <EmptyTitle>{title}</EmptyTitle>
-                {desc && <EmptyDescription>{desc}</EmptyDescription>}
-            </EmptyHeader>
-            {action && <EmptyContent>{action}</EmptyContent>}
-        </Empty>
+        <div className="flex min-h-16 items-center gap-3 pe-4">
+            {onClick ? (
+                <button
+                    type="button"
+                    onClick={onClick}
+                    className="flex min-w-0 flex-1 items-center gap-3 self-stretch py-3 ps-4 text-left outline-none transition-colors hover:bg-black/3 focus-visible:bg-black/5 dark:hover:bg-white/4 dark:focus-visible:bg-white/6"
+                >
+                    {body}
+                </button>
+            ) : (
+                <div className="flex min-w-0 flex-1 items-center gap-3 py-3 ps-4">{body}</div>
+            )}
+            {trailing && <div className="flex shrink-0 items-center gap-4">{trailing}</div>}
+        </div>
     );
 }
 
-/** "No items" placeholder row inside a group. */
+function SelectRow({ title, subtitle, selected, onToggle }: any) {
+    return (
+        <button
+            type="button"
+            role="checkbox"
+            aria-checked={selected}
+            onClick={onToggle}
+            className="flex min-h-12 w-full items-center justify-between gap-3 px-4 py-3 text-left outline-none transition-colors hover:bg-black/3 focus-visible:bg-black/5 dark:hover:bg-white/4 dark:focus-visible:bg-white/6"
+        >
+            <div className="min-w-0">
+                <div className="truncate text-[15px] font-medium">{title}</div>
+                {subtitle && (
+                    <div className="mt-0.5 truncate text-[13px] text-muted-foreground">{subtitle}</div>
+                )}
+            </div>
+            {selected && <CheckIcon weight="bold" className="size-4 shrink-0 text-primary" />}
+        </button>
+    );
+}
+
+function EmptyCard({ title, desc, action }: any) {
+    return <Notice title={title} description={desc} action={action} />;
+}
+
 function EmptyRow({ children }: any) {
     return (
-        <Item size="sm">
-            <ItemContent className="items-center">
-                <ItemDescription>{children}</ItemDescription>
-            </ItemContent>
-        </Item>
+        <div className="px-4 py-6 text-center text-sm text-muted-foreground">{children}</div>
     );
 }
 
-/** Read-only value with a copy affordance. */
 function CopyRow({ value, label, onCopy }: any) {
+    const t = useT();
     return (
-        <Item size="sm">
-            <ItemContent className="min-w-0">
-                {label && <ItemDescription>{label}</ItemDescription>}
-                <code className="block min-w-0 truncate font-mono text-sm">{value}</code>
-            </ItemContent>
-            <ItemActions>
-                <Button variant="ghost" size="icon-sm" onClick={onCopy} aria-label="Kopyala">
-                    <CopyIcon />
-                </Button>
-            </ItemActions>
-        </Item>
+        <div className="flex min-h-12 items-center justify-between gap-4 px-4 py-3">
+            <div className="min-w-0">
+                {label && <div className="text-[13px] text-muted-foreground">{label}</div>}
+                <code className="block font-mono text-sm [overflow-wrap:anywhere]">{value || "—"}</code>
+            </div>
+            <TextAction onClick={onCopy} disabled={!value}>
+                {t("sxCommonCopy")}
+            </TextAction>
+        </div>
+    );
+}
+
+function SaveBar({ children }: any) {
+    return <div className="flex flex-wrap justify-end gap-2">{children}</div>;
+}
+
+function SubBack({ onClick, children }: any) {
+    return (
+        <TextAction onClick={onClick} className="inline-flex items-center gap-1 self-start">
+            <CaretLeftIcon className="size-3.5" />
+            {children}
+        </TextAction>
     );
 }
 
@@ -669,37 +691,37 @@ function ActionsMenu({
     onAdapterConfig,
     onDelete
 }: any) {
+    const t = useT();
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <Button variant="secondary" size="icon" aria-label="Eylemler" title="Eylemler">
+                <Button variant="secondary" size="icon" aria-label={t("sxCommonActions")} title={t("sxCommonActions")}>
                     <DotsThreeIcon weight="bold" />
                 </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-60">
                 <DropdownMenuItem onClick={onToggleEnabled}>
                     {enabled ? <ProhibitIcon /> : <PowerIcon />}
-                    {enabled ? "Devre dışı bırak" : "Etkinleştir"}
+                    {enabled ? t("sxCommonDisable") : t("sxCommonEnable")}
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={onExport}>
                     <ExportIcon />
-                    Dışa aktar
+                    {t("sxCommonExport")}
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={onAdapterConfig}>
                     <DownloadSimpleIcon />
-                    Adapter config indir
+                    {t("sxClientDetailDownloadAdapter")}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem variant="destructive" onClick={onDelete}>
                     <TrashIcon />
-                    Sil
+                    {t("sxCommonDelete")}
                 </DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>
     );
 }
 
-/* ── 1. Ayarlar ─────────────────────────────────────────────────────────── */
 function SettingsTab({
     id,
     client,
@@ -712,23 +734,31 @@ function SettingsTab({
     addError,
     reload
 }: any) {
+    const t = useT();
     const [saving, setSaving] = useState(false);
     const [loginThemes, setLoginThemes] = useState<string[]>([]);
+    const [themesState, setThemesState] = useState<"loading" | "ready" | "error">("loading");
+    const [themesAttempt, setThemesAttempt] = useState(0);
     useEffect(() => {
+        let alive = true;
+        setThemesState("loading");
         adminClient.serverInfo
             .find()
-            .then((si: any) =>
+            .then((si: any) => {
+                if (!alive) return;
                 setLoginThemes(
                     (si?.themes?.login || []).map((x: any) => x.name).filter(Boolean)
-                )
-            )
-            .catch(() => {});
-    }, [adminClient]);
-    if (!edited) return (
-            <div className="flex justify-center py-16">
-                <Spinner className="size-6" />
-            </div>
-        );
+                );
+                setThemesState("ready");
+            })
+            .catch(() => {
+                if (alive) setThemesState("error");
+            });
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, themesAttempt]);
+    if (!edited) return <ListSkeleton />;
 
     const set = (key: string, value: any) =>
         setEdited((e: any) => ({ ...e, [key]: value }));
@@ -755,234 +785,224 @@ function SettingsTab({
                 webOrigins: Array.isArray(edited.webOrigins) ? edited.webOrigins : []
             };
             await adminClient.clients.update({ id }, rep);
-            addAlert("İstemci kaydedildi.", AlertVariant.success);
+            addAlert(t("sxClientDetailSaved"), AlertVariant.success);
             await reload();
         } catch (err) {
-            addError("İstemci kaydedilemedi.", err);
+            addError(t("sxClientDetailSaveFailed"), err);
         } finally {
             setSaving(false);
         }
     };
 
     return (
-        <div className="space-y-6">
-            <div>
-                <GroupLabel>Genel</GroupLabel>
-                <Group>
-                    <Row label="Client ID">
-                        <span className="truncate text-sm text-muted-foreground">
-                            {client.clientId ?? ""}
-                        </span>
-                    </Row>
-                    <Row label="Protokol">
-                        <span className="text-sm text-muted-foreground">
+        <div className="flex flex-col gap-6">
+            <Section label={t("sxNavGeneral")}>
+                <Stack>
+                    <Group>
+                        <ValueRow label={t("sxClientDetailClientId")}>{client.clientId ?? ""}</ValueRow>
+                        <ValueRow label={t("sxClientDetailProtocol")}>
                             {protocol === "saml" ? "SAML" : "OpenID Connect"}
-                        </span>
-                    </Row>
-                    <Row label="Ad">
-                        <Input
-                            size="sm"
-                            value={edited.name ?? ""}
-                            onChange={(e: any) => set("name", e.target.value)}
-                            placeholder="—"
+                        </ValueRow>
+                    </Group>
+                    <FieldCard>
+                        <Field size="lg">
+                            <FieldLabel>{t("sxCommonName")}</FieldLabel>
+                            <Input
+                                size="lg"
+                                value={edited.name ?? ""}
+                                onChange={(e: any) => set("name", e.target.value)}
+                                placeholder="—"
+                            />
+                        </Field>
+                        <Field size="lg">
+                            <FieldLabel>{t("sxCommonDescription")}</FieldLabel>
+                            <Textarea
+                                size="lg"
+                                value={edited.description ?? ""}
+                                onChange={(e: any) => set("description", e.target.value)}
+                                placeholder="—"
+                            />
+                        </Field>
+                    </FieldCard>
+                    <Group>
+                        <SwitchRow
+                            label={t("sxClientDetailAlwaysDisplay")}
+                            checked={edited.alwaysDisplayInConsole}
+                            onChange={(v: boolean) => set("alwaysDisplayInConsole", v)}
                         />
-                    </Row>
-                    <StackRow label="Açıklama">
-                        <Textarea
-                            value={edited.description ?? ""}
-                            onChange={(e: any) => set("description", e.target.value)}
-                            placeholder="—"
-                        />
-                    </StackRow>
-                    <Row label="Konsolda her zaman göster">
-                        <Switch
-                            checked={!!edited.alwaysDisplayInConsole}
-                            onCheckedChange={(v: boolean) => set("alwaysDisplayInConsole", v)}
-                        />
-                    </Row>
-                </Group>
-            </div>
+                    </Group>
+                </Stack>
+            </Section>
 
-            <Card>
-                <CardHeader>
-                    <CardTitle>Erişim ayarları</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <div className="flex max-w-2xl flex-col gap-4">
-                        <Field>
-                            <FieldLabel>Kök URL</FieldLabel>
-                            <Input
-                                value={edited.rootUrl ?? ""}
-                                onChange={e => set("rootUrl", e.target.value)}
-                                placeholder="https://app.example.com"
-                            />
-                            <FieldDescription>İstemcinin kök URL'i; göreli URI'lere önek olarak eklenir.</FieldDescription>
-                        </Field>
-                        <Field>
-                            <FieldLabel>Ana URL</FieldLabel>
-                            <Input
-                                value={edited.baseUrl ?? ""}
-                                onChange={e => set("baseUrl", e.target.value)}
-                                placeholder="/"
-                            />
-                            <FieldDescription>Kullanıcı bu istemciye yönlendirildiğinde açılacak varsayılan URL.</FieldDescription>
-                        </Field>
-                        {(edited.standardFlowEnabled || edited.implicitFlowEnabled) && (
-                            <>
-                                <Field>
-                                    <FieldLabel>Geçerli yönlendirme URI'leri</FieldLabel>
-                                    <MultiLineInput
-                                        value={edited.redirectUris || []}
-                                        onChange={(v: string[]) => set("redirectUris", v)}
-                                        addLabel="Yönlendirme URI ekle"
-                                        placeholder="https://app.example.com/*"
-                                    />
-                                    <FieldDescription>Başarılı giriş sonrası izin verilen yönlendirme desenleri.</FieldDescription>
-                                </Field>
-                                <Field>
-                                    <FieldLabel>Geçerli post-logout yönlendirme URI'leri</FieldLabel>
-                                    <MultiLineInput
-                                        value={(
-                                            edited.attributes?.[
-                                                "post.logout.redirect.uris"
-                                            ] || ""
-                                        )
-                                            .split("##")
-                                            .filter(Boolean)}
-                                        onChange={(v: string[]) =>
-                                            setAttr("post.logout.redirect.uris", v.join("##"))
-                                        }
-                                        addLabel="Post-logout URI ekle"
-                                        placeholder="+"
-                                    />
-                                    <FieldDescription>Çıkış sonrası izin verilen yönlendirme desenleri. '+' yalnız başına redirect URI'leriyle aynı anlamına gelir.</FieldDescription>
-                                </Field>
-                            </>
-                        )}
-                        <Field>
-                            <FieldLabel>Yönetim URL</FieldLabel>
-                            <Input
-                                value={edited.adminUrl ?? ""}
-                                onChange={e => set("adminUrl", e.target.value)}
-                            />
-                        </Field>
-                        {protocol !== "saml" && edited.standardFlowEnabled && (
-                            <Field>
-                                <FieldLabel>Web origins</FieldLabel>
+            <Section label={t("sxClientDetailAccessSettings")}>
+                <FieldCard>
+                    <Field size="lg">
+                        <FieldLabel>{t("sxClientDetailRootUrl")}</FieldLabel>
+                        <Input
+                            size="lg"
+                            value={edited.rootUrl ?? ""}
+                            onChange={e => set("rootUrl", e.target.value)}
+                            placeholder="https://app.example.com"
+                        />
+                        <FieldDescription>{t("sxClientDetailRootUrlHelp")}</FieldDescription>
+                    </Field>
+                    <Field size="lg">
+                        <FieldLabel>{t("sxClientDetailHomeUrl")}</FieldLabel>
+                        <Input
+                            size="lg"
+                            value={edited.baseUrl ?? ""}
+                            onChange={e => set("baseUrl", e.target.value)}
+                            placeholder="/"
+                        />
+                        <FieldDescription>{t("sxClientDetailHomeUrlHelp")}</FieldDescription>
+                    </Field>
+                    {(edited.standardFlowEnabled || edited.implicitFlowEnabled) && (
+                        <>
+                            <Field size="lg">
+                                <FieldLabel>{t("sxClientDetailRedirectUris")}</FieldLabel>
                                 <MultiLineInput
-                                    value={edited.webOrigins || []}
-                                    onChange={(v: string[]) => set("webOrigins", v)}
-                                    addLabel="Web origin ekle"
+                                    value={edited.redirectUris || []}
+                                    onChange={(v: string[]) => set("redirectUris", v)}
+                                    addLabel={t("sxClientDetailAddRedirectUri")}
+                                    placeholder="https://app.example.com/*"
+                                />
+                                <FieldDescription>{t("sxClientDetailRedirectUrisHelp")}</FieldDescription>
+                            </Field>
+                            <Field size="lg">
+                                <FieldLabel>{t("sxClientDetailPostLogoutUris")}</FieldLabel>
+                                <MultiLineInput
+                                    value={(
+                                        edited.attributes?.[
+                                            "post.logout.redirect.uris"
+                                        ] || ""
+                                    )
+                                        .split("##")
+                                        .filter(Boolean)}
+                                    onChange={(v: string[]) =>
+                                        setAttr("post.logout.redirect.uris", v.join("##"))
+                                    }
+                                    addLabel={t("sxClientDetailAddPostLogoutUri")}
                                     placeholder="+"
                                 />
-                                <FieldDescription>CORS için izin verilen origin'ler. '+' tüm geçerli redirect URI origin'lerini ekler, '*' hepsine izin verir.</FieldDescription>
+                                <FieldDescription>{t("sxClientDetailPostLogoutUrisHelp")}</FieldDescription>
                             </Field>
-                        )}
-                    </div>
-                </CardContent>
-            </Card>
+                        </>
+                    )}
+                    <Field size="lg">
+                        <FieldLabel>{t("sxClientDetailAdminUrl")}</FieldLabel>
+                        <Input
+                            size="lg"
+                            value={edited.adminUrl ?? ""}
+                            onChange={e => set("adminUrl", e.target.value)}
+                        />
+                    </Field>
+                    {protocol !== "saml" && edited.standardFlowEnabled && (
+                        <Field size="lg">
+                            <FieldLabel>{t("sxClientDetailWebOrigins")}</FieldLabel>
+                            <MultiLineInput
+                                value={edited.webOrigins || []}
+                                onChange={(v: string[]) => set("webOrigins", v)}
+                                addLabel={t("sxClientDetailAddWebOrigin")}
+                                placeholder="+"
+                            />
+                            <FieldDescription>{t("sxClientDetailWebOriginsHelp")}</FieldDescription>
+                        </Field>
+                    )}
+                </FieldCard>
+            </Section>
 
             {oidc && (
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Yetenek yapılandırması</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <Group className="max-w-2xl">
+                <Section label={t("sxClientDetailCapabilityConfig")}>
+                    <Group>
+                        <SwitchRow
+                            label={t("sxClientDetailClientAuthentication")}
+                            hint={t("sxClientDetailClientAuthenticationHint")}
+                            checked={!edited.publicClient}
+                            onChange={(v: boolean) =>
+                                setEdited((e: any) => ({
+                                    ...e,
+                                    publicClient: !v,
+                                    ...(v
+                                        ? {}
+                                        : {
+                                              authorizationServicesEnabled: false,
+                                              serviceAccountsEnabled: false
+                                          })
+                                }))
+                            }
+                        />
+                        <SwitchRow
+                            label={t("sxClientDetailStandardFlow")}
+                            checked={edited.standardFlowEnabled}
+                            onChange={(v: boolean) => set("standardFlowEnabled", v)}
+                        />
+                        <SwitchRow
+                            label={t("sxClientDetailDirectAccessGrants")}
+                            checked={edited.directAccessGrantsEnabled}
+                            onChange={(v: boolean) => set("directAccessGrantsEnabled", v)}
+                        />
+                        <SwitchRow
+                            label={t("sxClientDetailImplicitFlow")}
+                            checked={edited.implicitFlowEnabled}
+                            onChange={(v: boolean) => set("implicitFlowEnabled", v)}
+                        />
+                        {!edited.publicClient && (
                             <SwitchRow
-                                label="İstemci kimlik doğrulama"
-                                hint="Kapalı = public, açık = confidential"
-                                checked={!edited.publicClient}
+                                label={t("sxClientDetailServiceAccountsRoles")}
+                                checked={edited.serviceAccountsEnabled}
+                                onChange={(v: boolean) =>
+                                    set("serviceAccountsEnabled", v)
+                                }
+                            />
+                        )}
+                        {!edited.publicClient && (
+                            <SwitchRow
+                                label={t("sxClientDetailTabAuthorization")}
+                                hint={t("sxClientDetailAuthorizationHint")}
+                                checked={edited.authorizationServicesEnabled}
                                 onChange={(v: boolean) =>
                                     setEdited((e: any) => ({
                                         ...e,
-                                        publicClient: !v,
-                                        // Public istemciler yetkilendirme/servis hesabı kullanamaz.
-                                        ...(v
-                                            ? {}
-                                            : {
-                                                  authorizationServicesEnabled: false,
-                                                  serviceAccountsEnabled: false
-                                              })
+                                        authorizationServicesEnabled: v,
+                                        ...(v ? { serviceAccountsEnabled: true } : {})
                                     }))
                                 }
                             />
-                            <SwitchRow
-                                label="Standart akış"
-                                checked={edited.standardFlowEnabled}
-                                onChange={(v: boolean) => set("standardFlowEnabled", v)}
-                            />
-                            <SwitchRow
-                                label="Doğrudan erişim izinleri"
-                                checked={edited.directAccessGrantsEnabled}
-                                onChange={(v: boolean) => set("directAccessGrantsEnabled", v)}
-                            />
-                            <SwitchRow
-                                label="Implicit akış"
-                                checked={edited.implicitFlowEnabled}
-                                onChange={(v: boolean) => set("implicitFlowEnabled", v)}
-                            />
-                            {/* Yetkilendirme ve servis hesapları yalnızca confidential istemcilerde. */}
-                            {!edited.publicClient && (
-                                <SwitchRow
-                                    label="Servis hesapları rolleri"
-                                    checked={edited.serviceAccountsEnabled}
-                                    onChange={(v: boolean) =>
-                                        set("serviceAccountsEnabled", v)
-                                    }
-                                />
-                            )}
-                            {!edited.publicClient && (
-                                <SwitchRow
-                                    label="Yetkilendirme"
-                                    hint="Fine-grained authorization services. Servis hesabını otomatik açar."
-                                    checked={edited.authorizationServicesEnabled}
-                                    onChange={(v: boolean) =>
-                                        setEdited((e: any) => ({
-                                            ...e,
-                                            authorizationServicesEnabled: v,
-                                            ...(v ? { serviceAccountsEnabled: true } : {})
-                                        }))
-                                    }
-                                />
-                            )}
-                        </Group>
-                    </CardContent>
-                </Card>
+                        )}
+                    </Group>
+                </Section>
             )}
 
-            <Card>
-                <CardHeader>
-                    <CardTitle>Giriş ayarları</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <div className="flex max-w-2xl flex-col gap-4">
-                        <Group>
-                            <SwitchRow
-                                label="Onay gerekli"
-                                checked={edited.consentRequired}
-                                onChange={(v: boolean) => set("consentRequired", v)}
-                            />
-                            {edited.consentRequired && (
-                                <SwitchRow
-                                    label="İstemciyi onay ekranında göster"
-                                    checked={
-                                        (edited.attributes?.["display.on.consent.screen"] ??
-                                            "") === "true"
-                                    }
-                                    onChange={(v: boolean) =>
-                                        setAttr(
-                                            "display.on.consent.screen",
-                                            v ? "true" : "false"
-                                        )
-                                    }
-                                />
-                            )}
-                        </Group>
+            <Section label={t("sxClientDetailLoginSettings")}>
+                <Stack>
+                    <Group>
+                        <SwitchRow
+                            label={t("sxClientDetailConsentRequired")}
+                            checked={edited.consentRequired}
+                            onChange={(v: boolean) => set("consentRequired", v)}
+                        />
                         {edited.consentRequired && (
-                            <Field>
-                                <FieldLabel>Onay ekranı metni</FieldLabel>
+                            <SwitchRow
+                                label={t("sxClientDetailDisplayOnConsent")}
+                                checked={
+                                    (edited.attributes?.["display.on.consent.screen"] ??
+                                        "") === "true"
+                                }
+                                onChange={(v: boolean) =>
+                                    setAttr(
+                                        "display.on.consent.screen",
+                                        v ? "true" : "false"
+                                    )
+                                }
+                            />
+                        )}
+                    </Group>
+                    <FieldCard>
+                        {edited.consentRequired && (
+                            <Field size="lg">
+                                <FieldLabel>{t("sxClientDetailConsentText")}</FieldLabel>
                                 <Textarea
+                                    size="lg"
                                     value={edited.attributes?.["consent.screen.text"] ?? ""}
                                     onChange={e =>
                                         setAttr("consent.screen.text", e.target.value)
@@ -990,19 +1010,19 @@ function SettingsTab({
                                 />
                             </Field>
                         )}
-                        <Field>
-                            <FieldLabel>Login theme</FieldLabel>
+                        <Field size="lg">
+                            <FieldLabel>{t("sxClientDetailLoginTheme")}</FieldLabel>
                             <Select
                                 value={edited.loginTheme || "__default__"}
                                 onValueChange={(v: string) =>
                                     set("loginTheme", v === "__default__" ? "" : v)
                                 }
                             >
-                                <SelectTrigger className="w-full" aria-label="Login theme">
+                                <SelectTrigger size="lg" className="w-full" aria-label={t("sxClientDetailLoginTheme")}>
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent align="start">
-                                    <SelectItem value="__default__">Varsayılan</SelectItem>
+                                    <SelectItem value="__default__">{t("sxCommonDefault")}</SelectItem>
                                     {loginThemes.map(theme => (
                                         <SelectItem key={theme} value={theme}>
                                             {theme}
@@ -1010,149 +1030,152 @@ function SettingsTab({
                                     ))}
                                 </SelectContent>
                             </Select>
+                            {themesState === "loading" && (
+                                <FieldDescription>{t("sxClientDetailThemesLoading")}</FieldDescription>
+                            )}
+                            {themesState === "error" && (
+                                <FieldDescription>
+                                    {t("sxClientDetailThemesError")}{" "}
+                                    <TextAction onClick={() => setThemesAttempt(n => n + 1)}>
+                                        {t("sxRetry")}
+                                    </TextAction>
+                                </FieldDescription>
+                            )}
                         </Field>
-                    </div>
-                </CardContent>
-            </Card>
+                    </FieldCard>
+                </Stack>
+            </Section>
 
-            <Card>
-                <CardHeader>
-                    <CardTitle>Çıkış (Logout) ayarları</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <div className="flex max-w-2xl flex-col gap-4">
-                        <Group>
-                            <SwitchRow
-                                label="Front-channel logout"
-                                hint="Açıkken çıkış, kullanıcının tarayıcısı üzerinden istemciye iletilir."
-                                checked={!!edited.frontchannelLogout}
-                                onChange={(v: boolean) => set("frontchannelLogout", v)}
-                            />
-                        </Group>
+            <Section label={t("sxClientDetailLogoutSettings")}>
+                <Stack>
+                    <Group>
+                        <SwitchRow
+                            label={t("sxClientDetailFrontchannelLogout")}
+                            hint={t("sxClientDetailFrontchannelLogoutHint")}
+                            checked={!!edited.frontchannelLogout}
+                            onChange={(v: boolean) => set("frontchannelLogout", v)}
+                        />
                         {edited.frontchannelLogout ? (
-                            <>
-                                <Field>
-                                    <FieldLabel>Front-channel logout URL</FieldLabel>
-                                    <Input
-                                        value={
-                                            edited.attributes?.["frontchannel.logout.url"] ??
-                                            ""
-                                        }
-                                        onChange={e =>
-                                            setAttr("frontchannel.logout.url", e.target.value)
-                                        }
-                                        placeholder="https://app.example.com/logout"
-                                    />
-                                    <FieldDescription>Front-channel çıkış isteklerinin gönderileceği URL.</FieldDescription>
-                                </Field>
-                                <Group>
-                                    <SwitchRow
-                                        label="Front-channel logout oturum gerekli"
-                                        hint="Çıkış isteğinde oturum kimliği (sid) gönderilsin."
-                                        checked={
-                                            (edited.attributes?.[
-                                                "frontchannel.logout.session.required"
-                                            ] ?? "") !== "false"
-                                        }
-                                        onChange={(v: boolean) =>
-                                            setAttr(
-                                                "frontchannel.logout.session.required",
-                                                v ? "true" : "false"
-                                            )
-                                        }
-                                    />
-                                </Group>
-                            </>
-                        ) : (
-                            <>
-                                <Field>
-                                    <FieldLabel>Back-channel logout URL</FieldLabel>
-                                    <Input
-                                        value={
-                                            edited.attributes?.["backchannel.logout.url"] ??
-                                            ""
-                                        }
-                                        onChange={e =>
-                                            setAttr("backchannel.logout.url", e.target.value)
-                                        }
-                                        placeholder="https://app.example.com/backchannel-logout"
-                                    />
-                                    <FieldDescription>Back-channel çıkış isteklerinin gönderileceği URL.</FieldDescription>
-                                </Field>
-                                <Group>
-                                    <SwitchRow
-                                        label="Back-channel logout oturum gerekli"
-                                        hint="Çıkış token'ında oturum kimliği (sid) gönderilsin."
-                                        checked={
-                                            (edited.attributes?.[
-                                                "backchannel.logout.session.required"
-                                            ] ?? "") === "true"
-                                        }
-                                        onChange={(v: boolean) =>
-                                            setAttr(
-                                                "backchannel.logout.session.required",
-                                                v ? "true" : "false"
-                                            )
-                                        }
-                                    />
-                                    <SwitchRow
-                                        label="Back-channel logout çevrimdışı oturumları iptal et"
-                                        hint="Çıkışta bu istemcinin çevrimdışı oturumları da iptal edilsin."
-                                        checked={
-                                            (edited.attributes?.[
-                                                "backchannel.logout.revoke.offline.tokens"
-                                            ] ?? "") === "true"
-                                        }
-                                        onChange={(v: boolean) =>
-                                            setAttr(
-                                                "backchannel.logout.revoke.offline.tokens",
-                                                v ? "true" : "false"
-                                            )
-                                        }
-                                    />
-                                </Group>
-                            </>
-                        )}
-                        <Group>
                             <SwitchRow
-                                label="Çıkış onayı"
-                                hint="Çıkış sırasında kullanıcıdan onay istensin."
+                                label={t("sxClientDetailFrontchannelSessionRequired")}
+                                hint={t("sxClientDetailFrontchannelSessionRequiredHint")}
                                 checked={
-                                    (edited.attributes?.["logout.confirmation.enabled"] ??
-                                        "") === "true"
+                                    (edited.attributes?.[
+                                        "frontchannel.logout.session.required"
+                                    ] ?? "") !== "false"
                                 }
                                 onChange={(v: boolean) =>
                                     setAttr(
-                                        "logout.confirmation.enabled",
+                                        "frontchannel.logout.session.required",
                                         v ? "true" : "false"
                                     )
                                 }
                             />
-                        </Group>
-                    </div>
-                </CardContent>
-            </Card>
+                        ) : (
+                            <>
+                                <SwitchRow
+                                    label={t("sxClientDetailBackchannelSessionRequired")}
+                                    hint={t("sxClientDetailBackchannelSessionRequiredHint")}
+                                    checked={
+                                        (edited.attributes?.[
+                                            "backchannel.logout.session.required"
+                                        ] ?? "") === "true"
+                                    }
+                                    onChange={(v: boolean) =>
+                                        setAttr(
+                                            "backchannel.logout.session.required",
+                                            v ? "true" : "false"
+                                        )
+                                    }
+                                />
+                                <SwitchRow
+                                    label={t("sxClientDetailBackchannelRevokeOffline")}
+                                    hint={t("sxClientDetailBackchannelRevokeOfflineHint")}
+                                    checked={
+                                        (edited.attributes?.[
+                                            "backchannel.logout.revoke.offline.tokens"
+                                        ] ?? "") === "true"
+                                    }
+                                    onChange={(v: boolean) =>
+                                        setAttr(
+                                            "backchannel.logout.revoke.offline.tokens",
+                                            v ? "true" : "false"
+                                        )
+                                    }
+                                />
+                            </>
+                        )}
+                        <SwitchRow
+                            label={t("sxClientDetailLogoutConfirmation")}
+                            hint={t("sxClientDetailLogoutConfirmationHint")}
+                            checked={
+                                (edited.attributes?.["logout.confirmation.enabled"] ??
+                                    "") === "true"
+                            }
+                            onChange={(v: boolean) =>
+                                setAttr(
+                                    "logout.confirmation.enabled",
+                                    v ? "true" : "false"
+                                )
+                            }
+                        />
+                    </Group>
+                    <FieldCard>
+                        {edited.frontchannelLogout ? (
+                            <Field size="lg">
+                                <FieldLabel>{t("sxClientDetailFrontchannelLogoutUrl")}</FieldLabel>
+                                <Input
+                                    size="lg"
+                                    value={
+                                        edited.attributes?.["frontchannel.logout.url"] ??
+                                        ""
+                                    }
+                                    onChange={e =>
+                                        setAttr("frontchannel.logout.url", e.target.value)
+                                    }
+                                    placeholder="https://app.example.com/logout"
+                                />
+                                <FieldDescription>{t("sxClientDetailFrontchannelLogoutUrlHelp")}</FieldDescription>
+                            </Field>
+                        ) : (
+                            <Field size="lg">
+                                <FieldLabel>{t("sxClientDetailBackchannelLogoutUrl")}</FieldLabel>
+                                <Input
+                                    size="lg"
+                                    value={
+                                        edited.attributes?.["backchannel.logout.url"] ??
+                                        ""
+                                    }
+                                    onChange={e =>
+                                        setAttr("backchannel.logout.url", e.target.value)
+                                    }
+                                    placeholder="https://app.example.com/backchannel-logout"
+                                />
+                                <FieldDescription>{t("sxClientDetailBackchannelLogoutUrlHelp")}</FieldDescription>
+                            </Field>
+                        )}
+                    </FieldCard>
+                </Stack>
+            </Section>
 
-            <div className="flex justify-end">
-                <Button
-                    disabled={saving}
-                    onClick={save}
-                >
-                    {saving ? "Kaydediliyor…" : "Kaydet"}
+            <SaveBar>
+                <Button size="form" disabled={saving} onClick={save}>
+                    {saving ? t("sxCommonSaving") : t("sxCommonSave")}
                 </Button>
-            </div>
+            </SaveBar>
         </div>
     );
 }
 
 const AUTHENTICATOR_OPTIONS = [
-    { value: "client-secret", label: "İstemci ID ve Sırrı" },
-    { value: "client-jwt", label: "Signed Jwt" },
-    { value: "client-secret-jwt", label: "Signed Jwt with Client Secret" },
-    { value: "client-x509", label: "X509 Certificate" }
+    { value: "client-secret", label: "sxClientDetailAuthClientSecret" },
+    { value: "client-jwt", label: "sxClientDetailAuthSignedJwt" },
+    { value: "client-secret-jwt", label: "sxClientDetailAuthSignedJwtSecret" },
+    { value: "client-x509", label: "sxClientDetailAuthX509" }
 ];
 
-/* ── 2. Kimlik Bilgileri ────────────────────────────────────────────────── */
+const ANY_ALG = "__any";
+
 const SIGNING_ALG_OPTIONS = [
     "",
     "RS256",
@@ -1167,7 +1190,10 @@ const SIGNING_ALG_OPTIONS = [
 ];
 
 function CredentialsTab({ id, client, adminClient, addAlert, addError, reload }: any) {
+    const t = useT();
     const [loading, setLoading] = useState(true);
+    const [failed, setFailed] = useState(false);
+    const [attempt, setAttempt] = useState(0);
     const [secret, setSecret] = useState("");
     const [savingAuth, setSavingAuth] = useState(false);
     const [savingCfg, setSavingCfg] = useState(false);
@@ -1176,7 +1202,6 @@ function CredentialsTab({ id, client, adminClient, addAlert, addError, reload }:
 
     const authenticatorType = client?.clientAuthenticatorType || "client-secret";
 
-    // Local draft of attributes for type-specific signing / X509 config.
     const [attrs, setAttrs] = useState<Record<string, any>>(client?.attributes || {});
     useEffect(() => {
         setAttrs(client?.attributes || {});
@@ -1190,45 +1215,47 @@ function CredentialsTab({ id, client, adminClient, addAlert, addError, reload }:
                 { id },
                 { ...client, attributes: { ...(client.attributes || {}), ...attrs } }
             );
-            addAlert("Yapılandırma kaydedildi.", AlertVariant.success);
+            addAlert(t("sxClientDetailConfigSaved"), AlertVariant.success);
             await reload();
         } catch (err) {
-            addError("Yapılandırma kaydedilemedi.", err);
+            addError(t("sxClientDetailConfigSaveFailed"), err);
         } finally {
             setSavingCfg(false);
         }
     };
 
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            const res = await adminClient.clients.getClientSecret({ id });
-            setSecret(res?.value ?? "");
-        } catch {
-            // JWT / X509 istemcilerinde sır bulunmayabilir; sessizce geç.
-            setSecret("");
-        } finally {
-            setLoading(false);
-        }
-    }, [adminClient, id]);
-
     useEffect(() => {
-        load();
-    }, [load]);
+        let alive = true;
+        (async () => {
+            setLoading(true);
+            setFailed(false);
+            try {
+                const res = await adminClient.clients.getClientSecret({ id });
+                if (alive) setSecret(res?.value ?? "");
+            } catch {
+                if (alive) setFailed(true);
+            } finally {
+                if (alive) setLoading(false);
+            }
+        })();
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, id, attempt]);
 
     const regenerate = async () => {
         try {
             const res = await adminClient.clients.generateNewClientSecret({ id });
             setSecret(res?.value ?? "");
-            addAlert("Yeni istemci sırrı oluşturuldu.", AlertVariant.success);
+            addAlert(t("sxClientDetailSecretRegenerated"), AlertVariant.success);
         } catch (err) {
-            addError("İstemci sırrı oluşturulamadı.", err);
+            addError(t("sxClientDetailSecretRegenerateFailed"), err);
         }
     };
 
     const copy = () => {
         navigator.clipboard?.writeText(secret);
-        addAlert("İstemci sırrı kopyalandı.", AlertVariant.success);
+        addAlert(t("sxClientDetailSecretCopied"), AlertVariant.success);
     };
 
     const changeAuthenticator = async (value: string) => {
@@ -1238,10 +1265,10 @@ function CredentialsTab({ id, client, adminClient, addAlert, addError, reload }:
                 { id },
                 { ...client, clientAuthenticatorType: value }
             );
-            addAlert("İstemci doğrulayıcı güncellendi.", AlertVariant.success);
+            addAlert(t("sxClientDetailAuthenticatorUpdated"), AlertVariant.success);
             await reload();
         } catch (err) {
-            addError("İstemci doğrulayıcı güncellenemedi.", err);
+            addError(t("sxClientDetailAuthenticatorUpdateFailed"), err);
         } finally {
             setSavingAuth(false);
         }
@@ -1252,9 +1279,9 @@ function CredentialsTab({ id, client, adminClient, addAlert, addError, reload }:
         try {
             const res = await adminClient.clients.generateRegistrationAccessToken({ id });
             setRegToken(res?.registrationAccessToken ?? "");
-            addAlert("Kayıt erişim token'ı oluşturuldu.", AlertVariant.success);
+            addAlert(t("sxClientDetailRegTokenCreated"), AlertVariant.success);
         } catch (err) {
-            addError("Kayıt erişim token'ı oluşturulamadı.", err);
+            addError(t("sxClientDetailRegTokenCreateFailed"), err);
         } finally {
             setGenningToken(false);
         }
@@ -1262,186 +1289,185 @@ function CredentialsTab({ id, client, adminClient, addAlert, addError, reload }:
 
     const copyRegToken = () => {
         navigator.clipboard?.writeText(regToken);
-        addAlert("Token kopyalandı.", AlertVariant.success);
+        addAlert(t("sxClientDetailTokenCopied"), AlertVariant.success);
     };
 
-    if (loading) return (
-            <div className="flex justify-center py-16">
-                <Spinner className="size-6" />
-            </div>
-        );
+    if (loading) return <ListSkeleton />;
 
     return (
-        <div className="space-y-7">
-            <div>
-                <GroupLabel>İstemci Doğrulayıcı</GroupLabel>
-                <Group>
-                    <Row label="Yöntem">
+        <div className="flex flex-col gap-6">
+            <Section label={t("sxClientDetailClientAuthenticator")}>
+                <FieldCard>
+                    <Field size="lg">
+                        <FieldLabel>{t("sxClientDetailMethod")}</FieldLabel>
                         <Select
                             value={authenticatorType}
                             disabled={savingAuth}
                             onValueChange={changeAuthenticator}
                         >
-                            <SelectTrigger aria-label="İstemci doğrulayıcı">
+                            <SelectTrigger size="lg" className="w-full" aria-label={t("sxClientDetailClientAuthenticator")}>
                                 <SelectValue />
                             </SelectTrigger>
-                            <SelectContent align="end">
+                            <SelectContent align="start">
                                 {AUTHENTICATOR_OPTIONS.map(o => (
                                     <SelectItem key={o.value} value={o.value}>
-                                        {o.label}
+                                        {t(o.label)}
                                     </SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
-                    </Row>
-                </Group>
-                <GroupFooter>İstemcinin kimliğini nasıl doğrulayacağı.</GroupFooter>
-            </div>
+                    </Field>
+                </FieldCard>
+                <GroupFooter>{t("sxClientDetailAuthenticatorHelp")}</GroupFooter>
+            </Section>
 
             {authenticatorType === "client-secret" && (
-                <div>
-                    <GroupLabel>İstemci Sırrı</GroupLabel>
-                    <Group>
-                        <CopyRow value={secret} onCopy={copy} />
-                        <ActionRow onClick={regenerate}>Yeniden oluştur</ActionRow>
-                    </Group>
-                    <GroupFooter>Confidential istemciler için gizli anahtar.</GroupFooter>
-                </div>
+                <Section label={t("sxClientDetailClientSecret")}>
+                    {failed ? (
+                        <Notice
+                            title={t("sxClientDetailSecretLoadErrorTitle")}
+                            description={t("sxLoadErrorDescription")}
+                            onRetry={() => setAttempt(n => n + 1)}
+                        />
+                    ) : (
+                        <Group>
+                            <CopyRow value={secret} onCopy={copy} />
+                            <ActionRow onClick={regenerate}>{t("sxClientDetailRegenerate")}</ActionRow>
+                        </Group>
+                    )}
+                    <GroupFooter>{t("sxClientDetailClientSecretHelp")}</GroupFooter>
+                </Section>
             )}
 
             {authenticatorType === "client-jwt" && (
-                <div>
-                    <GroupLabel>Signed JWT</GroupLabel>
-                    <Group>
-                        <Row
-                            label="İmza algoritması"
-                            hint="Boş bırakılırsa herhangi bir algoritma kabul edilir."
-                        >
-                            <Select
-                                value={attrs["token.endpoint.auth.signing.alg"] ?? ""}
-                                onValueChange={(v: string) =>
-                                    setAttr("token.endpoint.auth.signing.alg", v)
-                                }
-                            >
-                                <SelectTrigger size="sm" aria-label="İmza algoritması">
-                                    <SelectValue placeholder="Herhangi" />
-                                </SelectTrigger>
-                                <SelectContent align="end">
-                                    {SIGNING_ALG_OPTIONS.map(a => (
-                                        <SelectItem key={a || "any"} value={a}>
-                                            {a || "Herhangi"}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </Row>
-                        <Row
-                            label="Maks. token geçerlilik (sn)"
-                            hint="JWT'nin geçerli sayılacağı en uzun süre. Boş = sınırsız."
-                        >
-                            <Input
-                                size="sm"
-                                type="number"
-                                min={1}
-                                value={attrs["token.endpoint.auth.signing.max.exp"] ?? ""}
-                                onChange={(e: any) =>
-                                    setAttr(
-                                        "token.endpoint.auth.signing.max.exp",
-                                        e.target.value
-                                    )
-                                }
-                                placeholder="—"
-                            />
-                        </Row>
-                        <ActionRow onClick={saveAttrs} disabled={savingCfg}>
-                            {savingCfg ? "Kaydediliyor…" : "Kaydet"}
-                        </ActionRow>
-                    </Group>
-                    <GroupFooter>
-                        İmza anahtarı ve sertifika, "Keys" sekmesinden yönetilir.
-                    </GroupFooter>
-                </div>
+                <Section label={t("sxClientDetailAuthSignedJwt")}>
+                    <Stack>
+                        <FieldCard>
+                            <Field size="lg">
+                                <FieldLabel>{t("sxClientDetailSignatureAlgorithm")}</FieldLabel>
+                                <Select
+                                    value={attrs["token.endpoint.auth.signing.alg"] || ANY_ALG}
+                                    onValueChange={(v: string) =>
+                                        setAttr("token.endpoint.auth.signing.alg", v === ANY_ALG ? "" : v)
+                                    }
+                                >
+                                    <SelectTrigger size="lg" className="w-full" aria-label={t("sxClientDetailSignatureAlgorithm")}>
+                                        <SelectValue placeholder={t("sxClientDetailAnyAlgorithm")} />
+                                    </SelectTrigger>
+                                    <SelectContent align="start">
+                                        {SIGNING_ALG_OPTIONS.map(a => (
+                                            <SelectItem key={a || ANY_ALG} value={a || ANY_ALG}>
+                                                {a || t("sxClientDetailAnyAlgorithm")}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <FieldDescription>{t("sxClientDetailAnyAlgorithmHelp")}</FieldDescription>
+                            </Field>
+                            <Field size="lg">
+                                <FieldLabel>{t("sxClientDetailMaxTokenExp")}</FieldLabel>
+                                <Input
+                                    size="lg"
+                                    type="number"
+                                    min={1}
+                                    value={attrs["token.endpoint.auth.signing.max.exp"] ?? ""}
+                                    onChange={(e: any) =>
+                                        setAttr(
+                                            "token.endpoint.auth.signing.max.exp",
+                                            e.target.value
+                                        )
+                                    }
+                                    placeholder="—"
+                                />
+                                <FieldDescription>{t("sxClientDetailMaxTokenExpHelp")}</FieldDescription>
+                            </Field>
+                        </FieldCard>
+                        <SaveBar>
+                            <Button size="form" onClick={saveAttrs} disabled={savingCfg}>
+                                {savingCfg ? t("sxCommonSaving") : t("sxCommonSave")}
+                            </Button>
+                        </SaveBar>
+                    </Stack>
+                    <GroupFooter>{t("sxClientDetailJwtFooter")}</GroupFooter>
+                </Section>
             )}
 
             {authenticatorType === "client-x509" && (
-                <div>
-                    <GroupLabel>X509 Sertifikası</GroupLabel>
-                    <Group>
-                        <Row
-                            label="Regex karşılaştırmaya izin ver"
-                            hint="Subject DN bir regex deseni olarak değerlendirilir."
-                        >
-                            <Switch
+                <Section label={t("sxClientDetailAuthX509")}>
+                    <Stack>
+                        <Group>
+                            <SwitchRow
+                                label={t("sxClientDetailAllowRegex")}
+                                hint={t("sxClientDetailAllowRegexHint")}
                                 checked={
                                     (attrs["x509.allow.regex.pattern.comparison"] ??
                                         "") === "true"
                                 }
-                                onCheckedChange={(v: boolean) =>
+                                onChange={(v: boolean) =>
                                     setAttr(
                                         "x509.allow.regex.pattern.comparison",
                                         v ? "true" : "false"
                                     )
                                 }
                             />
-                        </Row>
-                        <StackRow
-                            label="Subject DN"
-                            hint="İstemci sertifikasının beklenen subject DN değeri."
-                        >
-                            <Input
-                                size="sm"
-                                value={attrs["x509.subjectdn"] ?? ""}
-                                onChange={(e: any) =>
-                                    setAttr("x509.subjectdn", e.target.value)
-                                }
-                                placeholder="CN=istemci, O=org"
-                            />
-                        </StackRow>
-                        <ActionRow onClick={saveAttrs} disabled={savingCfg}>
-                            {savingCfg ? "Kaydediliyor…" : "Kaydet"}
-                        </ActionRow>
-                    </Group>
-                    <GroupFooter>
-                        İstemci, X509 sertifikası ile kimliğini doğrular.
-                    </GroupFooter>
-                </div>
+                        </Group>
+                        <FieldCard>
+                            <Field size="lg">
+                                <FieldLabel>Subject DN</FieldLabel>
+                                <Input
+                                    size="lg"
+                                    value={attrs["x509.subjectdn"] ?? ""}
+                                    onChange={(e: any) =>
+                                        setAttr("x509.subjectdn", e.target.value)
+                                    }
+                                    placeholder="CN=client, O=org"
+                                />
+                                <FieldDescription>{t("sxClientDetailSubjectDnHelp")}</FieldDescription>
+                            </Field>
+                        </FieldCard>
+                        <SaveBar>
+                            <Button size="form" onClick={saveAttrs} disabled={savingCfg}>
+                                {savingCfg ? t("sxCommonSaving") : t("sxCommonSave")}
+                            </Button>
+                        </SaveBar>
+                    </Stack>
+                    <GroupFooter>{t("sxClientDetailX509Footer")}</GroupFooter>
+                </Section>
             )}
 
-            <div>
-                <GroupLabel>Registration Access Token</GroupLabel>
+            <Section label={t("sxClientDetailRegToken")}>
                 <Group>
                     {regToken && <CopyRow value={regToken} onCopy={copyRegToken} />}
                     <ActionRow onClick={generateRegToken} disabled={genningToken}>
-                        {genningToken ? "Oluşturuluyor…" : "Yeni oluştur"}
+                        {genningToken ? t("sxCommonGenerating") : t("sxClientDetailGenerateNew")}
                     </ActionRow>
                 </Group>
-                <GroupFooter>
-                    İstemciyi dinamik olarak yönetmek için kullanılır. Token yalnızca bir
-                    kez gösterilir.
-                </GroupFooter>
-            </div>
+                <GroupFooter>{t("sxClientDetailRegTokenHelp")}</GroupFooter>
+            </Section>
         </div>
     );
 }
 
-/* ── 3. Roller ──────────────────────────────────────────────────────────── */
 function RolesTab({ id, adminClient, addAlert, addError, confirm }: any) {
+    const t = useT();
     const [loading, setLoading] = useState(true);
+    const [failed, setFailed] = useState(false);
     const [roles, setRoles] = useState<any[]>([]);
     const [createOpen, setCreateOpen] = useState(false);
     const [detailRole, setDetailRole] = useState<any>(null);
 
     const load = useCallback(async () => {
         setLoading(true);
+        setFailed(false);
         try {
             const list = await adminClient.clients.listRoles({ id });
             setRoles(list ?? []);
-        } catch (err) {
-            addError("Roller yüklenemedi.", err);
+        } catch {
+            setFailed(true);
         } finally {
             setLoading(false);
         }
-    }, [adminClient, id, addError]);
+    }, [adminClient, id]);
 
     useEffect(() => {
         load();
@@ -1449,83 +1475,54 @@ function RolesTab({ id, adminClient, addAlert, addError, confirm }: any) {
 
     const remove = (role: any) =>
         confirm({
-            title: "Rolü sil",
-            message: `“${role.name}” rolü silinecek. Emin misiniz?`,
-            confirmLabel: "Sil",
+            title: t("sxClientDetailDeleteRoleTitle"),
+            message: t("sxClientDetailDeleteRoleMessage", { name: role.name }),
+            confirmLabel: t("sxCommonDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.roles.delById({ id: role.id });
-                    addAlert("Rol silindi.", AlertVariant.success);
+                    addAlert(t("sxClientDetailRoleDeleted"), AlertVariant.success);
                     await load();
                 } catch (err) {
-                    addError("Rol silinemedi.", err);
+                    addError(t("sxClientDetailRoleDeleteFailed"), err);
                 }
             }
         });
 
     return (
-        <div className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
-                <div>
-                    <p className="text-base font-semibold tracking-tight">Roller</p>
-                    <p className="text-sm text-muted-foreground">
-                        İstemciye özel roller.
-                    </p>
-                </div>
-                <Button
-                    variant="secondary"
-                    onClick={() => setCreateOpen(true)}
-                >
-                    Rol oluştur
-                </Button>
-            </div>
-
+        <Section
+            label={t("sxClientDetailClientRoles")}
+            action={<TextAction onClick={() => setCreateOpen(true)}>{t("sxClientDetailCreateRole")}</TextAction>}
+        >
             {loading ? (
-                <div className="flex justify-center py-16">
-                    <Spinner className="size-6" />
-                </div>
+                <ListSkeleton />
+            ) : failed ? (
+                <Notice
+                    title={t("sxClientDetailRolesLoadErrorTitle")}
+                    description={t("sxLoadErrorDescription")}
+                    onRetry={load}
+                />
             ) : roles.length === 0 ? (
                 <EmptyCard
-                    icon={<ShieldCheckIcon />}
-                    title="Rol yok"
-                    desc="Bu istemciye özel henüz bir rol yok."
+                    title={t("sxClientDetailNoRolesTitle")}
+                    desc={t("sxClientDetailNoRolesDescription")}
                     action={
-                        <Button
-                            variant="secondary"
-                            onClick={() => setCreateOpen(true)}
-                        >
-                            Rol oluştur
+                        <Button variant="secondary" onClick={() => setCreateOpen(true)}>
+                            {t("sxClientDetailCreateRole")}
                         </Button>
                     }
                 />
             ) : (
                 <Group>
                     {roles.map(r => (
-                        <Item key={r.id} size="sm">
-                            <ItemContent
-                                className="min-w-0 cursor-pointer"
-                                onClick={() => setDetailRole(r)}
-                            >
-                                <ItemTitle>{r.name}</ItemTitle>
-                                {r.description && (
-                                    <ItemDescription className="truncate">
-                                        {r.description}
-                                    </ItemDescription>
-                                )}
-                            </ItemContent>
-                            <ItemActions>
-                                <RowDelete onClick={() => remove(r)} />
-                                <Button
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    aria-label="Ayrıntılar"
-                                    onClick={() => setDetailRole(r)}
-                                >
-                                    <CaretRightIcon weight="bold" className="rtl:rotate-180" />
-                                </Button>
-                            </ItemActions>
-                        </Item>
+                        <ItemRow
+                            key={r.id}
+                            title={r.name}
+                            subtitle={r.description}
+                            onClick={() => setDetailRole(r)}
+                            trailing={<RowDelete onClick={() => remove(r)} />}
+                        />
                     ))}
                 </Group>
             )}
@@ -1558,7 +1555,7 @@ function RolesTab({ id, adminClient, addAlert, addError, confirm }: any) {
                     }}
                 />
             )}
-        </div>
+        </Section>
     );
 }
 
@@ -1571,6 +1568,7 @@ function RoleDetailModal({
     onClose,
     onSaved
 }: any) {
+    const t = useT();
     const [subTab, setSubTab] = useState("settings");
 
     const [name, setName] = useState(role.name ?? "");
@@ -1587,41 +1585,44 @@ function RoleDetailModal({
     const [realmRoles, setRealmRoles] = useState<any[]>([]);
     const [roleToAdd, setRoleToAdd] = useState("");
     const [loadingComp, setLoadingComp] = useState(false);
+    const [compFailed, setCompFailed] = useState(false);
 
     const [users, setUsers] = useState<any[]>([]);
     const [loadingUsers, setLoadingUsers] = useState(false);
+    const [usersFailed, setUsersFailed] = useState(false);
 
     const loadComposites = useCallback(async () => {
         setLoadingComp(true);
+        setCompFailed(false);
         try {
             const [comp, realm] = await Promise.all([
-                adminClient.roles.getCompositeRoles({ id: role.id }).catch(() => []),
-                adminClient.roles.find().catch(() => [])
+                adminClient.roles.getCompositeRoles({ id: role.id }),
+                adminClient.roles.find()
             ]);
             setComposites(Array.isArray(comp) ? comp : []);
             setRealmRoles(Array.isArray(realm) ? realm : []);
-        } catch (err) {
-            addError("İlişkili roller yüklenemedi.", err);
+        } catch {
+            setCompFailed(true);
         } finally {
             setLoadingComp(false);
         }
-    }, [adminClient, role.id, addError]);
+    }, [adminClient, role.id]);
 
     const loadUsers = useCallback(async () => {
         setLoadingUsers(true);
+        setUsersFailed(false);
         try {
             const list = await adminClient.clients.findUsersWithRole({
                 id: clientId,
                 roleName: role.name
             });
             setUsers(Array.isArray(list) ? list : []);
-        } catch (err) {
-            addError("Kullanıcılar yüklenemedi.", err);
-            setUsers([]);
+        } catch {
+            setUsersFailed(true);
         } finally {
             setLoadingUsers(false);
         }
-    }, [adminClient, clientId, role.name, addError]);
+    }, [adminClient, clientId, role.name]);
 
     useEffect(() => {
         if (subTab === "composites") loadComposites();
@@ -1653,10 +1654,10 @@ function RoleDetailModal({
                     attributes: assembleAttributes()
                 }
             );
-            addAlert("Rol kaydedildi.", AlertVariant.success);
+            addAlert(t("sxClientDetailRoleSaved"), AlertVariant.success);
             await onSaved();
         } catch (err) {
-            addError("Rol kaydedilemedi.", err);
+            addError(t("sxClientDetailRoleSaveFailed"), err);
         } finally {
             setSaving(false);
         }
@@ -1672,58 +1673,58 @@ function RoleDetailModal({
         if (!r) return;
         try {
             await adminClient.roles.createComposite({ id: role.id }, [r]);
-            addAlert("İlişkili rol eklendi.", AlertVariant.success);
+            addAlert(t("sxClientDetailCompositeAdded"), AlertVariant.success);
             setRoleToAdd("");
             await loadComposites();
         } catch (err) {
-            addError("İlişkili rol eklenemedi.", err);
+            addError(t("sxClientDetailCompositeAddFailed"), err);
         }
     };
 
     const removeComposite = async (r: any) => {
         try {
             await adminClient.roles.delComposite({ id: role.id }, [r]);
-            addAlert("İlişkili rol kaldırıldı.", AlertVariant.success);
+            addAlert(t("sxClientDetailCompositeRemoved"), AlertVariant.success);
             await loadComposites();
         } catch (err) {
-            addError("İlişkili rol kaldırılamadı.", err);
+            addError(t("sxClientDetailCompositeRemoveFailed"), err);
         }
     };
 
     const subTabs = [
-        { key: "settings", label: "Ayarlar" },
-        { key: "attributes", label: "Öznitelikler" },
-        { key: "composites", label: "İlişkili roller" },
-        { key: "users", label: "Kullanıcılar" }
+        { key: "settings", label: t("sxClientDetailTabSettings") },
+        { key: "attributes", label: t("sxClientDetailAttributes") },
+        { key: "composites", label: t("sxClientDetailAssociatedRoles") },
+        { key: "users", label: t("sxNavUsers") }
     ];
 
     return (
         <Modal open onOpenChange={o => !o && onClose()}>
             <ModalContent className="sm:max-w-2xl">
                 <ModalHeader>
-                    <ModalTitle>{role.name}</ModalTitle>
+                    <ModalTitle className="[overflow-wrap:anywhere]">{role.name}</ModalTitle>
                 </ModalHeader>
                 <ModalBody>
-                    <div className="space-y-4">
-                        <Tabs value={subTab} onValueChange={setSubTab}>
-                            <TabsList variant="line">
-                                {(subTabs).map((t: any) => (
-                                    <TabsTrigger key={t.key} value={t.key}>
-                                        {t.label}
-                                    </TabsTrigger>
-                                ))}
-                            </TabsList>
-                        </Tabs>
+                    <div className="flex flex-col gap-4">
+                        <div className="min-w-0 overflow-hidden">
+                            <SegmentTabs
+                                ariaLabel={t("sxClientDetailRoleSectionsAria")}
+                                value={subTab}
+                                onChange={setSubTab}
+                                items={subTabs.map((item: any) => ({ value: item.key, label: item.label }))}
+                            />
+                        </div>
 
                         {subTab === "settings" && (
-                            <div className="space-y-4">
-                                <Field>
-                                    <FieldLabel>Ad</FieldLabel>
-                                    <Input value={name} onChange={e => setName(e.target.value)} />
+                            <div className="flex flex-col gap-4">
+                                <Field size="lg">
+                                    <FieldLabel>{t("sxCommonName")}</FieldLabel>
+                                    <Input size="lg" value={name} onChange={e => setName(e.target.value)} />
                                 </Field>
-                                <Field>
-                                    <FieldLabel>Açıklama</FieldLabel>
+                                <Field size="lg">
+                                    <FieldLabel>{t("sxCommonDescription")}</FieldLabel>
                                     <Textarea
+                                        size="lg"
                                         value={description}
                                         onChange={e => setDescription(e.target.value)}
                                     />
@@ -1732,17 +1733,22 @@ function RoleDetailModal({
                         )}
 
                         {subTab === "attributes" && (
-                            <div className="space-y-3">
+                            <div className="flex flex-col gap-3">
                                 {attrRows.length === 0 && (
-                                    <p className="text-sm text-muted-foreground">
-                                        Öznitelik yok.
-                                    </p>
+                                    <Notice
+                                        title={t("sxClientDetailNoAttributesTitle")}
+                                        description={t("sxClientDetailNoAttributesDescription")}
+                                    />
                                 )}
                                 {attrRows.map((row, i) => (
-                                    <div key={i} className="flex gap-2">
+                                    <div
+                                        key={i}
+                                        className="flex flex-col gap-2 border-b border-[#e5e5ea] pb-3 sm:flex-row sm:items-center sm:border-0 sm:pb-0 dark:border-[#38383a]"
+                                    >
                                         <Input
+                                            className="min-w-0 sm:flex-1"
                                             value={row.key}
-                                            placeholder="Anahtar"
+                                            placeholder={t("sxCommonKey")}
                                             onChange={e =>
                                                 setAttrRows(rows =>
                                                     rows.map((r, j) =>
@@ -1754,8 +1760,9 @@ function RoleDetailModal({
                                             }
                                         />
                                         <Input
+                                            className="min-w-0 sm:flex-1"
                                             value={row.value}
-                                            placeholder="Değer (virgülle ayrılmış)"
+                                            placeholder={t("sxClientDetailValueCommaSeparated")}
                                             onChange={e =>
                                                 setAttrRows(rows =>
                                                     rows.map((r, j) =>
@@ -1766,41 +1773,43 @@ function RoleDetailModal({
                                                 )
                                             }
                                         />
-                                        <Button
-                                            variant="destructive"
+                                        <TextAction
+                                            tone="danger"
+                                            className="self-end sm:self-center"
                                             onClick={() =>
                                                 setAttrRows(rows =>
                                                     rows.filter((_, j) => j !== i)
                                                 )
                                             }
                                         >
-                                            Kaldır
-                                        </Button>
+                                            {t("sxCommonRemove")}
+                                        </TextAction>
                                     </div>
                                 ))}
-                                <Button
-                                    variant="secondary"
+                                <TextAction
+                                    className="self-start"
                                     onClick={() =>
                                         setAttrRows(rows => [...rows, { key: "", value: "" }])
                                     }
                                 >
-                                    Öznitelik ekle
-                                </Button>
+                                    {t("sxClientDetailAddAttribute")}
+                                </TextAction>
                             </div>
                         )}
 
                         {subTab === "composites" && (
-                            <div className="space-y-4">
+                            <div className="flex flex-col gap-4">
                                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                                    <div className="flex-1">
-                                        <Field>
-                                            <FieldLabel>Rol</FieldLabel>
+                                    <div className="min-w-0 flex-1">
+                                        <Field size="lg">
+                                            <FieldLabel>{t("sxClientDetailRole")}</FieldLabel>
                                             <NativeSelect
+                                                size="lg"
                                                 className="w-full"
                                                 value={roleToAdd}
                                                 onChange={e => setRoleToAdd(e.target.value)}
                                             >
-                                                <NativeSelectOption value="">Rol seçin…</NativeSelectOption>
+                                                <NativeSelectOption value="">{t("sxClientDetailSelectRole")}</NativeSelectOption>
                                                 {assignableComposites.map(r => (
                                                     <NativeSelectOption key={r.id} value={r.id}>
                                                         {r.name}
@@ -1810,65 +1819,77 @@ function RoleDetailModal({
                                         </Field>
                                     </div>
                                     <Button
-                                        variant="secondary"
+                                        size="lg"
                                         disabled={!roleToAdd}
                                         onClick={addComposite}
                                     >
-                                        Rol ekle
+                                        {t("sxClientDetailAddRole")}
                                     </Button>
                                 </div>
                                 {loadingComp ? (
-                                    <div className="flex justify-center py-16">
-                                        <Spinner className="size-6" />
-                                    </div>
-                                ) : (
-                                    <DataTable
-                                        head={["Rol", ""]}
-                                        empty="İlişkili rol yok."
-                                        rows={composites.map(r => [
-                                            <span className="font-medium text-foreground">
-                                                {r.name}
-                                            </span>,
-                                            <div className="flex justify-end">
-                                                <Button
-                                                    variant="destructive"
-                                                    onClick={() => removeComposite(r)}
-                                                >
-                                                    Kaldır
-                                                </Button>
-                                            </div>
-                                        ])}
+                                    <ListSkeleton />
+                                ) : compFailed ? (
+                                    <Notice
+                                        title={t("sxClientDetailCompositesLoadErrorTitle")}
+                                        description={t("sxLoadErrorDescription")}
+                                        onRetry={loadComposites}
                                     />
+                                ) : composites.length === 0 ? (
+                                    <Notice
+                                        title={t("sxClientDetailNoCompositesTitle")}
+                                        description={t("sxClientDetailNoCompositesDescription")}
+                                    />
+                                ) : (
+                                    <Group>
+                                        {composites.map(r => (
+                                            <ItemRow
+                                                key={r.id}
+                                                title={r.name}
+                                                subtitle={r.description}
+                                                trailing={
+                                                    <RowDelete
+                                                        title={t("sxCommonRemove")}
+                                                        onClick={() => removeComposite(r)}
+                                                    />
+                                                }
+                                            />
+                                        ))}
+                                    </Group>
                                 )}
                             </div>
                         )}
 
                         {subTab === "users" &&
                             (loadingUsers ? (
-                                <div className="flex justify-center py-16">
-                                    <Spinner className="size-6" />
-                                </div>
-                            ) : (
-                                <DataTable
-                                    head={["Kullanıcı", "E-posta"]}
-                                    empty="Bu role sahip kullanıcı yok."
-                                    rows={users.map(u => [
-                                        <span className="font-medium text-foreground">
-                                            {u.username || "—"}
-                                        </span>,
-                                        <span>{u.email || "—"}</span>
-                                    ])}
+                                <ListSkeleton />
+                            ) : usersFailed ? (
+                                <Notice
+                                    title={t("sxClientDetailRoleUsersLoadErrorTitle")}
+                                    description={t("sxLoadErrorDescription")}
+                                    onRetry={loadUsers}
                                 />
+                            ) : users.length === 0 ? (
+                                <Notice
+                                    title={t("sxClientDetailNoRoleUsersTitle")}
+                                    description={t("sxClientDetailNoRoleUsersDescription")}
+                                />
+                            ) : (
+                                <Group>
+                                    {users.map(u => (
+                                        <ItemRow
+                                            key={u.id}
+                                            title={u.username || "—"}
+                                            subtitle={u.email || "—"}
+                                        />
+                                    ))}
+                                </Group>
                             ))}
                     </div>
                 </ModalBody>
                 <ModalFooter>
                     {(subTab === "settings" || subTab === "attributes") && (
-                        <Button
-                            disabled={saving}
-                            onClick={save}
-                        >
-                            {saving ? "Kaydediliyor…" : "Kaydet"}
+                        <Button disabled={saving} onClick={save}>
+                            {saving ? t("sxCommonSaving") : t("sxCommonSave")}
                         </Button>
                     )}
                 </ModalFooter>
@@ -1878,13 +1899,14 @@ function RoleDetailModal({
 }
 
 function CreateRole({ id, adminClient, addAlert, addError, onClose, onCreated }: any) {
+    const t = useT();
     const [name, setName] = useState("");
     const [description, setDescription] = useState("");
     const [saving, setSaving] = useState(false);
 
     const create = async () => {
         if (!name.trim()) {
-            addError("Rol adı gerekli.", new Error("name"));
+            addError(t("sxClientDetailRoleNameRequired"), new Error("name"));
             return;
         }
         setSaving(true);
@@ -1893,10 +1915,10 @@ function CreateRole({ id, adminClient, addAlert, addError, onClose, onCreated }:
                 { id },
                 { name: name.trim(), description: description.trim() || undefined }
             );
-            addAlert("Rol oluşturuldu.", AlertVariant.success);
+            addAlert(t("sxClientDetailRoleCreated"), AlertVariant.success);
             await onCreated();
         } catch (err) {
-            addError("Rol oluşturulamadı.", err);
+            addError(t("sxClientDetailRoleCreateFailed"), err);
         } finally {
             setSaving(false);
         }
@@ -1906,21 +1928,23 @@ function CreateRole({ id, adminClient, addAlert, addError, onClose, onCreated }:
         <Modal open onOpenChange={o => !o && onClose()}>
             <ModalContent>
                 <ModalHeader>
-                    <ModalTitle>Rol oluştur</ModalTitle>
+                    <ModalTitle>{t("sxClientDetailCreateRole")}</ModalTitle>
                 </ModalHeader>
                 <ModalBody>
-                    <div className="space-y-4">
-                        <Field>
-                            <FieldLabel>Rol adı <span className="text-destructive">*</span></FieldLabel>
+                    <div className="flex flex-col gap-4">
+                        <Field size="lg">
+                            <FieldLabel>{t("sxClientDetailRoleName")} <span className="text-destructive">*</span></FieldLabel>
                             <Input
+                                size="lg"
                                 value={name}
                                 onChange={e => setName(e.target.value)}
                                 placeholder="my-role"
                             />
                         </Field>
-                        <Field>
-                            <FieldLabel>Açıklama</FieldLabel>
+                        <Field size="lg">
+                            <FieldLabel>{t("sxCommonDescription")}</FieldLabel>
                             <Textarea
+                                size="lg"
                                 value={description}
                                 onChange={e => setDescription(e.target.value)}
                             />
@@ -1932,7 +1956,7 @@ function CreateRole({ id, adminClient, addAlert, addError, onClose, onCreated }:
                         disabled={saving}
                         onClick={create}
                     >
-                        Oluştur
+                        {t("sxCommonCreate")}
                     </Button>
                 </ModalFooter>
             </ModalContent>
@@ -1940,8 +1964,9 @@ function CreateRole({ id, adminClient, addAlert, addError, onClose, onCreated }:
     );
 }
 
-/* ── 4. İstemci Kapsamları ──────────────────────────────────────────────── */
 function ScopesTab({ id, clientId, adminClient, addAlert, addError, reload }: any) {
+    const t = useT();
+    const [failed, setFailed] = useState(false);
     const [subTab, setSubTab] = useState("setup");
     const [dedicatedOpen, setDedicatedOpen] = useState(false);
     const [addOpen, setAddOpen] = useState(false);
@@ -1954,21 +1979,22 @@ function ScopesTab({ id, clientId, adminClient, addAlert, addError, reload }: an
 
     const load = useCallback(async () => {
         setLoading(true);
+        setFailed(false);
         try {
             const [d, o, a] = await Promise.all([
-                adminClient.clients.listDefaultClientScopes({ id }).catch(() => []),
-                adminClient.clients.listOptionalClientScopes({ id }).catch(() => []),
-                adminClient.clientScopes.find().catch(() => [])
+                adminClient.clients.listDefaultClientScopes({ id }),
+                adminClient.clients.listOptionalClientScopes({ id }),
+                adminClient.clientScopes.find()
             ]);
             setDef(d ?? []);
             setOpt(o ?? []);
             setAll(a ?? []);
-        } catch (err) {
-            addError("İstemci kapsamları yüklenemedi.", err);
+        } catch {
+            setFailed(true);
         } finally {
             setLoading(false);
         }
-    }, [adminClient, id, addError]);
+    }, [adminClient, id]);
 
     useEffect(() => {
         load();
@@ -1994,13 +2020,13 @@ function ScopesTab({ id, clientId, adminClient, addAlert, addError, reload }: an
                     });
             }
             addAlert(
-                ids.length > 1 ? `${ids.length} kapsam eklendi.` : "Kapsam eklendi.",
+                ids.length > 1 ? t("sxClientDetailScopesAdded", { n: ids.length }) : t("sxClientDetailScopeAdded"),
                 AlertVariant.success
             );
             setAddOpen(false);
             await load();
         } catch (err) {
-            addError("Kapsam eklenemedi.", err);
+            addError(t("sxClientDetailScopeAddFailed"), err);
         }
     };
 
@@ -2010,10 +2036,10 @@ function ScopesTab({ id, clientId, adminClient, addAlert, addError, reload }: an
                 id,
                 clientScopeId: scope.id
             });
-            addAlert("Kapsam kaldırıldı.", AlertVariant.success);
+            addAlert(t("sxClientDetailScopeRemoved"), AlertVariant.success);
             await load();
         } catch (err) {
-            addError("Kapsam kaldırılamadı.", err);
+            addError(t("sxClientDetailScopeRemoveFailed"), err);
         }
     };
 
@@ -2023,14 +2049,13 @@ function ScopesTab({ id, clientId, adminClient, addAlert, addError, reload }: an
                 id,
                 clientScopeId: scope.id
             });
-            addAlert("Kapsam kaldırıldı.", AlertVariant.success);
+            addAlert(t("sxClientDetailScopeRemoved"), AlertVariant.success);
             await load();
         } catch (err) {
-            addError("Kapsam kaldırılamadı.", err);
+            addError(t("sxClientDetailScopeRemoveFailed"), err);
         }
     };
 
-    // Move an already-assigned scope between default ↔ optional.
     const changeType = async (scope: any, currentType: string, newType: string) => {
         if (currentType === newType) return;
         try {
@@ -2054,10 +2079,10 @@ function ScopesTab({ id, clientId, adminClient, addAlert, addError, reload }: an
                     id,
                     clientScopeId: scope.id
                 });
-            addAlert("Kapsam türü güncellendi.", AlertVariant.success);
+            addAlert(t("sxClientDetailScopeTypeUpdated"), AlertVariant.success);
             await load();
         } catch (err) {
-            addError("Kapsam türü güncellenemedi.", err);
+            addError(t("sxClientDetailScopeTypeUpdateFailed"), err);
         }
     };
 
@@ -2070,120 +2095,112 @@ function ScopesTab({ id, clientId, adminClient, addAlert, addError, reload }: an
         [def, opt]
     );
 
-    if (loading) return (
-            <div className="flex justify-center py-16">
-                <Spinner className="size-6" />
-            </div>
+    if (loading) return <ListSkeleton />;
+
+    if (failed)
+        return (
+            <Notice
+                title={t("sxClientDetailScopesLoadErrorTitle")}
+                description={t("sxLoadErrorDescription")}
+                onRetry={load}
+            />
         );
 
-    const _scopeRows = (scopes: any[], remove: (s: any) => void) =>
-        scopes.map(s => [
-            <span className="font-medium text-foreground">{s.name}</span>,
-            <div className="flex justify-end">
-                <Button
-                    variant="destructive"
-                    onClick={() => remove(s)}
-                >
-                    Kaldır
-                </Button>
-            </div>
-        ]);
-
     return (
-        <div className="space-y-4">
-            <Tabs value={subTab} onValueChange={setSubTab}>
-                <TabsList variant="line">
-                    {([
-                    { key: "setup", label: "Kurulum" },
-                    { key: "evaluate", label: "Değerlendir" }
-                ]).map((t: any) => (
-                        <TabsTrigger key={t.key} value={t.key}>
-                            {t.label}
-                        </TabsTrigger>
-                    ))}
-                </TabsList>
-            </Tabs>
+        <div className="flex flex-col gap-6">
+            <SegmentTabs
+                ariaLabel={t("sxClientDetailScopeSectionsAria")}
+                value={subTab}
+                onChange={setSubTab}
+                items={[
+                    { value: "setup", label: t("sxClientDetailScopeSetup") },
+                    { value: "evaluate", label: t("sxClientDetailScopeEvaluate") }
+                ]}
+            />
 
             {subTab === "setup" && (
-                <div className="space-y-7">
-                    <div>
-                        <GroupLabel>İstemci Token'ı</GroupLabel>
-                        <Group>
-                            <Item size="sm" asChild>
-                                <button type="button" onClick={() => setDedicatedOpen(true)}>
-                                    <ItemMedia variant="icon">
-                                        <StackIcon weight="fill" />
-                                    </ItemMedia>
-                                    <ItemContent className="min-w-0">
-                                        <ItemTitle>Mapper'lar ve Scope</ItemTitle>
-                                        <ItemDescription>
-                                            Bu istemciye özel token özelleştirmesi
-                                        </ItemDescription>
-                                    </ItemContent>
-                                    <ItemActions>
-                                        <CaretRightIcon weight="bold" className="rtl:rotate-180" />
-                                    </ItemActions>
-                                </button>
-                            </Item>
-                        </Group>
-                    </div>
+                <>
+                    <Section label={t("sxClientDetailClientToken")}>
+                        <ListGroup>
+                            <ListRow
+                                leading={
+                                    <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">
+                                        <StackIcon weight="fill" className="size-4.5" />
+                                    </span>
+                                }
+                                title={t("sxClientDetailMappersAndScope")}
+                                subtitle={t("sxClientDetailMappersAndScopeHint")}
+                                onClick={() => setDedicatedOpen(true)}
+                            />
+                        </ListGroup>
+                    </Section>
 
-                    <div>
-                        <div className="ms-1 mb-2 flex items-center justify-between gap-3">
-                            <h3 className="text-sm font-medium text-muted-foreground">
-                                Atanmış Kapsamlar
-                            </h3>
-                            <Button
-                                variant="plain"
-                                size="sm"
+                    <Section
+                        label={t("sxClientDetailAssignedScopes")}
+                        action={
+                            <TextAction
                                 onClick={() => setAddOpen(true)}
                                 disabled={unassigned.length === 0}
                             >
-                                + Ekle
-                            </Button>
-                        </div>
-                        <Group>
-                            {assigned.length === 0 ? (
-                                <EmptyRow>Atanmış kapsam yok.</EmptyRow>
-                            ) : (
-                                assigned.map(s => (
-                                    <Item key={s.id} size="sm">
-                                        <ItemContent className="min-w-0">
-                                            <ItemTitle>{s.name}</ItemTitle>
-                                        </ItemContent>
-                                        <ItemActions>
-                                        <Select
-                                            value={s.type}
-                                            onValueChange={(v: string) =>
-                                                changeType(s, s.type, v)
-                                            }
-                                        >
-                                            <SelectTrigger size="sm" aria-label="Tür">
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent align="end">
-                                                <SelectItem value="default">
-                                                    Varsayılan
-                                                </SelectItem>
-                                                <SelectItem value="optional">
-                                                    İsteğe bağlı
-                                                </SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                        <RowDelete
-                                            onClick={() =>
-                                                s.type === "default"
-                                                    ? removeDefault(s)
-                                                    : removeOptional(s)
-                                            }
-                                        />
-                                        </ItemActions>
-                                    </Item>
-                                ))
-                            )}
-                        </Group>
-                    </div>
-                </div>
+                                {t("sxCommonAdd")}
+                            </TextAction>
+                        }
+                    >
+                        {assigned.length === 0 ? (
+                            <Notice
+                                title={t("sxClientDetailNoAssignedScopesTitle")}
+                                description={t("sxClientDetailNoAssignedScopesDescription")}
+                                action={
+                                    unassigned.length > 0 ? (
+                                        <Button variant="secondary" onClick={() => setAddOpen(true)}>
+                                            {t("sxClientDetailAddScope")}
+                                        </Button>
+                                    ) : undefined
+                                }
+                            />
+                        ) : (
+                            <Group>
+                                {assigned.map(s => (
+                                    <ItemRow
+                                        key={s.id}
+                                        title={s.name}
+                                        subtitle={s.description}
+                                        trailing={
+                                            <>
+                                                <Select
+                                                    value={s.type}
+                                                    onValueChange={(v: string) =>
+                                                        changeType(s, s.type, v)
+                                                    }
+                                                >
+                                                    <SelectTrigger size="sm" aria-label={t("sxClientDetailType")}>
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent align="end">
+                                                        <SelectItem value="default">
+                                                            {t("sxCommonDefault")}
+                                                        </SelectItem>
+                                                        <SelectItem value="optional">
+                                                            {t("sxClientDetailOptional")}
+                                                        </SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                                <RowDelete
+                                                    title={t("sxCommonRemove")}
+                                                    onClick={() =>
+                                                        s.type === "default"
+                                                            ? removeDefault(s)
+                                                            : removeOptional(s)
+                                                    }
+                                                />
+                                            </>
+                                        }
+                                    />
+                                ))}
+                            </Group>
+                        )}
+                    </Section>
+                </>
             )}
 
             {subTab === "evaluate" && (
@@ -2214,6 +2231,7 @@ function ScopesTab({ id, clientId, adminClient, addAlert, addError, reload }: an
 }
 
 function AddScopeModal({ unassigned, onAdd, onClose }: any) {
+    const t = useT();
     const [search, setSearch] = useState("");
     const [type, setType] = useState("default");
     const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -2233,64 +2251,50 @@ function AddScopeModal({ unassigned, onAdd, onClose }: any) {
         <Modal open onOpenChange={o => !o && onClose()}>
             <ModalContent className="sm:max-w-2xl">
                 <ModalHeader>
-                    <ModalTitle>Kapsam ekle</ModalTitle>
+                    <ModalTitle>{t("sxClientDetailAddScope")}</ModalTitle>
                 </ModalHeader>
                 <ModalBody>
-                    <div className="space-y-4">
-                        {/* Search */}
-                        <InputGroup>
-                            <InputGroupAddon>
-                                <MagnifyingGlassIcon />
-                            </InputGroupAddon>
-                            <InputGroupInput
-                                type="search"
-                                value={search}
-                                onChange={e => setSearch(e.target.value)}
-                                placeholder="Kapsam ara"
-                            />
-                        </InputGroup>
+                    <div className="flex flex-col gap-4">
+                        <SearchField value={search} onChange={setSearch} placeholder={t("sxClientDetailSearchScope")} />
 
-                        {/* Available scopes */}
                         <div className="max-h-80 overflow-y-auto">
                             {filtered.length === 0 ? (
-                                <EmptyRow>Eklenebilecek kapsam yok.</EmptyRow>
+                                <Notice
+                                    title={t("sxClientDetailNoScopesToAddTitle")}
+                                    description={
+                                        search
+                                            ? t("sxClientDetailNoSearchResultsDescription")
+                                            : t("sxClientDetailNoScopesToAddDescription")
+                                    }
+                                />
                             ) : (
                                 <Group>
-                                    {filtered.map((s: any) => {
-                                        const on = selected.has(s.id);
-                                        return (
-                                            <Item key={s.id} size="sm" asChild>
-                                                <button type="button" onClick={() => toggle(s.id)}>
-                                                    <ItemContent className="min-w-0">
-                                                        <ItemTitle>{s.name}</ItemTitle>
-                                                    </ItemContent>
-                                                    {on && (
-                                                        <ItemActions>
-                                                            <CheckIcon weight="bold" className="text-primary" />
-                                                        </ItemActions>
-                                                    )}
-                                                </button>
-                                            </Item>
-                                        );
-                                    })}
+                                    {filtered.map((s: any) => (
+                                        <SelectRow
+                                            key={s.id}
+                                            title={s.name}
+                                            subtitle={s.description}
+                                            selected={selected.has(s.id)}
+                                            onToggle={() => toggle(s.id)}
+                                        />
+                                    ))}
                                 </Group>
                             )}
                         </div>
 
-                        {/* Type — labeled value selector, by the add action */}
-                        <Separator />
-                        <div className="flex items-center justify-between gap-3">
-                            <span className="text-sm font-medium">Tür</span>
-                            <Select value={type} onValueChange={setType}>
-                                <SelectTrigger size="sm" aria-label="Tür">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent align="end" className="z-200">
-                                    <SelectItem value="default">Varsayılan</SelectItem>
-                                    <SelectItem value="optional">İsteğe bağlı</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
+                        <Group>
+                            <Row label={t("sxClientDetailType")}>
+                                <Select value={type} onValueChange={setType}>
+                                    <SelectTrigger size="sm" aria-label={t("sxClientDetailType")}>
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent align="end" className="z-200">
+                                        <SelectItem value="default">{t("sxCommonDefault")}</SelectItem>
+                                        <SelectItem value="optional">{t("sxClientDetailOptional")}</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </Row>
+                        </Group>
                     </div>
                 </ModalBody>
                 <ModalFooter>
@@ -2298,7 +2302,7 @@ function AddScopeModal({ unassigned, onAdd, onClose }: any) {
                         disabled={selected.size === 0}
                         onClick={() => onAdd([...selected], type)}
                     >
-                        {selected.size > 0 ? `Ekle (${selected.size})` : "Ekle"}
+                        {selected.size > 0 ? t("sxClientDetailAddWithCount", { n: selected.size }) : t("sxCommonAdd")}
                     </Button>
                 </ModalFooter>
             </ModalContent>
@@ -2314,9 +2318,11 @@ function DedicatedScopeModal({
     reload,
     onClose
 }: any) {
+    const t = useT();
+    const [failed, setFailed] = useState(false);
     const [serverInfo, setServerInfo] = useState<any>(null);
     const [tab, setTab] = useState("mappers");
-    const [view, setView] = useState("list"); // list | choose | predefined | pickType | config
+    const [view, setView] = useState("list");
     const [loading, setLoading] = useState(true);
     const [mappers, setMappers] = useState<any[]>([]);
     const [protocol, setProtocol] = useState("openid-connect");
@@ -2332,22 +2338,23 @@ function DedicatedScopeModal({
 
     const load = useCallback(async () => {
         setLoading(true);
+        setFailed(false);
         try {
             const [m, c, si] = await Promise.all([
-                adminClient.clients.listProtocolMappers({ id }).catch(() => []),
-                adminClient.clients.findOne({ id }).catch(() => null),
-                adminClient.serverInfo.find().catch(() => null)
+                adminClient.clients.listProtocolMappers({ id }),
+                adminClient.clients.findOne({ id }),
+                adminClient.serverInfo.find()
             ]);
             setMappers(Array.isArray(m) ? m : []);
             setProtocol(c?.protocol || "openid-connect");
             setFullScope(!!c?.fullScopeAllowed);
             setServerInfo(si);
-        } catch (err) {
-            addError("Yüklenemedi.", err);
+        } catch {
+            setFailed(true);
         } finally {
             setLoading(false);
         }
-    }, [adminClient, id, addError]);
+    }, [adminClient, id]);
 
     useEffect(() => {
         load();
@@ -2375,17 +2382,17 @@ function DedicatedScopeModal({
 
     const deleteMapper = (m: any) =>
         confirm({
-            title: "Mapper'ı sil",
-            message: `“${m.name}” mapper'ı silinecek. Emin misiniz?`,
-            confirmLabel: "Sil",
+            title: t("sxClientDetailDeleteMapperTitle"),
+            message: t("sxClientDetailDeleteMapperMessage", { name: m.name }),
+            confirmLabel: t("sxCommonDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.clients.delProtocolMapper({ id, mapperId: m.id });
-                    addAlert("Mapper silindi.", AlertVariant.success);
+                    addAlert(t("sxClientDetailMapperDeleted"), AlertVariant.success);
                     await load();
                 } catch (err) {
-                    addError("Mapper silinemedi.", err);
+                    addError(t("sxClientDetailMapperDeleteFailed"), err);
                 }
             }
         });
@@ -2397,11 +2404,11 @@ function DedicatedScopeModal({
         if (!reps.length) return;
         try {
             await adminClient.clients.addMultipleProtocolMappers({ id }, reps);
-            addAlert(`${reps.length} mapper eklendi.`, AlertVariant.success);
+            addAlert(t("sxClientDetailMappersAdded", { n: reps.length }), AlertVariant.success);
             goList();
             await load();
         } catch (err) {
-            addError("Mapper eklenemedi.", err);
+            addError(t("sxClientDetailMapperAddFailed"), err);
         }
     };
 
@@ -2421,11 +2428,11 @@ function DedicatedScopeModal({
                 { id },
                 { name: newName.trim(), protocol, protocolMapper: pickedType.id, config }
             );
-            addAlert("Mapper eklendi.", AlertVariant.success);
+            addAlert(t("sxClientDetailMapperAdded"), AlertVariant.success);
             goList();
             await load();
         } catch (err) {
-            addError("Mapper eklenemedi.", err);
+            addError(t("sxClientDetailMapperAddFailed"), err);
         } finally {
             setSaving(false);
         }
@@ -2436,274 +2443,208 @@ function DedicatedScopeModal({
         try {
             const client = await adminClient.clients.findOne({ id });
             await adminClient.clients.update({ id }, { ...client, fullScopeAllowed: v });
-            addAlert("Scope ayarı güncellendi.", AlertVariant.success);
+            addAlert(t("sxClientDetailScopeSettingUpdated"), AlertVariant.success);
             await reload?.();
         } catch (err) {
             setFullScope(!v);
-            addError("Scope ayarı güncellenemedi.", err);
+            addError(t("sxClientDetailScopeSettingUpdateFailed"), err);
         }
     };
-
-    const SubBack = ({ to, children }: any) => (
-        <Button variant="ghost" size="sm" onClick={() => setView(to)}>
-            <CaretLeftIcon weight="bold" />
-            {children}
-        </Button>
-    );
 
     const filteredBuiltins = availBuiltins.filter((b: any) =>
         (b.name || "").toLowerCase().includes(search.toLowerCase())
     );
-    const filteredTypes = mapperTypes.filter((t: any) =>
-        (t.name || "").toLowerCase().includes(search.toLowerCase())
+    const filteredTypes = mapperTypes.filter((mt: any) =>
+        (mt.name || "").toLowerCase().includes(search.toLowerCase())
     );
 
     return (
         <Modal open onOpenChange={o => !o && onClose()}>
             <ModalContent className="sm:max-w-2xl">
                 <ModalHeader>
-                    <ModalTitle>Mapper'lar ve Scope</ModalTitle>
+                    <ModalTitle>{t("sxClientDetailMappersAndScope")}</ModalTitle>
                 </ModalHeader>
                 <ModalBody>
-                    <div className="space-y-4">
+                    <div className="flex flex-col gap-4">
                         {loading ? (
-                            <div className="flex justify-center py-16">
-                                <Spinner className="size-6" />
-                            </div>
+                            <ListSkeleton />
+                        ) : failed ? (
+                            <Notice
+                                title={t("sxClientDetailMappersLoadErrorTitle")}
+                                description={t("sxLoadErrorDescription")}
+                                onRetry={load}
+                            />
                         ) : view === "list" ? (
                             <>
-                                <Tabs value={tab} onValueChange={setTab}>
-                                    <TabsList variant="line">
-                                        {([
-                                        { key: "mappers", label: "Mappers" },
-                                        { key: "scope", label: "Scope" }
-                                    ]).map((t: any) => (
-                                            <TabsTrigger key={t.key} value={t.key}>
-                                                {t.label}
-                                            </TabsTrigger>
-                                        ))}
-                                    </TabsList>
-                                </Tabs>
+                                <div className="min-w-0 overflow-hidden">
+                                    <SegmentTabs
+                                        ariaLabel={t("sxClientDetailSectionAria")}
+                                        value={tab}
+                                        onChange={setTab}
+                                        items={[
+                                            { value: "mappers", label: t("sxClientDetailMappers") },
+                                            { value: "scope", label: t("sxClientDetailScope") }
+                                        ]}
+                                    />
+                                </div>
                                 {tab === "mappers" ? (
-                                    <div className="space-y-3">
-                                        <div className="ms-1 flex items-center justify-between">
-                                            <h3 className="text-sm font-medium text-muted-foreground">
-                                                Mapper'lar
-                                            </h3>
-                                            <Button
-                                                variant="plain"
-                                                size="sm"
-                                                onClick={() => setView("choose")}
-                                            >
-                                                + Ekle
-                                            </Button>
-                                        </div>
+                                    <Section
+                                        label={t("sxClientDetailMappers")}
+                                        action={
+                                            <TextAction onClick={() => setView("choose")}>
+                                                {t("sxCommonAdd")}
+                                            </TextAction>
+                                        }
+                                    >
                                         {mappers.length === 0 ? (
                                             <EmptyCard
-                                                icon={<StackIcon weight="fill" />}
-                                                title="Mapper yok"
-                                                desc="Token'a claim eklemek için bir mapper ekleyin."
+                                                title={t("sxClientDetailNoMappersTitle")}
+                                                desc={t("sxClientDetailNoMappersDescription")}
                                                 action={
                                                     <Button
                                                         variant="secondary"
                                                         onClick={() => setView("choose")}
                                                     >
-                                                        Ekle
+                                                        {t("sxClientDetailAddMapper")}
                                                     </Button>
                                                 }
                                             />
                                         ) : (
                                             <Group>
                                                 {mappers.map(m => (
-                                                    <Item key={m.id} size="sm">
-                                                        <ItemContent className="min-w-0">
-                                                            <ItemTitle>{m.name}</ItemTitle>
-                                                            <ItemDescription className="truncate">
-                                                                {m.protocolMapper}
-                                                            </ItemDescription>
-                                                        </ItemContent>
-                                                        <ItemActions>
+                                                    <ItemRow
+                                                        key={m.id}
+                                                        title={m.name}
+                                                        subtitle={m.protocolMapper}
+                                                        trailing={
                                                             <RowDelete
                                                                 onClick={() => deleteMapper(m)}
                                                             />
-                                                        </ItemActions>
-                                                    </Item>
+                                                        }
+                                                    />
                                                 ))}
                                             </Group>
                                         )}
-                                    </div>
+                                    </Section>
                                 ) : (
                                     <div>
                                         <Group>
-                                            <Row
-                                                label="Tam kapsam izni"
-                                                hint="Açıkken istemci, kullanıcının tüm rollerini token'da alır."
-                                            >
-                                                <Switch
-                                                    checked={fullScope}
-                                                    onCheckedChange={toggleFullScope}
-                                                />
-                                            </Row>
+                                            <SwitchRow
+                                                label={t("sxClientDetailFullScopeAllowed")}
+                                                hint={t("sxClientDetailFullScopeAllowedHint")}
+                                                checked={fullScope}
+                                                onChange={toggleFullScope}
+                                            />
                                         </Group>
-                                        <GroupFooter>
-                                            Kapalıyken yalnızca atanmış rol kapsam eşlemeleri
-                                            token'a dahil edilir.
-                                        </GroupFooter>
+                                        <GroupFooter>{t("sxClientDetailFullScopeFooter")}</GroupFooter>
                                     </div>
                                 )}
                             </>
                         ) : view === "choose" ? (
-                            <div className="space-y-3">
-                                <SubBack to="list">Mapper'lar</SubBack>
-                                <Group>
-                                    <Item size="sm" asChild>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setSearch("");
-                                                setSelected(new Set());
-                                                setView("predefined");
-                                            }}
-                                        >
-                                            <ItemContent>
-                                                <ItemTitle>Hazır mapper ekle</ItemTitle>
-                                                <ItemDescription>Standart claim'leri listeden seç</ItemDescription>
-                                            </ItemContent>
-                                            <ItemActions>
-                                                <CaretRightIcon weight="bold" className="rtl:rotate-180" />
-                                            </ItemActions>
-                                        </button>
-                                    </Item>
-                                    <Item size="sm" asChild>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setSearch("");
-                                                setView("pickType");
-                                            }}
-                                        >
-                                            <ItemContent>
-                                                <ItemTitle>Yeni mapper yapılandır</ItemTitle>
-                                                <ItemDescription>Bir tip seçip özel claim oluştur</ItemDescription>
-                                            </ItemContent>
-                                            <ItemActions>
-                                                <CaretRightIcon weight="bold" className="rtl:rotate-180" />
-                                            </ItemActions>
-                                        </button>
-                                    </Item>
-                                </Group>
+                            <div className="flex flex-col gap-3">
+                                <SubBack onClick={() => setView("list")}>{t("sxClientDetailMappers")}</SubBack>
+                                <ListGroup>
+                                    <ListRow
+                                        title={t("sxClientDetailAddPredefinedMapper")}
+                                        subtitle={t("sxClientDetailAddPredefinedMapperHint")}
+                                        onClick={() => {
+                                            setSearch("");
+                                            setSelected(new Set());
+                                            setView("predefined");
+                                        }}
+                                    />
+                                    <ListRow
+                                        title={t("sxClientDetailConfigureNewMapper")}
+                                        subtitle={t("sxClientDetailConfigureNewMapperHint")}
+                                        onClick={() => {
+                                            setSearch("");
+                                            setView("pickType");
+                                        }}
+                                    />
+                                </ListGroup>
                             </div>
                         ) : view === "predefined" ? (
-                            <div className="space-y-3">
-                                <SubBack to="choose">Geri</SubBack>
-                                <InputGroup>
-                                    <InputGroupAddon>
-                                        <MagnifyingGlassIcon />
-                                    </InputGroupAddon>
-                                    <InputGroupInput
-                                        type="search"
-                                        value={search}
-                                        onChange={e => setSearch(e.target.value)}
-                                        placeholder="Mapper ara"
-                                    />
-                                </InputGroup>
+                            <div className="flex flex-col gap-3">
+                                <SubBack onClick={() => setView("choose")}>{t("sxCommonBack")}</SubBack>
+                                <SearchField value={search} onChange={setSearch} placeholder={t("sxClientDetailSearchMapper")} />
                                 <div className="max-h-72 overflow-y-auto">
                                     {filteredBuiltins.length === 0 ? (
-                                        <EmptyRow>Eklenebilecek hazır mapper yok.</EmptyRow>
+                                        <Notice
+                                            title={t("sxClientDetailNoPredefinedMappersTitle")}
+                                            description={
+                                                search
+                                                    ? t("sxClientDetailNoSearchResultsDescription")
+                                                    : t("sxClientDetailNoPredefinedMappersDescription")
+                                            }
+                                        />
                                     ) : (
                                         <Group>
-                                            {filteredBuiltins.map((b: any) => {
-                                                const on = selected.has(b.name);
-                                                return (
-                                                    <Item key={b.name} size="sm" asChild>
-                                                        <button type="button" onClick={() => toggleSel(b.name)}>
-                                                            <ItemContent className="min-w-0">
-                                                                <ItemTitle>{b.name}</ItemTitle>
-                                                            </ItemContent>
-                                                            {on && (
-                                                                <ItemActions>
-                                                                    <CheckIcon weight="bold" className="text-primary" />
-                                                                </ItemActions>
-                                                            )}
-                                                        </button>
-                                                    </Item>
-                                                );
-                                            })}
-                                        </Group>
-                                    )}
-                                </div>
-                                <Button
-                                    block
-                                    disabled={selected.size === 0}
-                                    onClick={addPredefined}
-                                >
-                                    {selected.size > 0 ? `Ekle (${selected.size})` : "Ekle"}
-                                </Button>
-                            </div>
-                        ) : view === "pickType" ? (
-                            <div className="space-y-3">
-                                <SubBack to="choose">Geri</SubBack>
-                                <InputGroup>
-                                    <InputGroupAddon>
-                                        <MagnifyingGlassIcon />
-                                    </InputGroupAddon>
-                                    <InputGroupInput
-                                        type="search"
-                                        value={search}
-                                        onChange={e => setSearch(e.target.value)}
-                                        placeholder="Mapper tipi ara"
-                                    />
-                                </InputGroup>
-                                <div className="max-h-72 overflow-y-auto">
-                                    {filteredTypes.length === 0 ? (
-                                        <EmptyRow>Mapper tipi yok.</EmptyRow>
-                                    ) : (
-                                        <Group>
-                                            {filteredTypes.map((t: any) => (
-                                                <Item key={t.id} size="sm" asChild>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setPickedType(t);
-                                                            setNewName(t.name);
-                                                            setNewConfig({});
-                                                            setView("config");
-                                                        }}
-                                                    >
-                                                        <ItemContent className="min-w-0">
-                                                            <ItemTitle>{t.name}</ItemTitle>
-                                                            {t.category && (
-                                                                <ItemDescription className="truncate">
-                                                                    {t.category}
-                                                                </ItemDescription>
-                                                            )}
-                                                        </ItemContent>
-                                                        <ItemActions>
-                                                            <CaretRightIcon
-                                                                weight="bold"
-                                                                className="rtl:rotate-180"
-                                                            />
-                                                        </ItemActions>
-                                                    </button>
-                                                </Item>
+                                            {filteredBuiltins.map((b: any) => (
+                                                <SelectRow
+                                                    key={b.name}
+                                                    title={b.name}
+                                                    selected={selected.has(b.name)}
+                                                    onToggle={() => toggleSel(b.name)}
+                                                />
                                             ))}
                                         </Group>
                                     )}
                                 </div>
+                                <SaveBar>
+                                    <Button
+                                        size="form"
+                                        disabled={selected.size === 0}
+                                        onClick={addPredefined}
+                                    >
+                                        {selected.size > 0 ? t("sxClientDetailAddWithCount", { n: selected.size }) : t("sxCommonAdd")}
+                                    </Button>
+                                </SaveBar>
+                            </div>
+                        ) : view === "pickType" ? (
+                            <div className="flex flex-col gap-3">
+                                <SubBack onClick={() => setView("choose")}>{t("sxCommonBack")}</SubBack>
+                                <SearchField value={search} onChange={setSearch} placeholder={t("sxClientDetailSearchMapperType")} />
+                                <div className="max-h-72 overflow-y-auto">
+                                    {filteredTypes.length === 0 ? (
+                                        <Notice
+                                            title={t("sxClientDetailNoMapperTypesTitle")}
+                                            description={
+                                                search
+                                                    ? t("sxClientDetailNoSearchResultsDescription")
+                                                    : t("sxClientDetailNoMapperTypesDescription")
+                                            }
+                                        />
+                                    ) : (
+                                        <ListGroup>
+                                            {filteredTypes.map((mt: any) => (
+                                                <ListRow
+                                                    key={mt.id}
+                                                    title={mt.name}
+                                                    subtitle={mt.category}
+                                                    onClick={() => {
+                                                        setPickedType(mt);
+                                                        setNewName(mt.name);
+                                                        setNewConfig({});
+                                                        setView("config");
+                                                    }}
+                                                />
+                                            ))}
+                                        </ListGroup>
+                                    )}
+                                </div>
                             </div>
                         ) : (
-                            <div className="space-y-4">
-                                <SubBack to="pickType">{pickedType?.name}</SubBack>
-                                <Group>
-                                    <Row label="Ad">
-                                        <Input
-                                            size="sm"
-                                            value={newName}
-                                            onChange={(e: any) => setNewName(e.target.value)}
-                                            placeholder="Mapper adı"
-                                        />
-                                    </Row>
-                                </Group>
+                            <div className="flex flex-col gap-4">
+                                <SubBack onClick={() => setView("pickType")}>{pickedType?.name}</SubBack>
+                                <Field size="lg">
+                                    <FieldLabel>{t("sxCommonName")}</FieldLabel>
+                                    <Input
+                                        size="lg"
+                                        value={newName}
+                                        onChange={(e: any) => setNewName(e.target.value)}
+                                        placeholder={t("sxClientDetailMapperName")}
+                                    />
+                                </Field>
                                 <ConfigForm
                                     properties={pickedType?.properties}
                                     value={newConfig}
@@ -2711,13 +2652,15 @@ function DedicatedScopeModal({
                                         setNewConfig((c: any) => ({ ...c, [name]: v }))
                                     }
                                 />
-                                <Button
-                                    block
-                                    disabled={saving || !newName.trim()}
-                                    onClick={saveNew}
-                                >
-                                    {saving ? "Kaydediliyor…" : "Kaydet"}
-                                </Button>
+                                <SaveBar>
+                                    <Button
+                                        size="form"
+                                        disabled={saving || !newName.trim()}
+                                        onClick={saveNew}
+                                    >
+                                        {saving ? t("sxCommonSaving") : t("sxCommonSave")}
+                                    </Button>
+                                </SaveBar>
                             </div>
                         )}
                     </div>
@@ -2729,11 +2672,13 @@ function DedicatedScopeModal({
 }
 
 function EvaluateScopes({ id, adminClient, addError }: any) {
+    const t = useT();
     const { realm } = useRealm();
     const [scope, setScope] = useState("");
     const [userSearch, setUserSearch] = useState("");
     const [userResults, setUserResults] = useState<any[]>([]);
     const [searching, setSearching] = useState(false);
+    const [searchedTerm, setSearchedTerm] = useState("");
     const [picked, setPicked] = useState<{ userId: string; username: string } | null>(
         null
     );
@@ -2748,7 +2693,6 @@ function EvaluateScopes({ id, adminClient, addError }: any) {
     const [tokenFailed, setTokenFailed] = useState(false);
     const [evaluating, setEvaluating] = useState(false);
 
-    // The API wants a space-joined list of effective (extra) scope names.
     const scopeParam = useMemo(
         () => lines(scope.replace(/[,\s]+/g, "\n")).join(" "),
         [scope]
@@ -2757,17 +2701,20 @@ function EvaluateScopes({ id, adminClient, addError }: any) {
     const searchUsers = async () => {
         if (!userSearch.trim()) {
             setUserResults([]);
+            setSearchedTerm("");
             return;
         }
         setSearching(true);
+        setSearchedTerm("");
         try {
             const list = await adminClient.users.find({
                 search: userSearch.trim(),
                 max: 20
             });
             setUserResults(Array.isArray(list) ? list : []);
+            setSearchedTerm(userSearch.trim());
         } catch (err) {
-            addError("Kullanıcılar aranamadı.", err);
+            addError(t("sxClientDetailUserSearchFailed"), err);
             setUserResults([]);
         } finally {
             setSearching(false);
@@ -2806,12 +2753,12 @@ function EvaluateScopes({ id, adminClient, addError }: any) {
             }
             if (uid) {
                 try {
-                    const t = await adminClient.clients.evaluateGenerateAccessToken({
+                    const generated = await adminClient.clients.evaluateGenerateAccessToken({
                         id,
                         userId: uid,
                         scope: scopeParam
                     });
-                    setToken(t ?? null);
+                    setToken(generated ?? null);
                 } catch {
                     setToken(null);
                     setTokenFailed(true);
@@ -2828,164 +2775,175 @@ function EvaluateScopes({ id, adminClient, addError }: any) {
         setPicked({ userId: u.id, username: u.username });
         setUserResults([]);
         setUserSearch("");
+        setSearchedTerm("");
     };
 
     return (
-        <div className="space-y-7">
-            <div>
-                <GroupLabel>Değerlendirme</GroupLabel>
-                <Group>
-                    <StackRow
-                        label="Kapsam parametresi"
-                        hint="İsteğe bağlı kapsam adları (boşluk veya virgülle ayrılmış)."
-                    >
-                        <Input
-                            size="sm"
-                            value={scope}
-                            onChange={(e: any) => setScope(e.target.value)}
-                            placeholder="address phone"
+        <div className="flex flex-col gap-6">
+            <Section label={t("sxClientDetailEvaluation")}>
+                <Stack>
+                    <FieldCard>
+                        <Field size="lg">
+                            <FieldLabel>{t("sxClientDetailScopeParameter")}</FieldLabel>
+                            <Input
+                                size="lg"
+                                value={scope}
+                                onChange={(e: any) => setScope(e.target.value)}
+                                placeholder="address phone"
+                            />
+                            <FieldDescription>{t("sxClientDetailScopeParameterHelp")}</FieldDescription>
+                        </Field>
+                        <Field size="lg">
+                            <FieldLabel>{t("sxClientDetailUserOptional")}</FieldLabel>
+                            {picked ? (
+                                <div className="flex min-w-0 items-center gap-3">
+                                    <Chip tone="info">
+                                        <span className="max-w-56 truncate">{picked.username}</span>
+                                    </Chip>
+                                    <TextAction tone="danger" onClick={() => setPicked(null)}>
+                                        {t("sxCommonRemove")}
+                                    </TextAction>
+                                </div>
+                            ) : (
+                                <div className="flex gap-2">
+                                    <Input
+                                        size="lg"
+                                        className="min-w-0 flex-1"
+                                        value={userSearch}
+                                        onChange={e => setUserSearch(e.target.value)}
+                                        onKeyDown={e => e.key === "Enter" && searchUsers()}
+                                        placeholder={t("sxClientDetailUserSearchPlaceholder")}
+                                    />
+                                    <Button
+                                        size="lg"
+                                        variant="secondary"
+                                        disabled={searching}
+                                        onClick={searchUsers}
+                                    >
+                                        {searching ? t("sxClientDetailSearching") : t("sxCommonSearch")}
+                                    </Button>
+                                </div>
+                            )}
+                            <FieldDescription>{t("sxClientDetailUserHelp")}</FieldDescription>
+                        </Field>
+                    </FieldCard>
+                    {!picked && searchedTerm && userResults.length === 0 && (
+                        <Notice
+                            title={t("sxClientDetailNoUsersFoundTitle")}
+                            description={t("sxClientDetailNoSearchResultsDescription")}
                         />
-                    </StackRow>
-                    <StackRow
-                        label="Kullanıcı (isteğe bağlı)"
-                        hint="Örnek token üretmek için bir kullanıcı seçin."
-                    >
-                        {picked ? (
-                            <div className="flex items-center gap-2">
-                                <Badge>{picked.username}</Badge>
-                                <Button
-                                    variant="destructive"
-                                    size="sm"
-                                    onClick={() => setPicked(null)}
-                                >
-                                    Kaldır
-                                </Button>
-                            </div>
-                        ) : (
-                            <div className="flex gap-2">
-                                <Input
-                                    size="md"
-                                    className="flex-1"
-                                    value={userSearch}
-                                    onChange={e => setUserSearch(e.target.value)}
-                                    onKeyDown={e => e.key === "Enter" && searchUsers()}
-                                    placeholder="Kullanıcı adı, e-posta…"
-                                />
-                                <Button
-                                    variant="secondary"
-                                    disabled={searching}
-                                    onClick={searchUsers}
-                                >
-                                    Ara
-                                </Button>
-                            </div>
-                        )}
-                    </StackRow>
+                    )}
                     {userResults.length > 0 && (
-                        <div className="max-h-56 overflow-y-auto">
-                            {userResults.map(u => (
-                                <Item key={u.id} size="xs" asChild>
-                                    <button type="button" onClick={() => pickUser(u)}>
-                                        <ItemContent>
-                                            <ItemTitle>{u.username}</ItemTitle>
-                                        </ItemContent>
-                                        <ItemActions>
-                                            <span className="text-sm text-muted-foreground">
-                                                {u.email || "—"}
-                                            </span>
-                                        </ItemActions>
-                                    </button>
-                                </Item>
-                            ))}
+                        <div className="max-h-72 overflow-y-auto">
+                            <ListGroup>
+                                {userResults.map(u => (
+                                    <ListRow
+                                        key={u.id}
+                                        title={u.username}
+                                        subtitle={u.email || "—"}
+                                        onClick={() => pickUser(u)}
+                                    />
+                                ))}
+                            </ListGroup>
                         </div>
                     )}
-                    <ActionRow onClick={() => evaluate()} disabled={evaluating}>
-                        {evaluating ? "Değerlendiriliyor…" : "Değerlendir"}
-                    </ActionRow>
-                </Group>
-                <GroupFooter>
-                    Etkin kapsamları, mapper'ları, rolleri ve örnek token'ı görüntüleyin.
-                </GroupFooter>
-            </div>
+                    <SaveBar>
+                        <Button size="form" onClick={() => evaluate()} disabled={evaluating}>
+                            {evaluating ? t("sxClientDetailEvaluating") : t("sxClientDetailScopeEvaluate")}
+                        </Button>
+                    </SaveBar>
+                </Stack>
+                <GroupFooter>{t("sxClientDetailEvaluateFooter")}</GroupFooter>
+            </Section>
 
             {evaluated && (
-                <div>
-                    <Tabs value={view} onValueChange={setView}>
-                        <TabsList variant="line">
-                            {([
-                            { key: "token", label: "Örnek token" },
-                            { key: "mappers", label: "Etkin mapper'lar" },
-                            { key: "roles", label: "Etkin roller" }
-                        ]).map((t: any) => (
-                                <TabsTrigger key={t.key} value={t.key}>
-                                    {t.label}
-                                </TabsTrigger>
-                            ))}
-                        </TabsList>
-                    </Tabs>
+                <div className="flex flex-col gap-4">
+                    <SegmentTabs
+                        ariaLabel={t("sxClientDetailResultAria")}
+                        value={view}
+                        onChange={setView}
+                        items={[
+                            { value: "token", label: t("sxClientDetailSampleToken") },
+                            { value: "mappers", label: t("sxClientDetailEffectiveMappers") },
+                            { value: "roles", label: t("sxClientDetailEffectiveRoles") }
+                        ]}
+                    />
 
-                    {view === "token" && (
-                        <div className="mt-4">
-                            {!picked ? (
-                                <EmptyRow>Örnek token için bir kullanıcı seçin.</EmptyRow>
-                            ) : tokenFailed ? (
-                                <EmptyRow>Token değerlendirilemedi.</EmptyRow>
-                            ) : (
-                                <CodeBlock size="sm">
-                                    <CodeBlockContent className="max-h-112 scroll-fade-y">
-                                        {token ? JSON.stringify(token, null, 2) : "—"}
-                                    </CodeBlockContent>
-                                </CodeBlock>
-                            )}
-                        </div>
-                    )}
+                    {evaluating ? (
+                        <ListSkeleton />
+                    ) : (
+                    <>
+                    {view === "token" &&
+                        (!picked ? (
+                            <Notice
+                                title={t("sxClientDetailPickUserTitle")}
+                                description={t("sxClientDetailPickUserDescription")}
+                            />
+                        ) : tokenFailed ? (
+                            <Notice
+                                title={t("sxClientDetailTokenEvalErrorTitle")}
+                                description={t("sxLoadErrorDescription")}
+                                onRetry={() => evaluate()}
+                            />
+                        ) : (
+                            <CodeBlock size="sm">
+                                <CodeBlockContent className="max-h-112 scroll-fade-y">
+                                    {token ? JSON.stringify(token, null, 2) : "—"}
+                                </CodeBlockContent>
+                            </CodeBlock>
+                        ))}
 
-                    {view === "mappers" && (
-                        <div className="mt-4">
-                            <Group>
-                                {mappersFailed ? (
-                                    <EmptyRow>Mapper'lar değerlendirilemedi.</EmptyRow>
-                                ) : (mappers ?? []).length === 0 ? (
-                                    <EmptyRow>Etkin mapper yok.</EmptyRow>
-                                ) : (
-                                    (mappers ?? []).map((m: any, i: number) => (
-                                        <Row
-                                            key={m.id || i}
-                                            label={m.name || "—"}
-                                            hint={m.category || m.protocol || undefined}
-                                        >
-                                            <span className="truncate text-sm text-muted-foreground">
-                                                {m.protocolMapper || "—"}
-                                            </span>
-                                        </Row>
-                                    ))
-                                )}
-                            </Group>
-                        </div>
-                    )}
+                    {view === "mappers" &&
+                        (mappersFailed ? (
+                            <Notice
+                                title={t("sxClientDetailMappersEvalErrorTitle")}
+                                description={t("sxLoadErrorDescription")}
+                                onRetry={() => evaluate()}
+                            />
+                        ) : (mappers ?? []).length === 0 ? (
+                            <Notice
+                                title={t("sxClientDetailNoEffectiveMappersTitle")}
+                                description={t("sxClientDetailNoEffectiveMappersDescription")}
+                            />
+                        ) : (
+                            <ListGroup>
+                                {(mappers ?? []).map((m: any, i: number) => (
+                                    <ListRow
+                                        key={m.id || i}
+                                        title={m.name || "—"}
+                                        subtitle={[m.protocolMapper, m.category || m.protocol]
+                                            .filter(Boolean)
+                                            .join(" · ") || "—"}
+                                    />
+                                ))}
+                            </ListGroup>
+                        ))}
 
-                    {view === "roles" && (
-                        <div className="mt-4">
-                            <Group>
-                                {rolesFailed ? (
-                                    <EmptyRow>Roller değerlendirilemedi.</EmptyRow>
-                                ) : (roles ?? []).length === 0 ? (
-                                    <EmptyRow>Etkin rol yok.</EmptyRow>
-                                ) : (
-                                    (roles ?? []).map((r: any, i: number) => (
-                                        <Row
-                                            key={r.id || i}
-                                            label={r.name || "—"}
-                                            hint={r.containerId || undefined}
-                                        >
-                                            {r.clientRole && (
-                                                <Badge>İstemci</Badge>
-                                            )}
-                                        </Row>
-                                    ))
-                                )}
-                            </Group>
-                        </div>
+                    {view === "roles" &&
+                        (rolesFailed ? (
+                            <Notice
+                                title={t("sxClientDetailRolesEvalErrorTitle")}
+                                description={t("sxLoadErrorDescription")}
+                                onRetry={() => evaluate()}
+                            />
+                        ) : (roles ?? []).length === 0 ? (
+                            <Notice
+                                title={t("sxClientDetailNoEffectiveRolesTitle")}
+                                description={t("sxClientDetailNoEffectiveRolesDescription")}
+                            />
+                        ) : (
+                            <ListGroup>
+                                {(roles ?? []).map((r: any, i: number) => (
+                                    <ListRow
+                                        key={r.id || i}
+                                        title={r.name || "—"}
+                                        subtitle={r.containerId || undefined}
+                                        trailing={r.clientRole ? <Chip>{t("sxClientDetailTitle")}</Chip> : undefined}
+                                    />
+                                ))}
+                            </ListGroup>
+                        ))}
+                    </>
                     )}
                 </div>
             )}
@@ -2993,9 +2951,10 @@ function EvaluateScopes({ id, adminClient, addError }: any) {
     );
 }
 
-/* ── 5. Servis Hesabı Rolleri ───────────────────────────────────────────── */
 function ServiceAccountTab({ id, adminClient, addAlert, addError }: any) {
+    const t = useT();
     const [loading, setLoading] = useState(true);
+    const [failed, setFailed] = useState(false);
     const [user, setUser] = useState<any>(null);
     const [roles, setRoles] = useState<any[]>([]);
     const [allRoles, setAllRoles] = useState<any[]>([]);
@@ -3003,23 +2962,24 @@ function ServiceAccountTab({ id, adminClient, addAlert, addError }: any) {
 
     const load = useCallback(async () => {
         setLoading(true);
+        setFailed(false);
         try {
             const u = await adminClient.clients.getServiceAccountUser({ id });
             setUser(u ?? null);
             if (u?.id) {
                 const [mapped, all] = await Promise.all([
-                    adminClient.users.listRealmRoleMappings({ id: u.id }).catch(() => []),
-                    adminClient.roles.find().catch(() => [])
+                    adminClient.users.listRealmRoleMappings({ id: u.id }),
+                    adminClient.roles.find()
                 ]);
                 setRoles(mapped ?? []);
                 setAllRoles(all ?? []);
             }
-        } catch (err) {
-            addError("Servis hesabı yüklenemedi.", err);
+        } catch {
+            setFailed(true);
         } finally {
             setLoading(false);
         }
-    }, [adminClient, id, addError]);
+    }, [adminClient, id]);
 
     useEffect(() => {
         load();
@@ -3035,11 +2995,11 @@ function ServiceAccountTab({ id, adminClient, addAlert, addError }: any) {
         if (!role || !user?.id) return;
         try {
             await adminClient.users.addRealmRoleMappings({ id: user.id, roles: [role] });
-            addAlert("Rol atandı.", AlertVariant.success);
+            addAlert(t("sxClientDetailRoleAssigned"), AlertVariant.success);
             setRoleToAdd("");
             await load();
         } catch (err) {
-            addError("Rol atanamadı.", err);
+            addError(t("sxClientDetailRoleAssignFailed"), err);
         }
     };
 
@@ -3047,71 +3007,72 @@ function ServiceAccountTab({ id, adminClient, addAlert, addError }: any) {
         if (!user?.id) return;
         try {
             await adminClient.users.delRealmRoleMappings({ id: user.id, roles: [role] });
-            addAlert("Rol kaldırıldı.", AlertVariant.success);
+            addAlert(t("sxClientDetailRoleRemoved"), AlertVariant.success);
             await load();
         } catch (err) {
-            addError("Rol kaldırılamadı.", err);
+            addError(t("sxClientDetailRoleRemoveFailed"), err);
         }
     };
 
-    if (loading) return (
-            <div className="flex justify-center py-16">
-                <Spinner className="size-6" />
-            </div>
+    if (loading) return <ListSkeleton />;
+
+    if (failed)
+        return (
+            <Notice
+                title={t("sxClientDetailServiceAccountLoadErrorTitle")}
+                description={t("sxLoadErrorDescription")}
+                onRetry={load}
+            />
         );
 
     return (
-        <div className="space-y-4">
-            <Card>
-                <CardHeader>
-                    <CardTitle>Realm rolü ata</CardTitle>
-                    <CardDescription>Servis hesabına bir realm rolü atayın.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                        <div className="flex-1">
-                            <Field>
-                                <FieldLabel>Rol</FieldLabel>
-                                <NativeSelect
-                                    className="w-full"
-                                    value={roleToAdd}
-                                    onChange={e => setRoleToAdd(e.target.value)}
-                                >
-                                    <NativeSelectOption value="">Rol seçin…</NativeSelectOption>
-                                    {assignable.map(r => (
-                                        <NativeSelectOption key={r.id} value={r.id}>
-                                            {r.name}
-                                        </NativeSelectOption>
-                                    ))}
-                                </NativeSelect>
-                            </Field>
+        <div className="flex flex-col gap-6">
+            <Section label={t("sxNavRealmRoles")}>
+                <Stack>
+                    <FieldCard>
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                            <div className="min-w-0 flex-1">
+                                <Field size="lg">
+                                    <FieldLabel>{t("sxClientDetailRole")}</FieldLabel>
+                                    <NativeSelect
+                                        size="lg"
+                                        className="w-full"
+                                        value={roleToAdd}
+                                        onChange={e => setRoleToAdd(e.target.value)}
+                                    >
+                                        <NativeSelectOption value="">{t("sxClientDetailSelectRole")}</NativeSelectOption>
+                                        {assignable.map(r => (
+                                            <NativeSelectOption key={r.id} value={r.id}>
+                                                {r.name}
+                                            </NativeSelectOption>
+                                        ))}
+                                    </NativeSelect>
+                                </Field>
+                            </div>
+                            <Button size="lg" disabled={!roleToAdd} onClick={assign}>
+                                {t("sxClientDetailAssign")}
+                            </Button>
                         </div>
-                        <Button
-                            variant="secondary"
-                            disabled={!roleToAdd}
-                            onClick={assign}
-                        >
-                            Ata
-                        </Button>
-                    </div>
-                </CardContent>
-            </Card>
-
-            <DataTable
-                head={["Rol", ""]}
-                empty="Atanmış rol yok."
-                rows={roles.map(r => [
-                    <span className="font-medium text-foreground">{r.name}</span>,
-                    <div className="flex justify-end">
-                        <Button
-                            variant="destructive"
-                            onClick={() => remove(r)}
-                        >
-                            Kaldır
-                        </Button>
-                    </div>
-                ])}
-            />
+                    </FieldCard>
+                    {roles.length === 0 ? (
+                        <Notice
+                            title={t("sxClientDetailNoAssignedRolesTitle")}
+                            description={t("sxClientDetailNoAssignedRolesDescription")}
+                        />
+                    ) : (
+                        <Group>
+                            {roles.map(r => (
+                                <ItemRow
+                                    key={r.id}
+                                    title={r.name}
+                                    subtitle={r.description}
+                                    trailing={<RowDelete title={t("sxCommonRemove")} onClick={() => remove(r)} />}
+                                />
+                            ))}
+                        </Group>
+                    )}
+                </Stack>
+            </Section>
 
             <ServiceAccountClientRoles
                 saUser={user}
@@ -3124,7 +3085,11 @@ function ServiceAccountTab({ id, adminClient, addAlert, addError }: any) {
 }
 
 function ServiceAccountClientRoles({ saUser, adminClient, addAlert, addError }: any) {
+    const t = useT();
     const [clients, setClients] = useState<any[]>([]);
+    const [clientsState, setClientsState] = useState<"loading" | "ready" | "error">("loading");
+    const [clientsAttempt, setClientsAttempt] = useState(0);
+    const [rolesFailed, setRolesFailed] = useState(false);
     const [chosenClientId, setChosenClientId] = useState("");
     const [clientRoles, setClientRoles] = useState<any[]>([]);
     const [mapped, setMapped] = useState<any[]>([]);
@@ -3134,17 +3099,20 @@ function ServiceAccountClientRoles({ saUser, adminClient, addAlert, addError }: 
     useEffect(() => {
         let alive = true;
         (async () => {
+            setClientsState("loading");
             try {
                 const list = await adminClient.clients.find();
-                if (alive) setClients(Array.isArray(list) ? list : []);
-            } catch (err) {
-                addError("İstemciler yüklenemedi.", err);
+                if (!alive) return;
+                setClients(Array.isArray(list) ? list : []);
+                setClientsState("ready");
+            } catch {
+                if (alive) setClientsState("error");
             }
         })();
         return () => {
             alive = false;
         };
-    }, [adminClient, addError]);
+    }, [adminClient, clientsAttempt]);
 
     const loadForClient = useCallback(
         async (clientUniqueId: string) => {
@@ -3154,22 +3122,23 @@ function ServiceAccountClientRoles({ saUser, adminClient, addAlert, addError }: 
                 return;
             }
             setLoadingRoles(true);
+            setRolesFailed(false);
             try {
                 const [all, mp] = await Promise.all([
-                    adminClient.clients.listRoles({ id: clientUniqueId }).catch(() => []),
-                    adminClient.users
-                        .listClientRoleMappings({ id: saUser.id, clientUniqueId })
-                        .catch(() => [])
+                    adminClient.clients.listRoles({ id: clientUniqueId }),
+                    adminClient.users.listClientRoleMappings({ id: saUser.id, clientUniqueId })
                 ]);
                 setClientRoles(Array.isArray(all) ? all : []);
                 setMapped(Array.isArray(mp) ? mp : []);
-            } catch (err) {
-                addError("İstemci rolleri yüklenemedi.", err);
+            } catch {
+                setClientRoles([]);
+                setMapped([]);
+                setRolesFailed(true);
             } finally {
                 setLoadingRoles(false);
             }
         },
-        [adminClient, saUser, addError]
+        [adminClient, saUser?.id]
     );
 
     const onChooseClient = (value: string) => {
@@ -3192,11 +3161,11 @@ function ServiceAccountClientRoles({ saUser, adminClient, addAlert, addError }: 
                 clientUniqueId: chosenClientId,
                 roles: [role]
             });
-            addAlert("İstemci rolü atandı.", AlertVariant.success);
+            addAlert(t("sxClientDetailClientRoleAssigned"), AlertVariant.success);
             setRoleToAdd("");
             await loadForClient(chosenClientId);
         } catch (err) {
-            addError("İstemci rolü atanamadı.", err);
+            addError(t("sxClientDetailClientRoleAssignFailed"), err);
         }
     };
 
@@ -3208,172 +3177,178 @@ function ServiceAccountClientRoles({ saUser, adminClient, addAlert, addError }: 
                 clientUniqueId: chosenClientId,
                 roles: [role]
             });
-            addAlert("İstemci rolü kaldırıldı.", AlertVariant.success);
+            addAlert(t("sxClientDetailClientRoleRemoved"), AlertVariant.success);
             await loadForClient(chosenClientId);
         } catch (err) {
-            addError("İstemci rolü kaldırılamadı.", err);
+            addError(t("sxClientDetailClientRoleRemoveFailed"), err);
         }
     };
 
     return (
-        <Card>
-            <CardHeader>
-                <CardTitle>İstemci rolü ata</CardTitle>
-                <CardDescription>Servis hesabına başka bir istemcinin rollerini atayın.</CardDescription>
-            </CardHeader>
-            <CardContent>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                    <div className="flex-1">
-                        <Field>
-                            <FieldLabel>İstemci</FieldLabel>
-                            <NativeSelect
-                                className="w-full"
-                                value={chosenClientId}
-                                onChange={e => onChooseClient(e.target.value)}
-                            >
-                                <NativeSelectOption value="">İstemci seçin…</NativeSelectOption>
-                                {clients.map(c => (
-                                    <NativeSelectOption key={c.id} value={c.id}>
-                                        {c.clientId}
-                                    </NativeSelectOption>
-                                ))}
-                            </NativeSelect>
-                        </Field>
-                    </div>
-                    <div className="flex-1">
-                        <Field>
-                            <FieldLabel>Rol</FieldLabel>
-                            <NativeSelect
-                                className="w-full"
-                                value={roleToAdd}
-                                disabled={!chosenClientId}
-                                onChange={e => setRoleToAdd(e.target.value)}
-                            >
-                                <NativeSelectOption value="">Rol seçin…</NativeSelectOption>
-                                {assignable.map(r => (
-                                    <NativeSelectOption key={r.id} value={r.id}>
-                                        {r.name}
-                                    </NativeSelectOption>
-                                ))}
-                            </NativeSelect>
-                        </Field>
-                    </div>
-                    <Button
-                        variant="secondary"
-                        disabled={!roleToAdd}
-                        onClick={assign}
-                    >
-                        Ata
-                    </Button>
-                </div>
-
-                {chosenClientId && (
-                    <div className="mt-4">
-                        {loadingRoles ? (
-                            <div className="flex justify-center py-16">
-                                <Spinner className="size-6" />
-                            </div>
-                        ) : (
-                            <DataTable
-                                head={["Rol", ""]}
-                                empty="Atanmış istemci rolü yok."
-                                rows={mapped.map(r => [
-                                    <span className="font-medium text-foreground">
-                                        {r.name}
-                                    </span>,
-                                    <div className="flex justify-end">
-                                        <Button
-                                            variant="destructive"
-                                            onClick={() => remove(r)}
-                                        >
-                                            Kaldır
-                                        </Button>
-                                    </div>
-                                ])}
-                            />
-                        )}
-                    </div>
+        <Section label={t("sxClientDetailClientRolesSection")}>
+            <Stack>
+                {clientsState === "error" && (
+                    <Notice
+                        title={t("sxClientDetailClientsLoadErrorTitle")}
+                        description={t("sxLoadErrorDescription")}
+                        onRetry={() => setClientsAttempt(n => n + 1)}
+                    />
                 )}
-            </CardContent>
-        </Card>
+                <FieldCard>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                        <div className="min-w-0 flex-1">
+                            <Field size="lg">
+                                <FieldLabel>{t("sxClientDetailTitle")}</FieldLabel>
+                                <NativeSelect
+                                    size="lg"
+                                    className="w-full"
+                                    value={chosenClientId}
+                                    disabled={clientsState !== "ready"}
+                                    onChange={e => onChooseClient(e.target.value)}
+                                >
+                                    <NativeSelectOption value="">
+                                        {clientsState === "loading" ? t("sxClientDetailLoadingClients") : t("sxClientDetailSelectClient")}
+                                    </NativeSelectOption>
+                                    {clients.map(c => (
+                                        <NativeSelectOption key={c.id} value={c.id}>
+                                            {c.clientId}
+                                        </NativeSelectOption>
+                                    ))}
+                                </NativeSelect>
+                            </Field>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                            <Field size="lg">
+                                <FieldLabel>{t("sxClientDetailRole")}</FieldLabel>
+                                <NativeSelect
+                                    size="lg"
+                                    className="w-full"
+                                    value={roleToAdd}
+                                    disabled={!chosenClientId}
+                                    onChange={e => setRoleToAdd(e.target.value)}
+                                >
+                                    <NativeSelectOption value="">{t("sxClientDetailSelectRole")}</NativeSelectOption>
+                                    {assignable.map(r => (
+                                        <NativeSelectOption key={r.id} value={r.id}>
+                                            {r.name}
+                                        </NativeSelectOption>
+                                    ))}
+                                </NativeSelect>
+                            </Field>
+                        </div>
+                        <Button size="lg" disabled={!roleToAdd} onClick={assign}>
+                            {t("sxClientDetailAssign")}
+                        </Button>
+                    </div>
+                </FieldCard>
+
+                {chosenClientId &&
+                    (loadingRoles ? (
+                        <ListSkeleton />
+                    ) : rolesFailed ? (
+                        <Notice
+                            title={t("sxClientDetailClientRolesLoadErrorTitle")}
+                            description={t("sxLoadErrorDescription")}
+                            onRetry={() => loadForClient(chosenClientId)}
+                        />
+                    ) : mapped.length === 0 ? (
+                        <Notice
+                            title={t("sxClientDetailNoAssignedClientRolesTitle")}
+                            description={t("sxClientDetailNoAssignedClientRolesDescription")}
+                        />
+                    ) : (
+                        <Group>
+                            {mapped.map(r => (
+                                <ItemRow
+                                    key={r.id}
+                                    title={r.name}
+                                    subtitle={r.description}
+                                    trailing={<RowDelete title={t("sxCommonRemove")} onClick={() => remove(r)} />}
+                                />
+                            ))}
+                        </Group>
+                    ))}
+            </Stack>
+            <GroupFooter>{t("sxClientDetailClientRolesFooter")}</GroupFooter>
+        </Section>
     );
 }
 
-/* ── 6. Oturumlar ───────────────────────────────────────────────────────── */
 function SessionsTab({ id, adminClient, addError }: any) {
+    const t = useT();
     const [loading, setLoading] = useState(true);
+    const [failed, setFailed] = useState(false);
     const [sessions, setSessions] = useState<any[]>([]);
 
     const load = useCallback(async () => {
         setLoading(true);
+        setFailed(false);
         try {
             const list = await adminClient.clients.listSessions({ id });
             setSessions(list ?? []);
-        } catch (err) {
-            addError("Oturumlar yüklenemedi.", err);
+        } catch {
+            setFailed(true);
         } finally {
             setLoading(false);
         }
-    }, [adminClient, id, addError]);
+    }, [adminClient, id]);
 
     useEffect(() => {
         load();
     }, [load]);
 
-    if (loading) return (
-            <div className="flex justify-center py-16">
-                <Spinner className="size-6" />
-            </div>
-        );
-
     return (
-        <div className="space-y-3">
-            <div className="ms-1 flex items-center justify-between">
-                <h3 className="text-sm font-medium text-muted-foreground">Aktif Oturumlar</h3>
-                {sessions.length > 0 && (
-                    <span className="text-xs text-muted-foreground tabular-nums">
+        <Section
+            label={t("sxClientDetailActiveSessions")}
+            action={
+                !loading && sessions.length > 0 ? (
+                    <span className="text-[13px] text-muted-foreground tabular-nums">
                         {sessions.length}
                     </span>
-                )}
-            </div>
-            {sessions.length === 0 ? (
-                <EmptyCard
-                    icon={<UsersThreeIcon weight="fill" />}
-                    title="Aktif oturum yok"
-                    desc="Bu istemcide şu an açık bir kullanıcı oturumu yok."
+                ) : undefined
+            }
+        >
+            {loading ? (
+                <ListSkeleton />
+            ) : failed ? (
+                <Notice
+                    title={t("sxClientDetailSessionsLoadErrorTitle")}
+                    description={t("sxLoadErrorDescription")}
+                    onRetry={load}
+                />
+            ) : sessions.length === 0 ? (
+                <Notice
+                    title={t("sxClientDetailNoSessionsTitle")}
+                    description={t("sxClientDetailNoSessionsDescription")}
                 />
             ) : (
-                <Group>
+                <ListGroup>
                     {sessions.map(s => (
-                        <Item key={s.id} size="sm">
-                            <ItemMedia>
-                                <Avatar size="lg">
-                                    <AvatarFallback>
-                                        {(s.username || "?").trim().charAt(0).toUpperCase() ||
-                                            "?"}
-                                    </AvatarFallback>
-                                </Avatar>
-                            </ItemMedia>
-                            <ItemContent className="min-w-0">
-                                <ItemTitle>{s.username || "—"}</ItemTitle>
-                                <ItemDescription className="truncate">
-                                    <span className="font-mono">
-                                        {s.ipAddress || "—"}
-                                    </span>
-                                    {" · Son erişim "}
-                                    {fmtDate(s.lastAccess)}
-                                </ItemDescription>
-                            </ItemContent>
-                            <ItemActions className="hidden sm:flex">
-                                <span className="text-xs text-muted-foreground tabular-nums">
+                        <ListRow
+                            key={s.id}
+                            leading={
+                                <span className="grid size-8 place-items-center rounded-full bg-[#6e6e73] text-[11px] font-semibold text-white dark:bg-[#48484a]">
+                                    {(s.username || "?").trim().charAt(0).toUpperCase() || "?"}
+                                </span>
+                            }
+                            title={s.username || "—"}
+                            subtitle={
+                                <>
+                                    <span className="font-mono">{s.ipAddress || "—"}</span>
+                                    {" · "}
+                                    {t("sxClientDetailLastAccess", { date: fmtDate(s.lastAccess) })}
+                                </>
+                            }
+                            trailing={
+                                <span className="hidden text-[13px] text-muted-foreground tabular-nums sm:inline">
                                     {fmtDate(s.start)}
                                 </span>
-                            </ItemActions>
-                        </Item>
+                            }
+                        />
                     ))}
-                </Group>
+                </ListGroup>
             )}
-        </div>
+        </Section>
     );
 }
 
@@ -3395,7 +3370,6 @@ const KEYSTORE_FORMATS = [
     { value: "Certificate PEM", label: "Certificate PEM" }
 ];
 
-/* ── 7. Keys (OIDC) ─────────────────────────────────────────────────────── */
 function KeysTab({
     id,
     edited,
@@ -3406,38 +3380,39 @@ function KeysTab({
     reload,
     confirm
 }: any) {
+    const t = useT();
     const [_saving, setSaving] = useState(false);
 
     const [cert, setCert] = useState<string>("");
     const [loadingCert, setLoadingCert] = useState(true);
+    const [certFailed, setCertFailed] = useState(false);
     const [keystoreFormat, setKeystoreFormat] = useState("JKS");
     const fileRef = useRef<HTMLInputElement>(null);
 
     const loadCert = useCallback(async () => {
         setLoadingCert(true);
+        setCertFailed(false);
         try {
             const info = await adminClient.clients.getKeyInfo({
                 id,
                 attr: "jwt.credential"
             });
             setCert(info?.certificate ?? "");
-        } catch (err) {
-            addError("Sertifika bilgisi yüklenemedi.", err);
+        } catch {
             setCert("");
+            setCertFailed(true);
         } finally {
             setLoadingCert(false);
         }
-    }, [adminClient, id, addError]);
+    }, [adminClient, id]);
 
     useEffect(() => {
         loadCert();
     }, [loadCert]);
 
-    if (!edited) return (
-            <div className="flex justify-center py-16">
-                <Spinner className="size-6" />
-            </div>
-        );
+    const savedJwksRef = useRef(edited?.attributes?.["jwks.url"] ?? "");
+
+    if (!edited) return <ListSkeleton />;
 
     const attrs = edited.attributes || {};
     const useJwksUrl = (attrs["use.jwks.url"] ?? "") === "true";
@@ -3453,16 +3428,15 @@ function KeysTab({
         setSaving(true);
         try {
             await adminClient.clients.update({ id }, payload);
-            addAlert("İstemci kaydedildi.", AlertVariant.success);
+            addAlert(t("sxClientDetailSaved"), AlertVariant.success);
             await reload();
         } catch (err) {
-            addError("İstemci kaydedilemedi.", err);
+            addError(t("sxClientDetailSaveFailed"), err);
         } finally {
             setSaving(false);
         }
     };
 
-    // Switch her iki yönde de anında backend'e yazılır (Apple: mod seçimi sessizce kalıcı olur).
     const toggleJwks = (v: boolean) => {
         const next = {
             ...edited,
@@ -3475,8 +3449,6 @@ function KeysTab({
         save(next);
     };
 
-    // URL alanı odaktan çıkınca / Enter'da sessizce commit eder; değişmediyse istek atılmaz.
-    const savedJwksRef = useRef(attrs["jwks.url"] ?? "");
     const commitJwksUrl = () => {
         const cur = edited.attributes?.["jwks.url"] ?? "";
         if (cur === savedJwksRef.current) return;
@@ -3486,18 +3458,17 @@ function KeysTab({
 
     const generateKey = () =>
         confirm({
-            title: "Yeni anahtar üret",
-            message:
-                "Yeni bir anahtar ve sertifika üretilecek; mevcut anahtarlar değiştirilecek. Emin misiniz?",
-            confirmLabel: "Üret",
+            title: t("sxClientDetailGenerateKeyTitle"),
+            message: t("sxClientDetailGenerateKeyMessage"),
+            confirmLabel: t("sxClientDetailGenerate"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.clients.generateKey({ id, attr: "jwt.credential" });
-                    addAlert("Yeni anahtar üretildi.", AlertVariant.success);
+                    addAlert(t("sxClientDetailKeyGenerated"), AlertVariant.success);
                     await loadCert();
                 } catch (err) {
-                    addError("Anahtar üretilemedi.", err);
+                    addError(t("sxClientDetailKeyGenerateFailed"), err);
                 }
             }
         });
@@ -3511,34 +3482,31 @@ function KeysTab({
             formData.append("keystoreFormat", keystoreFormat);
             formData.append("file", file);
             await adminClient.clients.uploadKey({ id, attr: "jwt.credential" }, formData);
-            addAlert("Sertifika içe aktarıldı.", AlertVariant.success);
+            addAlert(t("sxClientDetailCertImported"), AlertVariant.success);
             await loadCert();
         } catch (err) {
-            addError("Sertifika içe aktarılamadı.", err);
+            addError(t("sxClientDetailCertImportFailed"), err);
         }
     };
 
     const copyCert = () => {
         navigator.clipboard?.writeText(cert);
-        addAlert("Sertifika kopyalandı.", AlertVariant.success);
+        addAlert(t("sxClientDetailCertCopied"), AlertVariant.success);
     };
 
     return (
-        <div className="space-y-7">
-            {/* JWKS */}
-            <div>
-                <GroupLabel>JWKS</GroupLabel>
+        <div className="flex flex-col gap-6">
+            <Section label="JWKS">
                 <Group>
-                    <Row
-                        label="JWKS URL kullan"
-                        hint="İstemci, imza anahtarlarını bir JWKS uç noktasından sunar."
-                    >
-                        <Switch checked={useJwksUrl} onCheckedChange={toggleJwks} />
-                    </Row>
+                    <SwitchRow
+                        label={t("sxClientDetailUseJwksUrl")}
+                        hint={t("sxClientDetailUseJwksUrlHint")}
+                        checked={useJwksUrl}
+                        onChange={toggleJwks}
+                    />
                     {useJwksUrl && (
                         <StackRow label="JWKS URL">
                             <Input
-                                size="sm"
                                 value={attrs["jwks.url"] ?? ""}
                                 onChange={(e: any) => setAttr("jwks.url", e.target.value)}
                                 onBlur={commitJwksUrl}
@@ -3550,53 +3518,41 @@ function KeysTab({
                         </StackRow>
                     )}
                 </Group>
-                <GroupFooter>
-                    İmza ve şifreleme anahtarları JWKS uç noktası aracılığıyla
-                    yapılandırılabilir.
-                </GroupFooter>
-            </div>
+                <GroupFooter>{t("sxClientDetailJwksFooter")}</GroupFooter>
+            </Section>
 
-            {/* Certificate */}
-            <div>
-                <GroupLabel>İmza Anahtarı Sertifikası</GroupLabel>
-                <Group>
-                    {loadingCert ? (
-                        <div className="flex justify-center py-6">
-                            <Spinner className="size-6" />
-                        </div>
-                    ) : cert ? (
-                        <Item size="sm">
-                            <ItemContent className="min-w-0">
-                                <code className="max-h-32 overflow-y-auto break-all font-mono text-xs">
+            <Section label={t("sxClientDetailSigningCert")}>
+                {loadingCert ? (
+                    <ListSkeleton rows={1} />
+                ) : certFailed ? (
+                    <Notice
+                        title={t("sxClientDetailCertLoadErrorTitle")}
+                        description={t("sxLoadErrorDescription")}
+                        onRetry={loadCert}
+                    />
+                ) : (
+                    <Group>
+                        {cert ? (
+                            <div className="flex flex-col gap-3 px-4 py-3">
+                                <code className="block max-h-32 overflow-y-auto font-mono text-xs break-all text-muted-foreground">
                                     {cert}
                                 </code>
-                            </ItemContent>
-                            <ItemActions>
-                                <Button
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    onClick={copyCert}
-                                    aria-label="Kopyala"
-                                >
-                                    <CopyIcon />
-                                </Button>
-                            </ItemActions>
-                        </Item>
-                    ) : (
-                        <EmptyRow>Sertifika yok.</EmptyRow>
-                    )}
-                    <ActionRow danger onClick={generateKey}>
-                        Yeni anahtar üret
-                    </ActionRow>
-                </Group>
-                <GroupFooter>
-                    Yeni anahtar üretmek mevcut imza anahtarlarını değiştirir.
-                </GroupFooter>
-            </div>
+                                <TextAction className="self-start" onClick={copyCert}>
+                                    {t("sxCommonCopy")}
+                                </TextAction>
+                            </div>
+                        ) : (
+                            <EmptyRow>{t("sxClientDetailNoCert")}</EmptyRow>
+                        )}
+                        <ActionRow danger onClick={generateKey}>
+                            {t("sxClientDetailGenerateKeyTitle")}
+                        </ActionRow>
+                    </Group>
+                )}
+                <GroupFooter>{t("sxClientDetailGenerateKeyFooter")}</GroupFooter>
+            </Section>
 
-            {/* Import */}
-            <div>
-                <GroupLabel>Sertifika İçe Aktar</GroupLabel>
+            <Section label={t("sxClientDetailImportCert")}>
                 <input
                     ref={fileRef}
                     type="file"
@@ -3604,9 +3560,9 @@ function KeysTab({
                     className="hidden"
                 />
                 <Group>
-                    <Row label="Arşiv biçimi">
+                    <Row label={t("sxClientDetailArchiveFormat")}>
                         <Select value={keystoreFormat} onValueChange={setKeystoreFormat}>
-                            <SelectTrigger size="sm" aria-label="Arşiv biçimi">
+                            <SelectTrigger size="sm" aria-label={t("sxClientDetailArchiveFormat")}>
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent align="end">
@@ -3619,18 +3575,15 @@ function KeysTab({
                         </Select>
                     </Row>
                     <ActionRow onClick={() => fileRef.current?.click()}>
-                        Dosya seç ve içe aktar
+                        {t("sxClientDetailChooseFileImport")}
                     </ActionRow>
                 </Group>
-                <GroupFooter>
-                    Bir anahtar deposu veya sertifika dosyası yükleyin.
-                </GroupFooter>
-            </div>
+                <GroupFooter>{t("sxClientDetailImportCertFooter")}</GroupFooter>
+            </Section>
         </div>
     );
 }
 
-/* ── 8. Gelişmiş ────────────────────────────────────────────────────────── */
 function AdvancedTab({
     id,
     edited,
@@ -3640,33 +3593,32 @@ function AdvancedTab({
     addError,
     reload
 }: any) {
+    const t = useT();
     const [saving, setSaving] = useState(false);
     const [flows, setFlows] = useState<any[]>([]);
+    const [flowsState, setFlowsState] = useState<"loading" | "ready" | "error">("loading");
+    const [flowsAttempt, setFlowsAttempt] = useState(0);
     const [revoking, setRevoking] = useState(false);
 
     useEffect(() => {
         let alive = true;
         (async () => {
+            setFlowsState("loading");
             try {
                 const res = await adminClient.authenticationManagement.getFlows();
-                if (alive)
-                    setFlows(
-                        Array.isArray(res) ? res.filter((f: any) => f?.topLevel) : []
-                    );
-            } catch (err) {
-                addError("Akışlar yüklenemedi.", err);
+                if (!alive) return;
+                setFlows(Array.isArray(res) ? res.filter((f: any) => f?.topLevel) : []);
+                setFlowsState("ready");
+            } catch {
+                if (alive) setFlowsState("error");
             }
         })();
         return () => {
             alive = false;
         };
-    }, [adminClient, addError]);
+    }, [adminClient, flowsAttempt]);
 
-    if (!edited) return (
-            <div className="flex justify-center py-16">
-                <Spinner className="size-6" />
-            </div>
-        );
+    if (!edited) return <ListSkeleton />;
 
     const attrs = edited.attributes || {};
     const overrides = edited.authenticationFlowBindingOverrides || {};
@@ -3689,10 +3641,10 @@ function AdvancedTab({
         setSaving(true);
         try {
             await adminClient.clients.update({ id }, edited);
-            addAlert("İstemci kaydedildi.", AlertVariant.success);
+            addAlert(t("sxClientDetailSaved"), AlertVariant.success);
             await reload();
         } catch (err) {
-            addError("İstemci kaydedilemedi.", err);
+            addError(t("sxClientDetailSaveFailed"), err);
         } finally {
             setSaving(false);
         }
@@ -3702,9 +3654,9 @@ function AdvancedTab({
         setRevoking(true);
         try {
             await adminClient.clients.pushRevocation({ id });
-            addAlert("Tüm token'lar geçersiz kılındı.", AlertVariant.success);
+            addAlert(t("sxClientDetailRevoked"), AlertVariant.success);
         } catch (err) {
-            addError("Token'lar geçersiz kılınamadı.", err);
+            addError(t("sxClientDetailRevokeFailed"), err);
         } finally {
             setRevoking(false);
         }
@@ -3723,7 +3675,7 @@ function AdvancedTab({
                 <SelectContent align="end">
                     {ALG_OPTIONS.map(a => (
                         <SelectItem key={a || ALG_UNSET} value={a || ALG_UNSET}>
-                            {a === "" ? "Belirtilmemiş" : a}
+                            {a === "" ? t("sxClientDetailUnspecified") : a}
                         </SelectItem>
                     ))}
                 </SelectContent>
@@ -3740,11 +3692,11 @@ function AdvancedTab({
                     setOverride(key, v === FLOW_DEFAULT ? "" : v)
                 }
             >
-                <SelectTrigger size="sm" aria-label={label} className="max-w-52">
+                <SelectTrigger size="sm" aria-label={label} className="max-w-full sm:max-w-52">
                     <SelectValue />
                 </SelectTrigger>
                 <SelectContent align="end">
-                    <SelectItem value={FLOW_DEFAULT}>Varsayılan</SelectItem>
+                    <SelectItem value={FLOW_DEFAULT}>{t("sxCommonDefault")}</SelectItem>
                     {flows.map(f => (
                         <SelectItem key={f.id} value={f.id}>
                             {f.alias}
@@ -3756,35 +3708,32 @@ function AdvancedTab({
     );
 
     const numRow = (key: string, label: string) => (
-        <Row label={label} hint="saniye">
+        <Row label={label} hint={t("sxClientDetailSeconds")}>
             <Input
                 size="sm"
                 type="number"
+                className="w-full sm:w-40"
                 value={attrs[key] ?? ""}
                 onChange={(e: any) => setAttr(key, e.target.value)}
-                placeholder="Varsayılan"
+                placeholder={t("sxCommonDefault")}
             />
         </Row>
     );
 
     const switchRow = (key: string, label: string, on: boolean, val: any) => (
-        <Row label={label}>
-            <Switch checked={on} onCheckedChange={(v: boolean) => setAttr(key, val(v))} />
-        </Row>
+        <SwitchRow label={label} checked={on} onChange={(v: boolean) => setAttr(key, val(v))} />
     );
 
     return (
-        <div className="space-y-7">
-            {/* OIDC ince ayar */}
-            <div>
-                <GroupLabel>OpenID Connect İnce Ayar</GroupLabel>
+        <div className="flex flex-col gap-6">
+            <Section label={t("sxClientDetailOidcFineGrain")}>
                 <Group>
                     {algRow(
                         "access.token.signed.response.alg",
-                        "Access token imza algoritması"
+                        t("sxClientDetailAccessTokenSigAlg")
                     )}
-                    {algRow("id.token.signed.response.alg", "ID token imza algoritması")}
-                    <Row label="PKCE kod doğrulama yöntemi">
+                    {algRow("id.token.signed.response.alg", t("sxClientDetailIdTokenSigAlg"))}
+                    <Row label={t("sxClientDetailPkceMethod")}>
                         <Select
                             value={attrs["pkce.code.challenge.method"] || ALG_UNSET}
                             onValueChange={(v: string) =>
@@ -3796,12 +3745,12 @@ function AdvancedTab({
                         >
                             <SelectTrigger
                                 size="sm"
-                                aria-label="PKCE kod doğrulama yöntemi"
+                                aria-label={t("sxClientDetailPkceMethod")}
                             >
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent align="end">
-                                <SelectItem value={ALG_UNSET}>Belirtilmemiş</SelectItem>
+                                <SelectItem value={ALG_UNSET}>{t("sxClientDetailUnspecified")}</SelectItem>
                                 <SelectItem value="S256">S256</SelectItem>
                                 <SelectItem value="plain">plain</SelectItem>
                             </SelectContent>
@@ -3809,23 +3758,21 @@ function AdvancedTab({
                     </Row>
                     {switchRow(
                         "require.pushed.authorization.requests",
-                        "Pushed authorization requests (PAR) zorunlu",
+                        t("sxClientDetailRequirePar"),
                         (attrs["require.pushed.authorization.requests"] ?? "") === "true",
                         (v: boolean) => (v ? "true" : "false")
                     )}
                 </Group>
-            </div>
+            </Section>
 
-            {/* Gelişmiş ayarlar */}
-            <div>
-                <GroupLabel>Gelişmiş Ayarlar</GroupLabel>
+            <Section label={t("sxClientDetailAdvancedSettings")}>
                 <Group>
-                    {numRow("access.token.lifespan", "Access token ömrü")}
+                    {numRow("access.token.lifespan", t("sxClientDetailAccessTokenLifespan"))}
                     {numRow(
                         "client.session.idle.timeout",
-                        "İstemci oturumu boşta zaman aşımı"
+                        t("sxClientDetailClientSessionIdle")
                     )}
-                    {numRow("client.session.max.lifespan", "İstemci oturumu max ömrü")}
+                    {numRow("client.session.max.lifespan", t("sxClientDetailClientSessionMax"))}
                     {switchRow(
                         "oauth2.device.authorization.grant.enabled",
                         "OAuth 2.0 Device Authorization Grant",
@@ -3840,59 +3787,64 @@ function AdvancedTab({
                         (v: boolean) => (v ? "true" : "false")
                     )}
                 </Group>
-            </div>
+            </Section>
 
-            {/* Uyumluluk modları */}
-            <div>
-                <GroupLabel>OpenID Connect Uyumluluk Modları</GroupLabel>
+            <Section label={t("sxClientDetailOidcCompat")}>
                 <Group>
                     {switchRow(
                         "exclude.session.state.from.auth.response",
-                        "Session state'i auth yanıtından hariç tut",
+                        t("sxClientDetailExcludeSessionState"),
                         (attrs["exclude.session.state.from.auth.response"] ?? "") ===
                             "true",
                         (v: boolean) => (v ? "true" : "false")
                     )}
                     {switchRow(
                         "use.refresh.tokens",
-                        "Refresh token kullan",
+                        t("sxClientDetailUseRefreshTokens"),
                         (attrs["use.refresh.tokens"] ?? "") !== "false",
                         (v: boolean) => (v ? "true" : "false")
                     )}
                     {switchRow(
                         "client_credentials.use_refresh_token",
-                        "Client credentials grant için refresh token kullan",
+                        t("sxClientDetailUseRefreshTokenCc"),
                         (attrs["client_credentials.use_refresh_token"] ?? "") === "true",
                         (v: boolean) => (v ? "true" : "false")
                     )}
                     {switchRow(
                         "client.use.lightweight.access.token.enabled",
-                        "Lightweight access token kullan",
+                        t("sxClientDetailUseLightweightToken"),
                         (attrs["client.use.lightweight.access.token.enabled"] ?? "") ===
                             "true",
                         (v: boolean) => (v ? "true" : "false")
                     )}
                 </Group>
-            </div>
+            </Section>
 
-            {/* Akış geçersiz kılmaları */}
-            <div>
-                <GroupLabel>Kimlik Doğrulama Akışı Geçersiz Kılmaları</GroupLabel>
-                <Group>
-                    {flowRow("browser", "Tarayıcı akışı")}
-                    {flowRow("direct_grant", "Doğrudan erişim akışı")}
-                </Group>
-            </div>
+            <Section label={t("sxClientDetailFlowOverrides")}>
+                {flowsState === "loading" ? (
+                    <ListSkeleton rows={2} />
+                ) : flowsState === "error" ? (
+                    <Notice
+                        title={t("sxClientDetailFlowsLoadErrorTitle")}
+                        description={t("sxLoadErrorDescription")}
+                        onRetry={() => setFlowsAttempt(n => n + 1)}
+                    />
+                ) : (
+                    <Group>
+                        {flowRow("browser", t("sxClientDetailBrowserFlow"))}
+                        {flowRow("direct_grant", t("sxClientDetailDirectGrantFlow"))}
+                    </Group>
+                )}
+            </Section>
 
-            {/* Clustering */}
-            <div>
-                <GroupLabel>Clustering</GroupLabel>
+            <Section label={t("sxClientDetailClustering")}>
                 <Group>
-                    <Row label="Düğüm yeniden kayıt zaman aşımı" hint="saniye">
+                    <Row label={t("sxClientDetailNodeReRegTimeout")} hint={t("sxClientDetailSeconds")}>
                         <Input
                             size="sm"
                             type="number"
-                            placeholder="Varsayılan"
+                            className="w-full sm:w-40"
+                            placeholder={t("sxCommonDefault")}
                             value={edited.nodeReRegistrationTimeout ?? ""}
                             onChange={(e: any) =>
                                 setEdited((ev: any) => ({
@@ -3906,7 +3858,7 @@ function AdvancedTab({
                         />
                     </Row>
                 </Group>
-            </div>
+            </Section>
 
             <ClusterNodes
                 id={id}
@@ -3917,33 +3869,32 @@ function AdvancedTab({
                 reload={reload}
             />
 
-            <div className="flex justify-end">
-                <Button
-                    disabled={saving}
-                    onClick={save}
-                >
-                    {saving ? "Kaydediliyor…" : "Kaydet"}
+            <SaveBar>
+                <Button size="form" disabled={saving} onClick={save}>
+                    {saving ? t("sxCommonSaving") : t("sxCommonSave")}
                 </Button>
-            </div>
+            </SaveBar>
 
-            {/* Revocation */}
-            <div>
-                <GroupLabel>İptal (Revocation)</GroupLabel>
-                <Group>
-                    <ActionRow danger disabled={revoking} onClick={revoke}>
-                        {revoking ? "İşleniyor…" : "Tüm token'ları geçersiz kıl"}
-                    </ActionRow>
-                </Group>
-                <GroupFooter>
-                    Bu işlem bir "not-before" zaman damgası ayarlar; bu tarihten önce
-                    verilmiş tüm token'lar geçersiz sayılır.
-                </GroupFooter>
-            </div>
+            <section className="border-t border-[#e5e5ea] pt-6 dark:border-[#38383a]">
+                <h2 className="mb-1 text-[15px] font-semibold">{t("sxClientDetailRevocation")}</h2>
+                <p className="mb-3 text-[13px] leading-[1.4] text-muted-foreground">
+                    {t("sxClientDetailRevocationHelp")}
+                </p>
+                <Button
+                    size="form"
+                    className={DANGER_BUTTON}
+                    disabled={revoking}
+                    onClick={revoke}
+                >
+                    {revoking ? t("sxCommonProcessing") : t("sxClientDetailRevokeAll")}
+                </Button>
+            </section>
         </div>
     );
 }
 
 function ClusterNodes({ id, nodes, adminClient, addAlert, addError, reload }: any) {
+    const t = useT();
     const [host, setHost] = useState("");
 
     const entries = Object.entries(nodes || {});
@@ -3957,50 +3908,43 @@ function ClusterNodes({ id, nodes, adminClient, addAlert, addError, reload }: an
             } catch {
                 await adminClient.clients.addClusterNode({ id, node: h });
             }
-            addAlert("Düğüm eklendi.", AlertVariant.success);
+            addAlert(t("sxClientDetailNodeAdded"), AlertVariant.success);
             setHost("");
             await reload();
         } catch (err) {
-            addError("Düğüm eklenemedi.", err);
+            addError(t("sxClientDetailNodeAddFailed"), err);
         }
     };
 
     const remove = async (h: string) => {
         try {
             await adminClient.clients.deleteClusterNode({ id, node: h });
-            addAlert("Düğüm kaldırıldı.", AlertVariant.success);
+            addAlert(t("sxClientDetailNodeRemoved"), AlertVariant.success);
             await reload();
         } catch (err) {
-            addError("Düğüm kaldırılamadı.", err);
+            addError(t("sxClientDetailNodeRemoveFailed"), err);
         }
     };
 
     return (
-        <div>
-            <GroupLabel>Kayıtlı Küme Düğümleri</GroupLabel>
+        <Section label={t("sxClientDetailClusterNodes")}>
             <Group>
                 {entries.length === 0 ? (
-                    <EmptyRow>Kayıtlı düğüm yok.</EmptyRow>
+                    <EmptyRow>{t("sxClientDetailNoNodes")}</EmptyRow>
                 ) : (
-                    entries.map(([h, t]: any) => (
-                        <Item key={h} size="sm">
-                            <ItemContent className="min-w-0">
-                                <ItemTitle>{h}</ItemTitle>
-                                <ItemDescription className="tabular-nums">
-                                    {fmtDate(t)}
-                                </ItemDescription>
-                            </ItemContent>
-                            <ItemActions>
-                                <RowDelete onClick={() => remove(h)} />
-                            </ItemActions>
-                        </Item>
+                    entries.map(([h, ts]: any) => (
+                        <ItemRow
+                            key={h}
+                            title={h}
+                            subtitle={<span className="tabular-nums">{fmtDate(ts)}</span>}
+                            trailing={<RowDelete title={t("sxCommonRemove")} onClick={() => remove(h)} />}
+                        />
                     ))
                 )}
-                <StackRow label="Düğüm ekle">
+                <StackRow label={t("sxClientDetailAddNode")}>
                     <div className="flex items-center gap-2">
                         <Input
-                            size="sm"
-                            className="flex-1"
+                            className="min-w-0 flex-1"
                             value={host}
                             onChange={(e: any) => setHost(e.target.value)}
                             onKeyDown={(e: any) => e.key === "Enter" && add()}
@@ -4008,20 +3952,18 @@ function ClusterNodes({ id, nodes, adminClient, addAlert, addError, reload }: an
                         />
                         <Button
                             variant="tinted"
-                            size="sm"
                             disabled={!host.trim()}
                             onClick={add}
                         >
-                            Ekle
+                            {t("sxCommonAdd")}
                         </Button>
                     </div>
                 </StackRow>
             </Group>
-        </div>
+        </Section>
     );
 }
 
-/* ── 9. Olaylar ─────────────────────────────────────────────────────────── */
 const evtTone = (type: string) => {
     if (!type) return "blue";
     if (type === "LOGIN") return "green";
@@ -4044,6 +3986,7 @@ const adminOpTone = (op: string) => {
 };
 
 function ClientEventsTab({ id, clientId, adminClient, realm, addError }: any) {
+    const t = useT();
     const [subTab, setSubTab] = useState("user");
 
     const [userLoading, setUserLoading] = useState(true);
@@ -4100,36 +4043,34 @@ function ClientEventsTab({ id, clientId, adminClient, realm, addError }: any) {
         if (subTab === "admin" && !adminLoaded) loadAdmin();
     }, [subTab, adminLoaded, loadAdmin]);
 
-    const emptyCard = (desc: string) => (
-        <EmptyCard icon={<ClockCounterClockwiseIcon />} title="Olay yok" desc={desc} />
-    );
-
     return (
-        <div className="space-y-5">
-            <Tabs value={subTab} onValueChange={setSubTab}>
-                <TabsList variant="line">
-                    {([
-                    { key: "user", label: "Kullanıcı olayları" },
-                    { key: "admin", label: "Yönetim olayları" }
-                ]).map((t: any) => (
-                        <TabsTrigger key={t.key} value={t.key}>
-                            {t.label}
-                        </TabsTrigger>
-                    ))}
-                </TabsList>
-            </Tabs>
+        <div className="flex flex-col gap-6">
+            <SegmentTabs
+                ariaLabel={t("sxClientDetailEventTypeAria")}
+                value={subTab}
+                onChange={setSubTab}
+                items={[
+                    { value: "user", label: t("sxClientDetailUserEvents") },
+                    { value: "admin", label: t("sxClientDetailAdminEvents") }
+                ]}
+            />
 
             {subTab === "user" &&
                 (userLoading ? (
-                    <div className="flex justify-center py-16">
-                        <Spinner className="size-6" />
-                    </div>
+                    <ListSkeleton />
                 ) : userFailed ? (
-                    emptyCard("Olaylar kapalı olabilir.")
+                    <Notice
+                        title={t("sxClientDetailEventsLoadErrorTitle")}
+                        description={t("sxClientDetailEventsLoadErrorDescription")}
+                        onRetry={loadUser}
+                    />
                 ) : userRows.length === 0 ? (
-                    emptyCard("Bu istemci için kayıtlı kullanıcı olayı bulunmuyor.")
+                    <Notice
+                        title={t("sxClientDetailNoEventsTitle")}
+                        description={t("sxClientDetailNoUserEventsDescription")}
+                    />
                 ) : (
-                    <Group>
+                    <ListGroup>
                         {userRows.map((e, i) => (
                             <EventRow
                                 key={i}
@@ -4138,31 +4079,40 @@ function ClientEventsTab({ id, clientId, adminClient, realm, addError }: any) {
                                 meta={
                                     e.details?.username ||
                                     e.userId?.slice(0, 8) ||
-                                    "Bilinmiyor"
+                                    t("sxClientDetailUnknown")
                                 }
                                 ip={e.ipAddress}
                                 time={e.time}
                             />
                         ))}
-                    </Group>
+                    </ListGroup>
                 ))}
 
             {subTab === "admin" &&
                 (adminLoading ? (
-                    <div className="flex justify-center py-16">
-                        <Spinner className="size-6" />
-                    </div>
+                    <ListSkeleton />
                 ) : adminFailed ? (
-                    emptyCard("Olaylar kapalı olabilir.")
+                    <Notice
+                        title={t("sxClientDetailEventsLoadErrorTitle")}
+                        description={t("sxClientDetailEventsLoadErrorDescription")}
+                        onRetry={loadAdmin}
+                    />
                 ) : adminRows.length === 0 ? (
-                    emptyCard("Bu istemci için kayıtlı yönetim olayı bulunmuyor.")
+                    <Notice
+                        title={t("sxClientDetailNoEventsTitle")}
+                        description={t("sxClientDetailNoAdminEventsDescription")}
+                    />
                 ) : (
-                    <Group>
+                    <ListGroup>
                         {adminRows.map((e, i) => (
                             <EventRow
                                 key={i}
                                 tone={adminOpTone(e.operationType)}
-                                label={e.operationType ?? "—"}
+                                label={
+                                    ADMIN_OP_LABELS[e.operationType]
+                                        ? t(ADMIN_OP_LABELS[e.operationType])
+                                        : (e.operationType ?? "—")
+                                }
                                 meta={
                                     [e.resourceType, e.resourcePath]
                                         .filter(Boolean)
@@ -4172,68 +4122,72 @@ function ClientEventsTab({ id, clientId, adminClient, realm, addError }: any) {
                                 time={e.time}
                             />
                         ))}
-                    </Group>
+                    </ListGroup>
                 ))}
         </div>
     );
 }
 
-const EVT_BADGE: Record<string, any> = {
-    blue: "default",
-    green: "outline",
-    red: "destructive",
-    amber: "outline",
-    gray: "secondary"
+const ADMIN_OP_LABELS: Record<string, string> = {
+    CREATE: "sxClientDetailOpCreate",
+    UPDATE: "sxClientDetailOpUpdate",
+    DELETE: "sxClientDetailOpDelete",
+    ACTION: "sxClientDetailOpAction"
+};
+
+const EVT_CHIP: Record<string, any> = {
+    blue: "info",
+    green: "success",
+    red: "danger",
+    amber: "warning",
+    gray: "neutral"
 };
 
 function EventRow({ tone, label, meta, ip, time }: any) {
     return (
-        <Item size="sm">
-            <ItemContent className="min-w-0">
-                <ItemTitle>
-                    <Badge variant={EVT_BADGE[tone] || EVT_BADGE.gray}>{label}</Badge>
-                </ItemTitle>
-                <ItemDescription className="truncate">
-                    {meta}
+        <ListRow
+            title={meta}
+            subtitle={
+                <>
                     {ip && (
                         <>
-                            {" · "}
                             <span className="font-mono">{ip}</span>
+                            {" · "}
                         </>
                     )}
-                </ItemDescription>
-            </ItemContent>
-            <ItemActions>
-                <span className="text-xs text-muted-foreground tabular-nums">
-                    {fmtDate(time)}
-                </span>
-            </ItemActions>
-        </Item>
+                    <span className="tabular-nums">{fmtDate(time)}</span>
+                </>
+            }
+            trailing={<Chip tone={EVT_CHIP[tone] || "neutral"}>{label}</Chip>}
+        />
     );
 }
 
-/* ── 10. Yönetici İzinleri (fine-grained admin permissions) ─────────────── */
 function AdminPermissionsTab({ id, adminClient, addAlert, addError }: any) {
-    // Keycloakify'daki gibi feature tespiti: serverInfo.features üzerinden
-    // (ClientDetail ServerInfoProvider altında olmadığı için doğrudan çekiyoruz).
+    const t = useT();
     const [features, setFeatures] = useState<any[] | null>(null);
+    const [featuresFailed, setFeaturesFailed] = useState(false);
+    const [featuresAttempt, setFeaturesAttempt] = useState(0);
     const [perm, setPerm] = useState<any>(null);
     const [permLoading, setPermLoading] = useState(false);
+    const [permFailed, setPermFailed] = useState(false);
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
         let alive = true;
+        setFeatures(null);
+        setFeaturesFailed(false);
         adminClient.serverInfo
             .find()
             .then(
                 (si: any) =>
                     alive && setFeatures(Array.isArray(si?.features) ? si.features : [])
             )
-            .catch(() => alive && setFeatures([]));
+            .catch(() => alive && setFeaturesFailed(true));
         return () => {
             alive = false;
         };
-    }, [adminClient]);
+    }, [adminClient, featuresAttempt]);
 
     const featureOn = (name: string) =>
         Array.isArray(features) &&
@@ -4243,17 +4197,18 @@ function AdminPermissionsTab({ id, adminClient, addAlert, addError }: any) {
 
     const loadPerm = useCallback(async () => {
         setPermLoading(true);
+        setPermFailed(false);
         try {
             const res = await adminClient.clients.listFineGrainPermissions({ id });
             setPerm(res ?? {});
         } catch (_err) {
             setPerm(null);
+            setPermFailed(true);
         } finally {
             setPermLoading(false);
         }
     }, [adminClient, id]);
 
-    // Per-client yönetim izinleri yalnızca V1'de var.
     useEffect(() => {
         if (v1On) loadPerm();
     }, [v1On, loadPerm]);
@@ -4264,51 +4219,59 @@ function AdminPermissionsTab({ id, adminClient, addAlert, addError }: any) {
             await adminClient.clients.updateFineGrainPermission({ id }, { enabled: v });
             addAlert(
                 v
-                    ? "İnce taneli yönetici izinleri etkinleştirildi."
-                    : "İnce taneli yönetici izinleri devre dışı bırakıldı.",
+                    ? t("sxClientDetailPermsEnabled")
+                    : t("sxClientDetailPermsDisabled"),
                 AlertVariant.success
             );
             await loadPerm();
         } catch (err) {
-            addError("İzin durumu güncellenemedi.", err);
+            addError(t("sxClientDetailPermsUpdateFailed"), err);
         } finally {
             setSaving(false);
         }
     };
 
-    if (features === null) return (
-            <div className="flex justify-center py-16">
-                <Spinner className="size-6" />
-            </div>
+    if (featuresFailed)
+        return (
+            <Notice
+                title={t("sxClientDetailFeaturesLoadErrorTitle")}
+                description={t("sxLoadErrorDescription")}
+                onRetry={() => setFeaturesAttempt(n => n + 1)}
+            />
         );
 
-    // V2 etkin: izinler realm seviyesinde merkezi olarak yönetilir (per-client toggle yok).
+    if (features === null) return <ListSkeleton />;
+
     if (v2On) {
         return (
-            <EmptyCard
-                icon={<ShieldCheckIcon />}
-                title="Admin Permissions (V2) etkin"
-                desc="Bu sürümde yönetici izinleri realm seviyesinde yönetilir. Keycloak admin console → Realm Settings → Permissions bölümünden kaynak bazlı izinleri tanımlayın."
+            <Notice
+                title={t("sxClientDetailPermsV2Title")}
+                description={t("sxClientDetailPermsV2Description")}
             />
         );
     }
 
-    // Hiçbir sürüm açık değil.
     if (!v1On) {
         return (
-            <EmptyCard
-                icon={<ShieldCheckIcon />}
-                title="Bu özellik sunucuda kapalı"
-                desc="İnce taneli yönetici izinleri varsayılan olarak kapalıdır. Per-client izinler için sunucuyu --features=admin-fine-grained-authz, yeni sürüm için --features=admin-fine-grained-authz:v2 ile başlatın."
+            <Notice
+                title={t("sxClientDetailPermsOffTitle")}
+                description={t("sxClientDetailPermsOffDescription", {
+                    v1: "--features=admin-fine-grained-authz",
+                    v2: "--features=admin-fine-grained-authz:v2"
+                })}
             />
         );
     }
 
-    // V1 etkin → per-client toggle.
-    if (permLoading && perm === null) return (
-            <div className="flex justify-center py-16">
-                <Spinner className="size-6" />
-            </div>
+    if (permLoading && perm === null) return <ListSkeleton />;
+
+    if (permFailed)
+        return (
+            <Notice
+                title={t("sxClientDetailPermsLoadErrorTitle")}
+                description={t("sxLoadErrorDescription")}
+                onRetry={loadPerm}
+            />
         );
 
     const enabled = !!perm?.enabled;
@@ -4316,81 +4279,43 @@ function AdminPermissionsTab({ id, adminClient, addAlert, addError }: any) {
     const scopeEntries = Object.entries(scopePermissions);
 
     return (
-        <div className="space-y-7">
-            <div>
-                <GroupLabel>Yönetici İzinleri</GroupLabel>
+        <div className="flex flex-col gap-6">
+            <Section label={t("sxNavAdminPermissions")}>
                 <Group>
-                    <Row
-                        label="İnce taneli yönetici izinleri etkin"
-                        hint="Bu istemcinin yönetimi için ince taneli yetkilendirme."
-                    >
-                        <Switch checked={enabled} disabled={saving} onCheckedChange={toggle} />
-                    </Row>
+                    <SwitchRow
+                        label={t("sxClientDetailPermsToggle")}
+                        hint={t("sxClientDetailPermsToggleHint")}
+                        checked={enabled}
+                        disabled={saving}
+                        onChange={toggle}
+                    />
                 </Group>
-            </div>
+            </Section>
 
             {enabled && scopeEntries.length > 0 && (
-                <div>
-                    <GroupLabel>Kapsam İzinleri</GroupLabel>
+                <Section label={t("sxClientDetailScopePermissions")}>
                     <Group>
                         {scopeEntries.map(([scope, permId]: any) => (
-                            <Item key={scope} size="sm">
-                                <ItemContent className="flex-none">
-                                    <ItemTitle>{scope}</ItemTitle>
-                                </ItemContent>
-                                <ItemActions className="min-w-0 flex-1 justify-end">
-                                    <code className="truncate font-mono text-xs text-muted-foreground">
-                                        {String(permId)}
-                                    </code>
-                                </ItemActions>
-                            </Item>
+                            <div
+                                key={scope}
+                                className="flex min-h-12 flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                            >
+                                <span className="text-[15px] font-medium">{scope}</span>
+                                <code className="min-w-0 font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                                    {String(permId)}
+                                </code>
+                            </div>
                         ))}
                     </Group>
                     <GroupFooter>
-                        Bu izinler, <span className="font-mono">realm-management</span>{" "}
-                        istemcisinin yetkilendirme ayarları altında yönetilir.
+                        <Trans
+                            i18nKey="sxClientDetailScopePermissionsFooter"
+                            values={{ client: "realm-management" }}
+                            components={{ mono: <span className="font-mono" /> }}
+                        />
                     </GroupFooter>
-                </div>
+                </Section>
             )}
         </div>
-    );
-}
-
-/** Simple table: head labels + rows of cells (built on @ui Table). */
-function DataTable({ head, rows, empty, cols }: any) {
-    return (
-        <Table>
-            <TableHeader>
-                <TableRow>
-                    {head.map((h: any, i: number) => (
-                        <TableHead key={i} className={cols?.[i]}>
-                            {h}
-                        </TableHead>
-                    ))}
-                </TableRow>
-            </TableHeader>
-            <TableBody>
-                {rows.length === 0 ? (
-                    <TableRow>
-                        <TableCell
-                            colSpan={head.length}
-                            className="py-10 text-center text-muted-foreground"
-                        >
-                            {empty ?? "Kayıt yok."}
-                        </TableCell>
-                    </TableRow>
-                ) : (
-                    rows.map((cells: any[], i: number) => (
-                        <TableRow key={i}>
-                            {cells.map((c: any, j: number) => (
-                                <TableCell key={j} className={cols?.[j]}>
-                                    {c}
-                                </TableCell>
-                            ))}
-                        </TableRow>
-                    ))
-                )}
-            </TableBody>
-        </Table>
     );
 }

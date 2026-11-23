@@ -1,36 +1,9 @@
 // @ts-nocheck
 
-import {
-    ArrowsClockwiseIcon,
-    CaretLeftIcon,
-    DotsThreeIcon,
-    DownloadSimpleIcon,
-    PencilSimpleIcon,
-    PlugIcon,
-    PlusIcon,
-    TrashIcon
-} from "@phosphor-icons/react";
-import { Badge } from "@ui/components/badge";
 import { Button } from "@ui/components/button";
-import {
-    Empty,
-    EmptyDescription,
-    EmptyHeader,
-    EmptyMedia,
-    EmptyTitle
-} from "@ui/components/empty";
+import { Field, FieldDescription, FieldLabel } from "@ui/components/field";
 import { Input } from "@ui/components/input";
-import {
-    Item,
-    ItemActions,
-    ItemContent,
-    ItemDescription,
-    ItemGroup,
-    ItemMedia,
-    ItemSeparator,
-    ItemTitle
-} from "@ui/components/item";
-import { Spinner } from "@ui/components/spinner";
+import { NativeSelect, NativeSelectOption } from "@ui/components/native-select";
 import { Switch } from "@ui/components/switch";
 import {
     Confirm,
@@ -50,113 +23,122 @@ import {
     ModalHeader,
     ModalTitle
 } from "@ui/patterns/modal";
-import { SegmentPicker, SegmentPickerItem } from "@ui/patterns/segment-picker";
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger
-} from "@ui/components/dropdown-menu";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue
-} from "@ui/components/select";
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AlertVariant, useAlerts } from "../../shared/keycloak-ui-shared";
 import { useAdminClient } from "../admin-client";
+import {
+    AdminPage,
+    Chip,
+    Group,
+    ListSkeleton,
+    Notice,
+    Row,
+    Section,
+    SegmentTabs,
+    TextAction
+} from "../ui/kit";
+import { useT } from "../ui/i18n";
 import { useRealm } from "../ui/realm";
 
-/* Protocol config field maps (read/written via idp.config). */
 const OIDC_FIELDS = [
-    { key: "authorizationUrl", label: "Yetkilendirme URL" },
-    { key: "tokenUrl", label: "Token URL" },
-    { key: "userInfoUrl", label: "Kullanıcı bilgisi URL" },
-    { key: "logoutUrl", label: "Çıkış URL" },
-    { key: "issuer", label: "Issuer" },
-    { key: "clientId", label: "İstemci ID" },
-    { key: "clientSecret", label: "İstemci sırrı", secret: true },
-    { key: "defaultScope", label: "Varsayılan kapsamlar" },
-    { key: "jwksUrl", label: "JWKS URL" }
+    { key: "authorizationUrl", label: "sxIdpDetailAuthorizationUrl" },
+    { key: "tokenUrl", label: "sxIdpDetailTokenUrl" },
+    { key: "userInfoUrl", label: "sxIdpDetailUserInfoUrl" },
+    { key: "logoutUrl", label: "sxIdpDetailLogoutUrl" },
+    { key: "issuer", label: "sxIdpDetailIssuer" },
+    { key: "clientId", label: "sxIdpDetailClientId" },
+    { key: "clientSecret", label: "sxIdpDetailClientSecret", secret: true },
+    { key: "defaultScope", label: "sxIdpDetailDefaultScopes" },
+    { key: "jwksUrl", label: "sxIdpDetailJwksUrl" }
 ];
 
 const SAML_FIELDS = [
-    { key: "singleSignOnServiceUrl", label: "SSO servis URL" },
-    { key: "singleLogoutServiceUrl", label: "SLO servis URL" },
-    { key: "idpEntityId", label: "IdP entity ID" },
-    { key: "nameIDPolicyFormat", label: "NameID policy formatı" },
-    { key: "signingCertificate", label: "İmzalama sertifikası" }
+    { key: "singleSignOnServiceUrl", label: "sxIdpDetailSsoUrl" },
+    { key: "singleLogoutServiceUrl", label: "sxIdpDetailSloUrl" },
+    { key: "idpEntityId", label: "sxIdpDetailEntityId" },
+    { key: "nameIDPolicyFormat", label: "sxIdpDetailNameIdFormat" },
+    { key: "signingCertificate", label: "sxIdpDetailSigningCertificate" }
 ];
 
 const CLIENT_AUTH_OPTIONS = [
-    { value: "client_secret_post", label: "İstek gövdesinde gönder (POST)" },
-    { value: "client_secret_basic", label: "Temel yetkilendirme (Basic)" },
-    { value: "client_secret_jwt", label: "JWT (istemci sırrı)" },
-    { value: "private_key_jwt", label: "JWT (özel anahtar)" }
+    { value: "client_secret_post", label: "sxIdpDetailAuthPost" },
+    { value: "client_secret_basic", label: "sxIdpDetailAuthBasic" },
+    { value: "client_secret_jwt", label: "sxIdpDetailAuthJwtSecret" },
+    { value: "private_key_jwt", label: "sxIdpDetailAuthJwtKey" }
 ];
 
-/* config is a flat string->string map. Booleans are stored as "true"/"false". */
+const TABS = [
+    { value: "settings", label: "sxIdpDetailTabSettings" },
+    { value: "mappers", label: "sxIdpDetailTabMappers" }
+];
+
+const DANGER_BUTTON =
+    "bg-[#d70015] text-white hover:bg-[#d70015]/90 dark:bg-[#ff453a] dark:hover:bg-[#ff453a]/90";
+
 const cfgBool = (config: any, key: string) => String(config?.[key]) === "true";
 
-const PAGE = "mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8";
-const CAPTION = "mb-2 ms-1 text-sm font-medium text-muted-foreground";
-const FOOTNOTE = "mt-2 ms-1 text-sm text-muted-foreground";
-
-/* Separates an array of rows with ItemSeparator inside an inset ItemGroup. */
-function withSeparators(nodes: any[]) {
-    return nodes.filter(Boolean).map((n, i) => (
-        <Fragment key={n.key ?? i}>
-            {i > 0 && <ItemSeparator />}
-            {n}
-        </Fragment>
-    ));
-}
-
-function SwitchItem({ label, hint, checked, onChange, disabled }: any) {
+function SwitchRow({ label, hint, checked, onChange, disabled }: any) {
     return (
-        <Item size="sm">
-            <ItemContent>
-                <ItemTitle>{label}</ItemTitle>
-                {hint && <ItemDescription>{hint}</ItemDescription>}
-            </ItemContent>
-            <ItemActions>
-                <Switch
-                    checked={!!checked}
-                    disabled={disabled}
-                    onCheckedChange={(v: boolean) => onChange(v)}
-                />
-            </ItemActions>
-        </Item>
+        <li className="flex min-h-14 items-center justify-between gap-3 px-4 py-3">
+            <div className="min-w-0">
+                <div className="text-base">{label}</div>
+                {hint && <div className="mt-0.5 text-[13px] text-muted-foreground">{hint}</div>}
+            </div>
+            <Switch
+                checked={!!checked}
+                disabled={disabled}
+                aria-label={typeof label === "string" ? label : undefined}
+                onCheckedChange={(v: boolean) => onChange(v)}
+            />
+        </li>
     );
 }
 
-function StackItem({ label, hint, children }: any) {
+function FormField({ label, hint, htmlFor, children }: any) {
     return (
-        <Item size="sm">
-            <ItemContent className="min-w-0">
-                {label && <ItemTitle>{label}</ItemTitle>}
-                {hint && <ItemDescription>{hint}</ItemDescription>}
-                {children}
-            </ItemContent>
-        </Item>
+        <Field size="lg">
+            <FieldLabel htmlFor={htmlFor}>{label}</FieldLabel>
+            {children}
+            {hint && <FieldDescription className="ps-0.5 text-[13px]">{hint}</FieldDescription>}
+        </Field>
+    );
+}
+
+function OpenRow({ title, subtitle, onOpen, trailing, testId }: any) {
+    return (
+        <li
+            data-testid={testId}
+            className="flex items-center gap-3 pe-4 transition-colors hover:bg-black/3 dark:hover:bg-white/4"
+        >
+            <button
+                type="button"
+                onClick={onOpen}
+                className="flex min-h-16 min-w-0 flex-1 flex-col justify-center py-3 ps-4 text-left outline-none focus-visible:bg-black/5 dark:focus-visible:bg-white/6"
+            >
+                <span className="w-full truncate text-base font-medium">{title}</span>
+                {subtitle && (
+                    <span className="mt-0.5 w-full text-[13px] text-muted-foreground [overflow-wrap:anywhere]">
+                        {subtitle}
+                    </span>
+                )}
+            </button>
+            {trailing && <div className="flex shrink-0 items-center gap-3">{trailing}</div>}
+        </li>
     );
 }
 
 function ConfirmDialog({ opts, setOpts }: any) {
+    const t = useT();
     return (
         <Confirm open={!!opts} onOpenChange={o => !o && setOpts(null)}>
             <ConfirmContent>
                 <ConfirmHeader>
                     <ConfirmTitle>{opts?.title}</ConfirmTitle>
-                    {opts?.message && (
-                        <ConfirmDescription>{opts.message}</ConfirmDescription>
-                    )}
+                    {opts?.message && <ConfirmDescription>{opts.message}</ConfirmDescription>}
                 </ConfirmHeader>
                 <ConfirmFooter>
-                    <ConfirmCancel>Vazgeç</ConfirmCancel>
+                    <ConfirmCancel>{t("sxCommonCancel")}</ConfirmCancel>
                     <ConfirmAction
                         variant={opts?.danger ? "destructive" : "default"}
                         onClick={() => {
@@ -165,7 +147,7 @@ function ConfirmDialog({ opts, setOpts }: any) {
                             fn?.();
                         }}
                     >
-                        {opts?.confirmLabel ?? "Onayla"}
+                        {opts?.confirmLabel ?? t("sxCommonConfirm")}
                     </ConfirmAction>
                 </ConfirmFooter>
             </ConfirmContent>
@@ -173,19 +155,8 @@ function ConfirmDialog({ opts, setOpts }: any) {
     );
 }
 
-function EmptyBlock({ icon, title, desc }: any) {
-    return (
-        <Empty>
-            <EmptyHeader>
-                <EmptyMedia variant="icon">{icon}</EmptyMedia>
-                <EmptyTitle>{title}</EmptyTitle>
-                {desc && <EmptyDescription>{desc}</EmptyDescription>}
-            </EmptyHeader>
-        </Empty>
-    );
-}
-
 export default function IdentityProviderDetail() {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
     const { alias } = useParams();
@@ -195,124 +166,115 @@ export default function IdentityProviderDetail() {
     const confirm = setConfirmOpts;
 
     const [idp, setIdp] = useState<any>(null);
-    const [loading, setLoading] = useState(true);
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
+    const [attempt, setAttempt] = useState(0);
     const [tab, setTab] = useState("settings");
 
-    const reload = useCallback(async () => {
+    useEffect(() => {
+        let alive = true;
+        setStatus("loading");
+        adminClient.identityProviders
+            .findOne({ alias })
+            .then(found => {
+                if (!alive) return;
+                setIdp(found ?? null);
+                setStatus("ready");
+            })
+            .catch(() => alive && setStatus("error"));
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, alias, attempt]);
+
+    const reload = async () => {
         try {
             const found = await adminClient.identityProviders.findOne({ alias });
             setIdp(found ?? null);
         } catch (e) {
-            addError("Kimlik sağlayıcı yüklenemedi.", e);
-        } finally {
-            setLoading(false);
+            addError(t("sxIdpDetailLoadErrorToast"), e);
         }
-    }, [adminClient, alias, addError]);
+    };
 
-    useEffect(() => {
-        setLoading(true);
-        reload();
-    }, [reload]);
+    const back = { label: t("sxNavIdentityProviders"), to: `/${realm}/identity-providers` };
 
-    if (loading)
+    if (status !== "ready" || !idp)
         return (
-            <div className={PAGE}>
-                <div className="grid place-items-center py-16">
-                    <Spinner />
-                </div>
-            </div>
-        );
-    if (!idp)
-        return (
-            <div className={PAGE}>
-                <EmptyBlock icon={<PlugIcon />} title="Kimlik sağlayıcı bulunamadı" />
-            </div>
+            <AdminPage title={idp?.displayName || alias || t("sxIdpDetailFallbackTitle")} back={back} width="narrow">
+                {status === "loading" && <ListSkeleton rows={4} />}
+                {status === "error" && (
+                    <Notice
+                        title={t("sxIdpDetailLoadError")}
+                        description={t("sxLoadErrorDescription")}
+                        onRetry={() => setAttempt(n => n + 1)}
+                    />
+                )}
+                {status === "ready" && (
+                    <Notice
+                        title={t("sxIdpDetailNotFound")}
+                        description={t("sxIdpDetailNotFoundDescription")}
+                        action={<Button size="sm" onClick={() => navigate(back.to)}>{t("sxIdpDetailBackToList")}</Button>}
+                    />
+                )}
+            </AdminPage>
         );
 
     const remove = () =>
         confirm({
-            title: "Kimlik sağlayıcıyı sil",
-            message: `“${idp.displayName || idp.alias}” kalıcı olarak silinecek.`,
-            confirmLabel: "Sil",
+            title: t("sxIdpDetailDeleteTitle"),
+            message: t("sxIdpDetailDeleteMessage", { name: idp.displayName || idp.alias }),
+            confirmLabel: t("sxCommonDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.identityProviders.del({ alias });
-                    addAlert("Kimlik sağlayıcı silindi.", AlertVariant.success);
+                    addAlert(t("sxIdpsDeleted"), AlertVariant.success);
                     navigate(`/${realm}/identity-providers`);
                 } catch (e) {
-                    addError("Silinemedi.", e);
+                    addError(t("sxCommonDeleteError"), e);
                 }
             }
         });
 
-    const TABS = [
-        { value: "settings", label: "Ayarlar" },
-        { value: "mappers", label: "Eşleştiriciler" }
-    ];
-
     return (
-        <div className={PAGE}>
-            {/* iOS nav-bar header */}
-            <div className="relative mb-7 flex items-center">
-                <Button
-                    type="button"
-                    variant="secondary"
-                    size="icon"
-                    onClick={() => navigate(`/${realm}/identity-providers`)}
-                    aria-label="Geri"
-                >
-                    <CaretLeftIcon weight="bold" className="rtl:rotate-180" />
-                </Button>
-                <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-2 text-center">
-                    <p className="font-semibold text-foreground">
-                        {idp.displayName || idp.alias}
-                    </p>
-                    {!idp.enabled && <Badge variant="destructive">Devre dışı</Badge>}
-                </div>
-                <div className="ms-auto">
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <Button
-                                type="button"
-                                variant="secondary"
-                                size="icon"
-                                aria-label="Eylemler"
-                            >
-                                <DotsThreeIcon className="size-5" weight="bold" />
-                            </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                            <DropdownMenuItem variant="destructive" onClick={remove}>
-                                <TrashIcon /> Sil
-                            </DropdownMenuItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
-                </div>
-            </div>
+        <AdminPage
+            title={idp.displayName || idp.alias}
+            description={
+                <span className="[overflow-wrap:anywhere]">
+                    <span className="font-mono">{idp.alias}</span> · {idp.providerId || "—"}
+                </span>
+            }
+            back={back}
+            width="narrow"
+            actions={!idp.enabled ? <Chip tone="danger">{t("sxIdpDetailDisabledChip")}</Chip> : undefined}
+        >
+            <SegmentTabs
+                value={tab}
+                onChange={setTab}
+                items={TABS.map(item => ({ value: item.value, label: t(item.label) }))}
+                ariaLabel={t("sxCommonSection")}
+            />
 
-            <div className="mb-5 flex justify-center">
-                <SegmentPicker value={tab} onValueChange={setTab}>
-                    {TABS.map(t => (
-                        <SegmentPickerItem
-                            key={t.value}
-                            value={t.value}
-                            label={t.label}
-                        />
-                    ))}
-                </SegmentPicker>
-            </div>
-
-            {tab === "settings" && <SettingsTab idp={idp} reload={reload} />}
+            {tab === "settings" && <SettingsTab idp={idp} reload={reload} onDelete={remove} />}
             {tab === "mappers" && <MappersTab idp={idp} />}
 
             <ConfirmDialog opts={confirmOpts} setOpts={setConfirmOpts} />
-        </div>
+        </AdminPage>
     );
 }
 
-/* ── Ayarlar ──────────────────────────────────────────────────────────── */
-function SettingsTab({ idp, reload }: any) {
+function initialGeneral(idp: any) {
+    return {
+        displayName: idp.displayName || "",
+        enabled: !!idp.enabled,
+        trustEmail: !!idp.trustEmail,
+        storeToken: !!idp.storeToken,
+        linkOnly: !!idp.linkOnly,
+        hideOnLoginPage: cfgBool(idp.config, "hideOnLoginPage")
+    };
+}
+
+function SettingsTab({ idp, reload, onDelete }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
 
@@ -321,20 +283,22 @@ function SettingsTab({ idp, reload }: any) {
     const isSaml = /saml/i.test(providerId);
     const PROTO_FIELDS = isSaml ? SAML_FIELDS : OIDC_FIELDS;
 
-    const [general, setGeneral] = useState({
-        displayName: idp.displayName || "",
-        enabled: !!idp.enabled,
-        trustEmail: !!idp.trustEmail,
-        storeToken: !!idp.storeToken,
-        linkOnly: !!idp.linkOnly,
-        hideOnLoginPage: cfgBool(idp.config, "hideOnLoginPage")
-    });
+    const [general, setGeneral] = useState(() => initialGeneral(idp));
     const [config, setConfig] = useState<any>({ ...(idp.config || {}) });
     const [saving, setSaving] = useState(false);
 
     const setG = (k: string, v: any) => setGeneral(p => ({ ...p, [k]: v }));
     const setC = (k: string, v: any) => setConfig((c: any) => ({ ...c, [k]: v }));
     const cBool = (k: string) => String(config[k]) === "true";
+
+    const dirty =
+        JSON.stringify(general) !== JSON.stringify(initialGeneral(idp)) ||
+        JSON.stringify(config) !== JSON.stringify({ ...(idp.config || {}) });
+
+    const reset = () => {
+        setGeneral(initialGeneral(idp));
+        setConfig({ ...(idp.config || {}) });
+    };
 
     const save = async () => {
         setSaving(true);
@@ -358,77 +322,76 @@ function SettingsTab({ idp, reload }: any) {
                     config: nextConfig
                 }
             );
-            addAlert("Kimlik sağlayıcı kaydedildi.", AlertVariant.success);
+            addAlert(t("sxIdpDetailSaved"), AlertVariant.success);
             reload();
         } catch (e) {
-            addError("Kaydedilemedi.", e);
+            addError(t("sxCommonSaveError"), e);
         } finally {
             setSaving(false);
         }
     };
 
     return (
-        <div className="mx-auto max-w-xl space-y-6">
-            {/* Genel */}
-            <div>
-                <h3 className={CAPTION}>Genel</h3>
-                <ItemGroup variant="inset">
-                    {withSeparators([
-                        <Item size="sm" key="alias">
-                            <ItemContent>
-                                <ItemTitle>Alias</ItemTitle>
-                            </ItemContent>
-                            <ItemActions>
-                                <span className="font-mono text-sm text-muted-foreground">
+        <>
+            <Section label={t("sxCommonGeneral")}>
+                <div className="flex flex-col gap-4">
+                    <FormField label={t("sxCommonDisplayName")} htmlFor="idp-display-name">
+                        <Input
+                            size="lg"
+                            id="idp-display-name"
+                            value={general.displayName}
+                            onChange={(e: any) => setG("displayName", e.target.value)}
+                            placeholder={idp.alias}
+                        />
+                    </FormField>
+                    <Group>
+                        <Row
+                            title={t("sxCommonAlias")}
+                            className="min-h-14"
+                            trailing={
+                                <span className="max-w-48 truncate font-mono text-sm text-muted-foreground">
                                     {idp.alias}
                                 </span>
-                            </ItemActions>
-                        </Item>,
-                        <StackItem label="Görünen ad" key="displayName">
-                            <Input
-                                value={general.displayName}
-                                onChange={(e: any) => setG("displayName", e.target.value)}
-                                placeholder={idp.alias}
-                            />
-                        </StackItem>,
-                        <SwitchItem
-                            key="enabled"
-                            label="Etkin"
+                            }
+                        />
+                        <Row
+                            title={t("sxIdpDetailProviderType")}
+                            className="min-h-14"
+                            trailing={<span className="text-sm text-muted-foreground">{providerId || "—"}</span>}
+                        />
+                    </Group>
+                    <Group>
+                        <SwitchRow
+                            label={t("sxCommonEnabled")}
                             checked={general.enabled}
                             onChange={(v: boolean) => setG("enabled", v)}
-                        />,
-                        <SwitchItem
-                            key="trustEmail"
-                            label="E-postaya güven"
-                            hint="Bu sağlayıcıdan gelen e-postayı doğrulanmış kabul et."
+                        />
+                        <SwitchRow
+                            label={t("sxIdpDetailTrustEmail")}
+                            hint={t("sxIdpDetailTrustEmailHint")}
                             checked={general.trustEmail}
                             onChange={(v: boolean) => setG("trustEmail", v)}
-                        />,
-                        <SwitchItem
-                            key="storeToken"
-                            label="Token sakla"
+                        />
+                        <SwitchRow
+                            label={t("sxIdpDetailStoreToken")}
                             checked={general.storeToken}
                             onChange={(v: boolean) => setG("storeToken", v)}
-                        />,
-                        <SwitchItem
-                            key="linkOnly"
-                            label="Yalnızca bağlama"
-                            hint="Yeni kullanıcı oluşturmaz, yalnızca mevcut hesaba bağlar."
+                        />
+                        <SwitchRow
+                            label={t("sxIdpDetailLinkOnly")}
+                            hint={t("sxIdpDetailLinkOnlyHint")}
                             checked={general.linkOnly}
                             onChange={(v: boolean) => setG("linkOnly", v)}
-                        />,
-                        <SwitchItem
-                            key="hideOnLoginPage"
-                            label="Giriş sayfasında gizle"
+                        />
+                        <SwitchRow
+                            label={t("sxIdpDetailHideOnLogin")}
                             checked={general.hideOnLoginPage}
                             onChange={(v: boolean) => setG("hideOnLoginPage", v)}
                         />
-                    ])}
-                </ItemGroup>
-                <p className={FOOTNOTE}>Sağlayıcı türü: {providerId || "—"}</p>
-            </div>
+                    </Group>
+                </div>
+            </Section>
 
-            {/* Discovery import (OIDC) */}
             {isOidc && (
                 <DiscoverySection
                     providerId={providerId}
@@ -436,93 +399,79 @@ function SettingsTab({ idp, reload }: any) {
                 />
             )}
 
-            {/* Protocol config */}
-            <div>
-                <h3 className={CAPTION}>
-                    {isSaml ? "SAML yapılandırması" : "OpenID Connect yapılandırması"}
-                </h3>
-                <ItemGroup variant="inset">
-                    {withSeparators([
-                        ...PROTO_FIELDS.map(f => (
-                            <StackItem key={f.key} label={f.label}>
-                                <Input
-                                    type={f.secret ? "password" : "text"}
-                                    value={config[f.key] ?? ""}
-                                    onChange={(e: any) => setC(f.key, e.target.value)}
-                                />
-                            </StackItem>
-                        )),
-                        isOidc && (
-                            <Item size="sm" key="clientAuthMethod">
-                                <ItemContent>
-                                    <ItemTitle>İstemci kimlik doğrulaması</ItemTitle>
-                                </ItemContent>
-                                <ItemActions>
-                                    <Select
-                                        value={
-                                            config.clientAuthMethod ||
-                                            "client_secret_post"
-                                        }
-                                        onValueChange={(v: string) =>
-                                            setC("clientAuthMethod", v)
-                                        }
-                                    >
-                                        <SelectTrigger size="sm" className="max-w-56">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {CLIENT_AUTH_OPTIONS.map(o => (
-                                                <SelectItem key={o.value} value={o.value}>
-                                                    {o.label}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </ItemActions>
-                            </Item>
-                        )
-                    ])}
-                </ItemGroup>
-            </div>
-
-            {/* Validation switches */}
-            <div>
-                <h3 className={CAPTION}>Doğrulama</h3>
-                <ItemGroup variant="inset">
-                    {withSeparators([
-                        <SwitchItem
-                            key="validateSignature"
-                            label="İmzayı doğrula"
-                            checked={cBool("validateSignature")}
-                            onChange={(v: boolean) =>
-                                setC("validateSignature", v ? "true" : "false")
-                            }
-                        />,
-                        isOidc && (
-                            <SwitchItem
-                                key="useJwksUrl"
-                                label="JWKS URL kullan"
-                                checked={cBool("useJwksUrl")}
-                                onChange={(v: boolean) =>
-                                    setC("useJwksUrl", v ? "true" : "false")
-                                }
+            <Section label={t("sxIdpDetailProtocolConfig", { protocol: isSaml ? "SAML" : "OpenID Connect" })}>
+                <div className="flex flex-col gap-4">
+                    {PROTO_FIELDS.map(f => (
+                        <FormField key={f.key} label={t(f.label)} htmlFor={`idp-${f.key}`}>
+                            <Input
+                                size="lg"
+                                id={`idp-${f.key}`}
+                                type={f.secret ? "password" : "text"}
+                                value={config[f.key] ?? ""}
+                                onChange={(e: any) => setC(f.key, e.target.value)}
                             />
-                        )
-                    ])}
-                </ItemGroup>
-            </div>
+                        </FormField>
+                    ))}
+                    {isOidc && (
+                        <FormField label={t("sxIdpDetailClientAuth")} htmlFor="idp-client-auth">
+                            <NativeSelect
+                                id="idp-client-auth"
+                                size="lg"
+                                className="w-full"
+                                value={config.clientAuthMethod || "client_secret_post"}
+                                onChange={(e: any) => setC("clientAuthMethod", e.target.value)}
+                            >
+                                {CLIENT_AUTH_OPTIONS.map(o => (
+                                    <NativeSelectOption key={o.value} value={o.value}>
+                                        {t(o.label)}
+                                    </NativeSelectOption>
+                                ))}
+                            </NativeSelect>
+                        </FormField>
+                    )}
+                </div>
+            </Section>
 
-            <div className="flex justify-end">
-                <Button disabled={saving} onClick={save}>
-                    {saving ? "Kaydediliyor…" : "Kaydet"}
+            <Section label={t("sxIdpDetailValidation")}>
+                <Group>
+                    <SwitchRow
+                        label={t("sxIdpDetailValidateSignature")}
+                        checked={cBool("validateSignature")}
+                        onChange={(v: boolean) => setC("validateSignature", v ? "true" : "false")}
+                    />
+                    {isOidc && (
+                        <SwitchRow
+                            label={t("sxIdpDetailUseJwksUrl")}
+                            checked={cBool("useJwksUrl")}
+                            onChange={(v: boolean) => setC("useJwksUrl", v ? "true" : "false")}
+                        />
+                    )}
+                </Group>
+            </Section>
+
+            <div className="flex flex-col gap-1.5">
+                <Button size="form" block disabled={saving} onClick={save}>
+                    {saving ? t("sxCommonSaving") : t("sxCommonSave")}
+                </Button>
+                <Button variant="plain" size="form" block disabled={saving || !dirty} onClick={reset}>
+                    {t("sxCommonCancel")}
                 </Button>
             </div>
-        </div>
+
+            <section className="border-t border-[#e5e5ea] pt-6 dark:border-[#38383a]">
+                <p className="mb-3 text-[13px] leading-[1.4] text-muted-foreground">
+                    {t("sxIdpDetailDeleteNote")}
+                </p>
+                <Button size="form" block className={DANGER_BUTTON} onClick={onDelete}>
+                    {t("sxIdpDetailDeleteTitle")}
+                </Button>
+            </section>
+        </>
     );
 }
 
-/* ── OIDC discovery import ─────────────────────────────────────────────── */
 function DiscoverySection({ providerId, onImport }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [url, setUrl] = useState("");
@@ -539,56 +488,49 @@ function DiscoverySection({ providerId, onImport }: any) {
             });
             if (result && Object.keys(result).length) {
                 onImport(result);
-                addAlert("Keşif belgesi içe aktarıldı.", AlertVariant.success);
+                addAlert(t("sxIdpDetailImported"), AlertVariant.success);
             } else {
-                addError("İçe aktarma başarısız.", new Error("Boş yanıt"));
+                addError(t("sxIdpDetailImportError"), new Error(t("sxIdpDetailEmptyResponse")));
             }
         } catch (e) {
-            addError("İçe aktarma başarısız.", e);
+            addError(t("sxIdpDetailImportError"), e);
         } finally {
             setBusy(false);
         }
     };
 
     return (
-        <div>
-            <h3 className={CAPTION}>Keşif belgesinden içe aktar</h3>
-            <ItemGroup variant="inset">
-                <StackItem
-                    label="Discovery endpoint URL"
-                    hint=".well-known/openid-configuration adresinden uç noktaları çeker."
-                >
+        <Section label={t("sxIdpDetailImportSection")}>
+            <FormField
+                label={t("sxIdpDetailDiscoveryUrl")}
+                htmlFor="idp-discovery-url"
+                hint={t("sxIdpDetailDiscoveryHint")}
+            >
+                <div className="flex flex-col gap-2 sm:flex-row">
                     <Input
+                        size="lg"
+                        id="idp-discovery-url"
                         value={url}
                         onChange={(e: any) => setUrl(e.target.value)}
                         onKeyDown={(e: any) => e.key === "Enter" && importUrl()}
                         placeholder="https://idp.example.com/.well-known/openid-configuration"
                     />
-                </StackItem>
-                <ItemSeparator />
-                <Item size="sm" asChild>
-                    <button
-                        type="button"
+                    <Button
+                        variant="secondary"
+                        className="h-13.5 shrink-0 rounded-xl px-5 text-[15px] font-medium"
                         disabled={!url.trim() || busy}
                         onClick={importUrl}
                     >
-                        <ItemMedia variant="icon">
-                            <DownloadSimpleIcon />
-                        </ItemMedia>
-                        <ItemContent>
-                            <ItemTitle className="text-primary">
-                                {busy ? "İçe aktarılıyor…" : "İçe aktar"}
-                            </ItemTitle>
-                        </ItemContent>
-                    </button>
-                </Item>
-            </ItemGroup>
-        </div>
+                        {busy ? t("sxIdpDetailImporting") : t("sxIdpDetailImport")}
+                    </Button>
+                </div>
+            </FormField>
+        </Section>
     );
 }
 
-/* ── Eşleştiriciler ───────────────────────────────────────────────────── */
 function MappersTab({ idp }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [confirmOpts, setConfirmOpts] = useState<any>(null);
@@ -597,119 +539,115 @@ function MappersTab({ idp }: any) {
     const alias = idp.alias;
     const [mappers, setMappers] = useState<any[]>([]);
     const [types, setTypes] = useState<Record<string, any>>({});
-    const [loading, setLoading] = useState(true);
-    const [editing, setEditing] = useState<any>(null); // mapper being edited
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
+    const [attempt, setAttempt] = useState(0);
+    const [editing, setEditing] = useState<any>(null);
     const [creating, setCreating] = useState(false);
 
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            const [list, t] = await Promise.all([
-                adminClient.identityProviders.findMappers({ alias }),
-                adminClient.identityProviders.findMapperTypes({ alias })
-            ]);
-            setMappers(Array.isArray(list) ? list : []);
-            setTypes(t || {});
-        } catch (e) {
-            addError("Eşleştiriciler yüklenemedi.", e);
-        } finally {
-            setLoading(false);
-        }
-    }, [adminClient, alias, addError]);
+    const fetchAll = () =>
+        Promise.all([
+            adminClient.identityProviders.findMappers({ alias }),
+            adminClient.identityProviders.findMapperTypes({ alias })
+        ]);
 
     useEffect(() => {
-        load();
-    }, [load]);
+        let alive = true;
+        setStatus("loading");
+        fetchAll()
+            .then(([list, found]) => {
+                if (!alive) return;
+                setMappers(Array.isArray(list) ? list : []);
+                setTypes(found || {});
+                setStatus("ready");
+            })
+            .catch(() => alive && setStatus("error"));
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, alias, attempt]);
+
+    const load = async () => {
+        try {
+            const [list, found] = await fetchAll();
+            setMappers(Array.isArray(list) ? list : []);
+            setTypes(found || {});
+        } catch (e) {
+            addError(t("sxIdpDetailMappersLoadErrorToast"), e);
+        }
+    };
 
     const typeName = (id: string) => types[id]?.name || id;
 
     const remove = (m: any) =>
         confirm({
-            title: "Eşleştiriciyi sil",
-            message: `“${m.name}” kalıcı olarak silinecek.`,
-            confirmLabel: "Sil",
+            title: t("sxIdpDetailMapperDeleteTitle"),
+            message: t("sxIdpDetailMapperDeleteMessage", { name: m.name }),
+            confirmLabel: t("sxCommonDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.identityProviders.delMapper({ alias, id: m.id });
-                    addAlert("Eşleştirici silindi.", AlertVariant.success);
+                    addAlert(t("sxIdpDetailMapperDeleted"), AlertVariant.success);
                     setMappers(mappers.filter(x => x.id !== m.id));
                 } catch (e) {
-                    addError("Silinemedi.", e);
+                    addError(t("sxCommonDeleteError"), e);
                 }
             }
         });
 
-    if (loading)
-        return (
-            <div className="grid place-items-center py-16">
-                <Spinner />
-            </div>
-        );
-
     return (
-        <div className="mx-auto max-w-xl space-y-3">
-            <div className="flex items-center justify-between">
-                <h3 className="ms-1 text-sm font-medium text-muted-foreground">
-                    {mappers.length} eşleştirici
-                </h3>
-                <Button
-                    type="button"
-                    variant="plain"
-                    size="sm"
-                    onClick={() => setCreating(true)}
-                    disabled={Object.keys(types).length === 0}
-                >
-                    <PlusIcon data-icon="inline-start" /> Eşleştirici ekle
-                </Button>
-            </div>
-
-            {mappers.length === 0 ? (
-                <EmptyBlock
-                    icon={<ArrowsClockwiseIcon />}
-                    title="Eşleştirici yok"
-                    desc="Harici talepleri kullanıcı özniteliklerine ve rollerine eşlemek için eşleştirici ekle."
+        <Section
+            label={
+                status === "ready"
+                    ? t("sxIdpDetailMappersCount", { total: mappers.length })
+                    : t("sxIdpDetailTabMappers")
+            }
+            action={
+                status === "ready" && (
+                    <TextAction onClick={() => setCreating(true)} disabled={Object.keys(types).length === 0}>
+                        {t("sxIdpDetailAddMapper")}
+                    </TextAction>
+                )
+            }
+        >
+            {status === "loading" && <ListSkeleton />}
+            {status === "error" && (
+                <Notice
+                    title={t("sxIdpDetailMappersLoadError")}
+                    description={t("sxLoadErrorDescription")}
+                    onRetry={() => setAttempt(n => n + 1)}
                 />
-            ) : (
-                <ItemGroup variant="inset">
-                    {withSeparators(
-                        mappers.map(m => (
-                            <Item size="sm" key={m.id}>
-                                <ItemMedia variant="icon">
-                                    <ArrowsClockwiseIcon />
-                                </ItemMedia>
-                                <ItemContent className="min-w-0">
-                                    <ItemTitle>{m.name || "—"}</ItemTitle>
-                                    <ItemDescription className="truncate">
-                                        {typeName(m.identityProviderMapper)}
-                                    </ItemDescription>
-                                </ItemContent>
-                                <ItemActions>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        title="Düzenle"
-                                        aria-label="Düzenle"
-                                        onClick={() => setEditing(m)}
-                                    >
-                                        <PencilSimpleIcon />
-                                    </Button>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        title="Sil"
-                                        aria-label="Sil"
-                                        onClick={() => remove(m)}
-                                    >
-                                        <TrashIcon />
-                                    </Button>
-                                </ItemActions>
-                            </Item>
-                        ))
-                    )}
-                </ItemGroup>
+            )}
+            {status === "ready" && mappers.length === 0 && (
+                <Notice
+                    title={t("sxIdpDetailMappersEmpty")}
+                    description={t("sxIdpDetailMappersEmptyDescription")}
+                    action={
+                        Object.keys(types).length > 0 && (
+                            <Button size="sm" className="h-8.5 px-4 font-medium" onClick={() => setCreating(true)}>
+                                {t("sxIdpDetailAddMapper")}
+                            </Button>
+                        )
+                    }
+                />
+            )}
+            {status === "ready" && mappers.length > 0 && (
+                <Group>
+                    {mappers.map(m => (
+                        <OpenRow
+                            key={m.id}
+                            testId={`mapper-${m.name}`}
+                            onOpen={() => setEditing(m)}
+                            title={m.name || "—"}
+                            subtitle={typeName(m.identityProviderMapper)}
+                            trailing={
+                                <TextAction tone="danger" onClick={() => remove(m)}>
+                                    {t("sxCommonDelete")}
+                                </TextAction>
+                            }
+                        />
+                    ))}
+                </Group>
             )}
 
             {creating && (
@@ -736,12 +674,12 @@ function MappersTab({ idp }: any) {
                 />
             )}
             <ConfirmDialog opts={confirmOpts} setOpts={setConfirmOpts} />
-        </div>
+        </Section>
     );
 }
 
-/* Create / edit mapper modal with a dynamic config form driven by mapper type properties. */
 function MapperModal({ alias, types, mapper, onClose, onSaved }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const isEdit = !!mapper;
@@ -777,104 +715,104 @@ function MapperModal({ alias, types, mapper, onClose, onSaved }: any) {
                     { alias, id: mapper.id },
                     { ...payload, id: mapper.id }
                 );
-                addAlert("Eşleştirici kaydedildi.", AlertVariant.success);
+                addAlert(t("sxIdpDetailMapperSaved"), AlertVariant.success);
             } else {
                 await adminClient.identityProviders.createMapper({
                     alias,
                     identityProviderMapper: payload
                 });
-                addAlert("Eşleştirici oluşturuldu.", AlertVariant.success);
+                addAlert(t("sxIdpDetailMapperCreated"), AlertVariant.success);
             }
             onSaved();
         } catch (e) {
-            addError(isEdit ? "Kaydedilemedi." : "Oluşturulamadı.", e);
+            addError(isEdit ? t("sxCommonSaveError") : t("sxCommonCreateError"), e);
             setSaving(false);
         }
     };
+
+    const valueOf = (p: any) =>
+        config[p.name] ?? (p.defaultValue != null ? String(p.defaultValue) : "");
+    const switches = properties.filter(p => /^boolean$/i.test(String(p.type || "")));
+    const others = properties.filter(p => !/^boolean$/i.test(String(p.type || "")));
 
     return (
         <Modal open onOpenChange={o => !o && onClose()}>
             <ModalContent className="sm:max-w-2xl">
                 <ModalHeader>
-                    <ModalTitle>
-                        {isEdit ? "Eşleştiriciyi düzenle" : "Eşleştirici ekle"}
-                    </ModalTitle>
+                    <ModalTitle>{isEdit ? t("sxIdpDetailEditMapper") : t("sxIdpDetailAddMapper")}</ModalTitle>
                 </ModalHeader>
                 <ModalBody>
-                    <div className="space-y-4">
-                        <ItemGroup variant="inset">
-                            <StackItem label="Ad">
+                    <div className="flex flex-col gap-4">
+                        <FormField label={t("sxCommonName")} htmlFor="idp-mapper-name">
+                            <Input
+                                size="lg"
+                                id="idp-mapper-name"
+                                autoFocus
+                                value={name}
+                                onChange={(e: any) => setName(e.target.value)}
+                                placeholder={t("sxIdpDetailMapperNamePlaceholder")}
+                            />
+                        </FormField>
+                        <FormField
+                            label={t("sxIdpDetailMapperType")}
+                            htmlFor="idp-mapper-type"
+                            hint={currentType?.helpText}
+                        >
+                            {isEdit ? (
                                 <Input
-                                    autoFocus
-                                    value={name}
-                                    onChange={(e: any) => setName(e.target.value)}
-                                    placeholder="eşleştirici-adı"
+                                    size="lg"
+                                    id="idp-mapper-type"
+                                    readOnly
+                                    value={currentType?.name || typeId}
+                                    className="text-muted-foreground"
                                 />
-                            </StackItem>
-                            <ItemSeparator />
-                            <Item size="sm">
-                                <ItemContent>
-                                    <ItemTitle>Eşleştirici türü</ItemTitle>
-                                </ItemContent>
-                                <ItemActions className="min-w-0">
-                                    {isEdit ? (
-                                        <span className="truncate text-sm text-muted-foreground">
-                                            {currentType?.name || typeId}
-                                        </span>
-                                    ) : (
-                                        <Select
-                                            value={typeId}
-                                            onValueChange={(v: string) => {
-                                                setTypeId(v);
-                                                setConfig({});
-                                            }}
-                                        >
-                                            <SelectTrigger size="sm" className="max-w-64">
-                                                <SelectValue placeholder="Tür seç…" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {typeList.map((t: any) => (
-                                                    <SelectItem key={t.id} value={t.id}>
-                                                        {t.name}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    )}
-                                </ItemActions>
-                            </Item>
-                        </ItemGroup>
+                            ) : (
+                                <NativeSelect
+                                    id="idp-mapper-type"
+                                    size="lg"
+                                    className="w-full"
+                                    value={typeId}
+                                    onChange={(e: any) => {
+                                        setTypeId(e.target.value);
+                                        setConfig({});
+                                    }}
+                                >
+                                    {typeList.map((item: any) => (
+                                        <NativeSelectOption key={item.id} value={item.id}>
+                                            {item.name}
+                                        </NativeSelectOption>
+                                    ))}
+                                </NativeSelect>
+                            )}
+                        </FormField>
 
-                        {currentType?.helpText && (
-                            <p className="ms-1 text-sm text-muted-foreground">
-                                {currentType.helpText}
-                            </p>
-                        )}
+                        {others.map((p: any) => (
+                            <PropertyField
+                                key={p.name}
+                                prop={p}
+                                value={valueOf(p)}
+                                onChange={(v: any) => setC(p.name, v)}
+                            />
+                        ))}
 
-                        {properties.length > 0 && (
-                            <ItemGroup variant="inset">
-                                {withSeparators(
-                                    properties.map((p: any) => (
-                                        <PropertyRow
-                                            key={p.name}
-                                            prop={p}
-                                            value={
-                                                config[p.name] ??
-                                                (p.defaultValue != null
-                                                    ? String(p.defaultValue)
-                                                    : "")
-                                            }
-                                            onChange={(v: any) => setC(p.name, v)}
-                                        />
-                                    ))
-                                )}
-                            </ItemGroup>
+                        {switches.length > 0 && (
+                            <Group>
+                                {switches.map((p: any) => (
+                                    <SwitchRow
+                                        key={p.name}
+                                        label={p.label || p.name}
+                                        hint={p.helpText}
+                                        checked={String(valueOf(p)) === "true"}
+                                        onChange={(v: boolean) => setC(p.name, v ? "true" : "false")}
+                                    />
+                                ))}
+                            </Group>
                         )}
                     </div>
                 </ModalBody>
                 <ModalFooter>
                     <Button disabled={saving || !name.trim() || !typeId} onClick={save}>
-                        {saving ? "Kaydediliyor…" : isEdit ? "Kaydet" : "Oluştur"}
+                        {saving ? t("sxCommonSaving") : isEdit ? t("sxCommonSave") : t("sxCommonCreate")}
                     </Button>
                 </ModalFooter>
             </ModalContent>
@@ -882,62 +820,42 @@ function MapperModal({ alias, types, mapper, onClose, onSaved }: any) {
     );
 }
 
-/* One dynamic config field, rendered by ConfigPropertyRepresentation.type. */
-function PropertyRow({ prop, value, onChange }: any) {
+function PropertyField({ prop, value, onChange }: any) {
+    const t = useT();
     const type = String(prop.type || "String");
     const label = prop.label || prop.name;
+    const id = `idp-prop-${prop.name}`;
 
-    if (type === "boolean" || type === "Boolean") {
+    if ((type === "List" || type === "Select") && Array.isArray(prop.options) && prop.options.length) {
         return (
-            <SwitchItem
-                label={label}
-                hint={prop.helpText}
-                checked={String(value) === "true"}
-                onChange={(v: boolean) => onChange(v ? "true" : "false")}
-            />
-        );
-    }
-
-    if (
-        (type === "List" || type === "Select") &&
-        Array.isArray(prop.options) &&
-        prop.options.length
-    ) {
-        return (
-            <Item size="sm">
-                <ItemContent className="min-w-0">
-                    <ItemTitle>{label}</ItemTitle>
-                    {prop.helpText && <ItemDescription>{prop.helpText}</ItemDescription>}
-                </ItemContent>
-                <ItemActions>
-                    <Select
-                        value={value || "__none__"}
-                        onValueChange={(v: string) => onChange(v === "__none__" ? "" : v)}
-                    >
-                        <SelectTrigger size="sm" className="max-w-56">
-                            <SelectValue placeholder="Seç…" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="__none__">Seç…</SelectItem>
-                            {prop.options.map((o: string) => (
-                                <SelectItem key={o} value={o}>
-                                    {o}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                </ItemActions>
-            </Item>
+            <FormField label={label} htmlFor={id} hint={prop.helpText}>
+                <NativeSelect
+                    id={id}
+                    size="lg"
+                    className="w-full"
+                    value={value || ""}
+                    onChange={(e: any) => onChange(e.target.value)}
+                >
+                    <NativeSelectOption value="">{t("sxCommonSelectPlaceholder")}</NativeSelectOption>
+                    {prop.options.map((o: string) => (
+                        <NativeSelectOption key={o} value={o}>
+                            {o}
+                        </NativeSelectOption>
+                    ))}
+                </NativeSelect>
+            </FormField>
         );
     }
 
     return (
-        <StackItem label={label} hint={prop.helpText}>
+        <FormField label={label} htmlFor={id} hint={prop.helpText}>
             <Input
+                size="lg"
+                id={id}
                 type={prop.secret ? "password" : "text"}
                 value={value}
                 onChange={(e: any) => onChange(e.target.value)}
             />
-        </StackItem>
+        </FormField>
     );
 }

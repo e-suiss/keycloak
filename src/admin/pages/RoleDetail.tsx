@@ -1,42 +1,10 @@
 // @ts-nocheck
 
-import {
-    CaretLeftIcon,
-    PlusIcon,
-    ShieldCheckIcon,
-    StackIcon,
-    TrashIcon,
-    UsersThreeIcon
-} from "@phosphor-icons/react";
-import { Avatar, AvatarFallback } from "@ui/components/avatar";
-import { Badge } from "@ui/components/badge";
+import { PlusIcon, ShieldCheckIcon } from "@phosphor-icons/react";
 import { Button } from "@ui/components/button";
 import { Checkbox } from "@ui/components/checkbox";
-import {
-    Empty,
-    EmptyDescription,
-    EmptyHeader,
-    EmptyMedia,
-    EmptyTitle
-} from "@ui/components/empty";
-import {
-    Field,
-    FieldGroup,
-    FieldLabel,
-    FieldLegend,
-    FieldSet
-} from "@ui/components/field";
+import { Field, FieldLabel } from "@ui/components/field";
 import { Input } from "@ui/components/input";
-import {
-    Item,
-    ItemActions,
-    ItemContent,
-    ItemDescription,
-    ItemGroup,
-    ItemMedia,
-    ItemSeparator,
-    ItemTitle
-} from "@ui/components/item";
 import { Spinner } from "@ui/components/spinner";
 import { Textarea } from "@ui/components/textarea";
 import {
@@ -57,103 +25,160 @@ import {
     ModalHeader,
     ModalTitle
 } from "@ui/patterns/modal";
-import { SegmentPicker, SegmentPickerItem } from "@ui/patterns/segment-picker";
-import { Fragment, useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { AlertVariant, useAlerts } from "../../shared/keycloak-ui-shared";
 import { useAdminClient } from "../admin-client";
+import {
+    AdminPage,
+    GROUP,
+    Group,
+    ListSkeleton,
+    Notice,
+    Row,
+    SEPARATOR,
+    Section,
+    SegmentTabs,
+    TextAction
+} from "../ui/kit";
+import { useT } from "../ui/i18n";
 import { useRealm } from "../ui/realm";
 import { initials } from "../ui/util";
 
 const TABS = [
-    { value: "details", label: "Ayrıntılar" },
-    { value: "attributes", label: "Öznitelikler" },
-    { value: "composite", label: "Bileşik roller" },
-    { value: "users", label: "Kullanıcılar" }
+    { value: "details", label: "sxRoleDetailTabDetails" },
+    { value: "attributes", label: "sxRoleDetailTabAttributes" },
+    { value: "composite", label: "sxRoleDetailTabComposite" },
+    { value: "users", label: "sxRoleDetailTabUsers" }
 ];
 
+function isNotFound(e: any) {
+    return e?.response?.status === 404;
+}
+
+const DANGER_BTN = "bg-[#d70015] text-white hover:bg-[#d70015]/90 dark:bg-[#ff453a] dark:hover:bg-[#ff453a]/90";
+
+function ConfirmDialog({ opts, onClose }: any) {
+    const t = useT();
+    return (
+        <Confirm open={!!opts} onOpenChange={o => !o && onClose()}>
+            <ConfirmContent>
+                <ConfirmHeader>
+                    <ConfirmTitle>{opts?.title}</ConfirmTitle>
+                    {opts?.message && <ConfirmDescription>{opts.message}</ConfirmDescription>}
+                </ConfirmHeader>
+                <ConfirmFooter>
+                    <ConfirmCancel>{t("sxRoleDetailCancel")}</ConfirmCancel>
+                    <ConfirmAction
+                        variant={opts?.danger ? "destructive" : "default"}
+                        onClick={() => {
+                            const fn = opts?.onConfirm;
+                            onClose();
+                            fn?.();
+                        }}
+                    >
+                        {opts?.confirmLabel ?? t("sxRoleDetailConfirm")}
+                    </ConfirmAction>
+                </ConfirmFooter>
+            </ConfirmContent>
+        </Confirm>
+    );
+}
+
 export default function RoleDetail() {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
     const { id } = useParams();
     const navigate = useNavigate();
-    const { addAlert, addError } = useAlerts();
+    const { addError } = useAlerts();
 
     const isNew = id === "new";
-    const [loading, setLoading] = useState(!isNew);
+    const [status, setStatus] = useState<"loading" | "error" | "ready">(isNew ? "ready" : "loading");
+    const [attempt, setAttempt] = useState(0);
     const [role, setRole] = useState<any>(null);
     const [tab, setTab] = useState("details");
 
-    const reload = useCallback(async () => {
+    const fetchRole = () =>
+        adminClient.roles.findOneByName({ name: id }).catch(e => {
+            if (isNotFound(e)) return null;
+            throw e;
+        });
+
+    const reload = async () => {
         try {
-            const found = await adminClient.roles
-                .findOneByName({ name: id })
-                .catch(() => null);
-            setRole(found);
+            setRole(await fetchRole());
         } catch (e) {
-            addError("Rol yüklenemedi.", e);
-        } finally {
-            setLoading(false);
+            addError(t("sxRoleDetailReloadError"), e);
         }
-    }, [adminClient, id, addError]);
+    };
 
     useEffect(() => {
         if (isNew) {
-            setLoading(false);
+            setStatus("ready");
             return;
         }
-        setLoading(true);
-        reload();
-    }, [reload, isNew]);
+        let alive = true;
+        setStatus("loading");
+        fetchRole()
+            .then(found => {
+                if (!alive) return;
+                setRole(found ?? null);
+                setStatus("ready");
+            })
+            .catch(() => alive && setStatus("error"));
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, id, isNew, attempt]);
+
+    const back = { label: t("sxNavRealmRoles"), to: `/${realm}/roles` };
 
     if (isNew) return <NewRole />;
-    if (loading)
+    if (status === "loading")
         return (
-            <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-                <div className="grid place-items-center py-16">
-                    <Spinner />
-                </div>
-            </div>
+            <AdminPage title={t("sxRoleDetailTitle")} back={back} width="narrow">
+                <ListSkeleton rows={3} />
+            </AdminPage>
+        );
+    if (status === "error")
+        return (
+            <AdminPage title={t("sxRoleDetailTitle")} back={back} width="narrow">
+                <Notice
+                    title={t("sxRoleDetailLoadError")}
+                    description={t("sxLoadErrorDescription")}
+                    onRetry={() => setAttempt(n => n + 1)}
+                />
+            </AdminPage>
         );
     if (!role?.id)
         return (
-            <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-                <Empty>
-                    <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                            <ShieldCheckIcon />
-                        </EmptyMedia>
-                        <EmptyTitle>Rol bulunamadı</EmptyTitle>
-                    </EmptyHeader>
-                </Empty>
-            </div>
+            <AdminPage title={t("sxRoleDetailNotFoundTitle")} back={back} width="narrow">
+                <Notice
+                    title={t("sxRoleDetailNotFoundTitle")}
+                    description={t("sxRoleDetailNotFoundDescription")}
+                    action={
+                        <Button asChild>
+                            <Link to={back.to}>{t("sxRoleDetailBackToRoles")}</Link>
+                        </Button>
+                    }
+                />
+            </AdminPage>
         );
 
     return (
-        <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-            <div className="relative mb-7 flex items-center">
-                <Button
-                    type="button"
-                    variant="secondary"
-                    size="icon"
-                    onClick={() => navigate(`/${realm}/roles`)}
-                    aria-label="Geri"
-                >
-                    <CaretLeftIcon weight="bold" />
-                </Button>
-                <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-2 text-center">
-                    <p className="font-semibold text-foreground">{role.name}</p>
-                    {role.composite && <Badge variant="outline">Bileşik</Badge>}
-                </div>
-            </div>
-
-            <div className="mb-5 flex justify-center">
-                <SegmentPicker value={tab} onValueChange={setTab}>
-                    {TABS.map(t => (
-                        <SegmentPickerItem key={t.value} value={t.value} label={t.label} />
-                    ))}
-                </SegmentPicker>
-            </div>
+        <AdminPage
+            title={role.name}
+            description={role.composite ? t("sxRoleDetailCompositeRealmRole") : t("sxRoleDetailRealmRole")}
+            back={back}
+            width="narrow"
+        >
+            <SegmentTabs
+                ariaLabel={t("sxRoleDetailSections")}
+                value={tab}
+                onChange={setTab}
+                items={TABS.map(item => ({ value: item.value, label: t(item.label) }))}
+            />
 
             {tab === "details" && (
                 <DetailsTab
@@ -166,11 +191,12 @@ export default function RoleDetail() {
             {tab === "attributes" && <AttributesTab role={role} reload={reload} />}
             {tab === "composite" && <CompositeTab role={role} reload={reload} />}
             {tab === "users" && <UsersTab role={role} />}
-        </div>
+        </AdminPage>
     );
 }
 
 function NewRole() {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
     const navigate = useNavigate();
@@ -187,68 +213,66 @@ function NewRole() {
                 name: name.trim(),
                 description: description.trim() || undefined
             });
-            addAlert("Rol oluşturuldu.", AlertVariant.success);
+            addAlert(t("sxRoleDetailCreated"), AlertVariant.success);
             navigate(`/${realm}/roles/${encodeURIComponent(name.trim())}`);
         } catch (e) {
-            addError("Rol oluşturulamadı.", e);
+            addError(t("sxRoleDetailCreateError"), e);
         } finally {
             setSaving(false);
         }
     };
 
     return (
-        <div className="mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8">
-            <div className="relative mb-7 flex items-center">
-                <Button
-                    type="button"
-                    variant="secondary"
-                    size="icon"
-                    onClick={() => navigate(`/${realm}/roles`)}
-                    aria-label="Geri"
-                >
-                    <CaretLeftIcon weight="bold" />
-                </Button>
-                <p className="absolute left-1/2 -translate-x-1/2 font-semibold text-foreground">
-                    Yeni rol
-                </p>
-            </div>
-            <div className="mx-auto max-w-xl space-y-6">
-                <FieldSet>
-                    <FieldLegend variant="label">Rol bilgileri</FieldLegend>
-                    <FieldGroup>
-                        <Field>
-                            <FieldLabel htmlFor="role-name">Rol adı</FieldLabel>
-                            <Input
-                                id="role-name"
-                                autoFocus
-                                value={name}
-                                onChange={(e: any) => setName(e.target.value)}
-                                placeholder="örn. realm-admin"
-                            />
-                        </Field>
-                        <Field>
-                            <FieldLabel htmlFor="role-description">Açıklama</FieldLabel>
-                            <Textarea
-                                id="role-description"
-                                rows={2}
-                                value={description}
-                                onChange={(e: any) => setDescription(e.target.value)}
-                                placeholder="İsteğe bağlı"
-                            />
-                        </Field>
-                    </FieldGroup>
-                </FieldSet>
-                <div className="flex justify-end">
-                    <Button disabled={saving || !name.trim()} onClick={create}>
-                        {saving ? "Oluşturuluyor…" : "Oluştur"}
+        <AdminPage
+            title={t("sxRoleDetailNewTitle")}
+            description={t("sxRoleDetailNewDescription")}
+            back={{ label: t("sxNavRealmRoles"), to: `/${realm}/roles` }}
+            width="narrow"
+        >
+            <form
+                onSubmit={e => {
+                    e.preventDefault();
+                    create();
+                }}
+            >
+                <div className="flex flex-col gap-4">
+                    <Field size="lg">
+                        <FieldLabel htmlFor="role-name">{t("sxRoleDetailName")}</FieldLabel>
+                        <Input
+                            id="role-name"
+                            size="lg"
+                            autoFocus
+                            value={name}
+                            onChange={(e: any) => setName(e.target.value)}
+                            placeholder={t("sxRoleDetailNamePlaceholder")}
+                        />
+                    </Field>
+                    <Field size="lg">
+                        <FieldLabel htmlFor="role-description">{t("sxRoleDetailDescription")}</FieldLabel>
+                        <Textarea
+                            id="role-description"
+                            rows={2}
+                            value={description}
+                            onChange={(e: any) => setDescription(e.target.value)}
+                            placeholder={t("sxRoleDetailOptional")}
+                        />
+                    </Field>
+                </div>
+                <div className="mt-7 flex flex-col gap-1.5">
+                    <Button type="submit" size="form" block disabled={saving || !name.trim()}>
+                        {saving ? t("sxRoleDetailCreating") : t("sxRoleDetailCreate")}
+                    </Button>
+                    <Button type="button" variant="plain" size="form" block onClick={() => navigate(`/${realm}/roles`)}>
+                        {t("sxRoleDetailCancel")}
                     </Button>
                 </div>
-            </div>
-        </div>
+            </form>
+        </AdminPage>
     );
 }
 
 function DetailsTab({ role, reload, onDeleted, onRenamed }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [confirmOpts, setConfirmOpts] = useState<any>(null);
@@ -256,6 +280,7 @@ function DetailsTab({ role, reload, onDeleted, onRenamed }: any) {
     const [name, setName] = useState(role.name || "");
     const [description, setDescription] = useState(role.description || "");
     const [saving, setSaving] = useState(false);
+    const dirty = name !== (role.name || "") || description !== (role.description || "");
 
     const save = async () => {
         if (!name.trim()) return;
@@ -269,11 +294,11 @@ function DetailsTab({ role, reload, onDeleted, onRenamed }: any) {
                     description: description.trim() || undefined
                 }
             );
-            addAlert("Rol kaydedildi.", AlertVariant.success);
+            addAlert(t("sxRoleDetailSaved"), AlertVariant.success);
             if (name.trim() !== role.name) onRenamed(name.trim());
             else reload();
         } catch (e) {
-            addError("Kaydedilemedi.", e);
+            addError(t("sxRoleDetailSaveError"), e);
         } finally {
             setSaving(false);
         }
@@ -281,101 +306,85 @@ function DetailsTab({ role, reload, onDeleted, onRenamed }: any) {
 
     const remove = () =>
         confirm({
-            title: "Rolü sil",
-            message: `“${role.name}” rolü silinecek.`,
-            confirmLabel: "Sil",
+            title: t("sxRoleDetailDeleteRole"),
+            message: t("sxRoleDetailDeleteMessage", { name: role.name }),
+            confirmLabel: t("sxRoleDetailDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.roles.delById({ id: role.id });
-                    addAlert("Rol silindi.", AlertVariant.success);
+                    addAlert(t("sxRoleDetailDeleted"), AlertVariant.success);
                     onDeleted();
                 } catch (e) {
-                    addError("Silinemedi.", e);
+                    addError(t("sxRoleDetailDeleteError"), e);
                 }
             }
         });
 
     return (
-        <div className="mx-auto max-w-xl space-y-6">
-            <div>
-                <FieldSet>
-                    <FieldLegend variant="label">Rol bilgileri</FieldLegend>
-                    <FieldGroup>
-                        <Field>
-                            <FieldLabel htmlFor="role-name">Rol adı</FieldLabel>
-                            <Input
-                                id="role-name"
-                                value={name}
-                                onChange={(e: any) => setName(e.target.value)}
-                            />
-                        </Field>
-                        <Field>
-                            <FieldLabel htmlFor="role-description">Açıklama</FieldLabel>
-                            <Textarea
-                                id="role-description"
-                                rows={2}
-                                value={description}
-                                onChange={(e: any) => setDescription(e.target.value)}
-                                placeholder="İsteğe bağlı"
-                            />
-                        </Field>
-                        <Field orientation="horizontal">
-                            <FieldLabel>Rol ID</FieldLabel>
-                            <span className="font-mono text-xs text-muted-foreground">
-                                {role.id}
-                            </span>
-                        </Field>
-                    </FieldGroup>
-                </FieldSet>
-                <div className="mt-3 flex justify-end">
-                    <Button disabled={saving || !name.trim()} onClick={save}>
-                        {saving ? "Kaydediliyor…" : "Kaydet"}
+        <div>
+            <form
+                onSubmit={e => {
+                    e.preventDefault();
+                    save();
+                }}
+            >
+                <div className="flex flex-col gap-4">
+                    <Field size="lg">
+                        <FieldLabel htmlFor="role-name">{t("sxRoleDetailName")}</FieldLabel>
+                        <Input id="role-name" size="lg" value={name} onChange={(e: any) => setName(e.target.value)} />
+                    </Field>
+                    <Field size="lg">
+                        <FieldLabel htmlFor="role-description">{t("sxRoleDetailDescription")}</FieldLabel>
+                        <Textarea
+                            id="role-description"
+                            rows={2}
+                            value={description}
+                            onChange={(e: any) => setDescription(e.target.value)}
+                            placeholder={t("sxRoleDetailOptional")}
+                        />
+                    </Field>
+                    <Field size="lg">
+                        <FieldLabel>{t("sxRoleDetailId")}</FieldLabel>
+                        <p className="ps-0.5 font-mono text-[13px] text-muted-foreground [overflow-wrap:anywhere]">
+                            {role.id}
+                        </p>
+                    </Field>
+                </div>
+                <div className="mt-7 flex flex-col gap-1.5">
+                    <Button type="submit" size="form" block disabled={saving || !name.trim() || !dirty}>
+                        {saving ? t("sxRoleDetailSaving") : t("sxRoleDetailSave")}
+                    </Button>
+                    <Button
+                        type="button"
+                        variant="plain"
+                        size="form"
+                        block
+                        disabled={saving || !dirty}
+                        onClick={() => {
+                            setName(role.name || "");
+                            setDescription(role.description || "");
+                        }}
+                    >
+                        {t("sxRoleDetailCancel")}
                     </Button>
                 </div>
-            </div>
-            <div>
-                <h3 className="mb-2 ms-1 text-sm font-medium text-muted-foreground">
-                    Tehlikeli bölge
-                </h3>
-                <ItemGroup variant="inset">
-                    <Item size="sm" asChild>
-                        <button type="button" onClick={remove}>
-                            <ItemContent>
-                                <ItemTitle className="text-destructive">Rolü sil</ItemTitle>
-                            </ItemContent>
-                        </button>
-                    </Item>
-                </ItemGroup>
-            </div>
-            <Confirm open={!!confirmOpts} onOpenChange={o => !o && setConfirmOpts(null)}>
-                <ConfirmContent>
-                    <ConfirmHeader>
-                        <ConfirmTitle>{confirmOpts?.title}</ConfirmTitle>
-                        {confirmOpts?.message && (
-                            <ConfirmDescription>{confirmOpts.message}</ConfirmDescription>
-                        )}
-                    </ConfirmHeader>
-                    <ConfirmFooter>
-                        <ConfirmCancel>Vazgeç</ConfirmCancel>
-                        <ConfirmAction
-                            variant={confirmOpts?.danger ? "destructive" : "default"}
-                            onClick={() => {
-                                const fn = confirmOpts?.onConfirm;
-                                setConfirmOpts(null);
-                                fn?.();
-                            }}
-                        >
-                            {confirmOpts?.confirmLabel ?? "Onayla"}
-                        </ConfirmAction>
-                    </ConfirmFooter>
-                </ConfirmContent>
-            </Confirm>
+            </form>
+            <section className="mt-7 border-t border-border pt-6">
+                <p className="mb-3 text-[13px] leading-[1.4] text-muted-foreground">
+                    {t("sxRoleDetailDeleteHint")}
+                </p>
+                <Button type="button" size="form" block className={DANGER_BTN} onClick={remove}>
+                    {t("sxRoleDetailDeleteRole")}
+                </Button>
+            </section>
+            <ConfirmDialog opts={confirmOpts} onClose={() => setConfirmOpts(null)} />
         </div>
     );
 }
 
 function AttributesTab({ role, reload }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const toRows = (attrs: any) =>
@@ -387,7 +396,9 @@ function AttributesTab({ role, reload }: any) {
     const [saving, setSaving] = useState(false);
 
     const setRow = (i: number, field: string, val: string) =>
-        setRows(rows.map((r, idx) => (idx === i ? { ...r, [field]: val } : r)));
+        setRows(prev => prev.map((r, idx) => (idx === i ? { ...r, [field]: val } : r)));
+
+    const addRow = () => setRows(prev => [...prev, { k: "", v: "" }]);
 
     const save = async () => {
         setSaving(true);
@@ -402,85 +413,81 @@ function AttributesTab({ role, reload }: any) {
                         .filter(Boolean);
             });
             await adminClient.roles.updateById({ id: role.id }, { ...role, attributes });
-            addAlert("Öznitelikler kaydedildi.", AlertVariant.success);
+            addAlert(t("sxRoleDetailAttributesSaved"), AlertVariant.success);
             reload();
         } catch (e) {
-            addError("Kaydedilemedi.", e);
+            addError(t("sxRoleDetailAttributesSaveError"), e);
         } finally {
             setSaving(false);
         }
     };
 
     return (
-        <div className="mx-auto max-w-xl space-y-3">
-            <h3 className="mb-2 ms-1 text-sm font-medium text-muted-foreground">
-                Öznitelikler
-            </h3>
-            <ItemGroup variant="inset">
+        <div>
+            <Section
+                label={t("sxRoleDetailTabAttributes")}
+                action={
+                    <TextAction onClick={addRow}>
+                        <span className="inline-flex items-center gap-1">
+                            <PlusIcon className="size-3.5" weight="bold" /> {t("sxRoleDetailAddAttribute")}
+                        </span>
+                    </TextAction>
+                }
+            >
                 {rows.length === 0 ? (
-                    <Item size="sm">
-                        <ItemContent>
-                            <ItemDescription className="text-center">
-                                Öznitelik yok.
-                            </ItemDescription>
-                        </ItemContent>
-                    </Item>
+                    <Notice
+                        title={t("sxRoleDetailNoAttributesTitle")}
+                        description={t("sxRoleDetailNoAttributesDescription")}
+                        action={<Button onClick={addRow}>{t("sxRoleDetailAddAttribute")}</Button>}
+                    />
                 ) : (
-                    rows.map((r, i) => (
-                        <Fragment key={i}>
-                            {i > 0 && <ItemSeparator />}
-                            <Item size="sm" className="flex-nowrap gap-2">
-                                <Input
-                                    size="sm"
-                                    value={r.k}
-                                    onChange={(e: any) => setRow(i, "k", e.target.value)}
-                                    placeholder="anahtar"
-                                    className="w-2/5 min-w-0 font-medium"
-                                />
-                                <span className="text-muted-foreground">:</span>
-                                <Input
-                                    size="sm"
-                                    value={r.v}
-                                    onChange={(e: any) => setRow(i, "v", e.target.value)}
-                                    placeholder="değer (virgülle ayır)"
-                                    className="min-w-0 flex-1"
-                                />
-                                <ItemActions>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        title="Sil"
-                                        aria-label="Sil"
-                                        onClick={() =>
-                                            setRows(rows.filter((_, idx) => idx !== i))
-                                        }
+                    <ul className={GROUP}>
+                        {rows.map((r, i) => (
+                            <Fragment key={i}>
+                                {i > 0 && <li aria-hidden className={SEPARATOR} />}
+                                <li className="flex items-center gap-2 px-4 py-3">
+                                    <Input
+                                        size="md"
+                                        value={r.k}
+                                        onChange={(e: any) => setRow(i, "k", e.target.value)}
+                                        placeholder={t("sxRoleDetailKeyPlaceholder")}
+                                        aria-label={t("sxRoleDetailKey")}
+                                        className="w-2/5 min-w-0 font-medium"
+                                    />
+                                    <Input
+                                        size="md"
+                                        value={r.v}
+                                        onChange={(e: any) => setRow(i, "v", e.target.value)}
+                                        placeholder={t("sxRoleDetailValuePlaceholder")}
+                                        aria-label={t("sxRoleDetailValue")}
+                                        className="min-w-0 flex-1"
+                                    />
+                                    <TextAction
+                                        tone="danger"
+                                        aria-label={t("sxRoleDetailDelete")}
+                                        onClick={() => setRows(prev => prev.filter((_, idx) => idx !== i))}
                                     >
-                                        <TrashIcon />
-                                    </Button>
-                                </ItemActions>
-                            </Item>
-                        </Fragment>
-                    ))
+                                        {t("sxRoleDetailDelete")}
+                                    </TextAction>
+                                </li>
+                            </Fragment>
+                        ))}
+                    </ul>
                 )}
-                <ItemSeparator />
-                <Item size="sm" asChild>
-                    <button
-                        type="button"
-                        onClick={() => setRows([...rows, { k: "", v: "" }])}
-                    >
-                        <ItemMedia variant="icon" className="text-primary">
-                            <PlusIcon />
-                        </ItemMedia>
-                        <ItemContent>
-                            <ItemTitle className="text-primary">Öznitelik ekle</ItemTitle>
-                        </ItemContent>
-                    </button>
-                </Item>
-            </ItemGroup>
-            <div className="flex justify-end">
-                <Button disabled={saving} onClick={save}>
-                    {saving ? "Kaydediliyor…" : "Kaydet"}
+            </Section>
+            <div className="mt-7 flex flex-col gap-1.5">
+                <Button type="button" size="form" block disabled={saving} onClick={save}>
+                    {saving ? t("sxRoleDetailSaving") : t("sxRoleDetailSave")}
+                </Button>
+                <Button
+                    type="button"
+                    variant="plain"
+                    size="form"
+                    block
+                    disabled={saving}
+                    onClick={() => setRows(toRows(role.attributes))}
+                >
+                    {t("sxRoleDetailCancel")}
                 </Button>
             </div>
         </div>
@@ -488,117 +495,104 @@ function AttributesTab({ role, reload }: any) {
 }
 
 function CompositeTab({ role, reload }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [confirmOpts, setConfirmOpts] = useState<any>(null);
     const confirm = setConfirmOpts;
     const [composites, setComposites] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
+    const [attempt, setAttempt] = useState(0);
     const [picking, setPicking] = useState(false);
 
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            const c = await adminClient.roles.getCompositeRoles({ id: role.id });
-            setComposites(Array.isArray(c) ? c : []);
-        } catch (e) {
-            addError("Bileşik roller yüklenemedi.", e);
-        } finally {
-            setLoading(false);
-        }
-    }, [adminClient, role.id, addError]);
-
     useEffect(() => {
-        load();
-    }, [load]);
+        let alive = true;
+        setStatus("loading");
+        adminClient.roles
+            .getCompositeRoles({ id: role.id })
+            .then(c => {
+                if (!alive) return;
+                setComposites(Array.isArray(c) ? c : []);
+                setStatus("ready");
+            })
+            .catch(() => alive && setStatus("error"));
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, role.id, attempt]);
 
     const removeComposite = (r: any) =>
         confirm({
-            title: "Bileşenden kaldır",
-            message: `“${r.name}” bu bileşik rolden kaldırılacak.`,
-            confirmLabel: "Kaldır",
+            title: t("sxRoleDetailRemoveCompositeTitle"),
+            message: t("sxRoleDetailRemoveCompositeMessage", { name: r.name }),
+            confirmLabel: t("sxRoleDetailRemove"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.roles.delCompositeRoles({ id: role.id }, [r]);
-                    addAlert("Kaldırıldı.", AlertVariant.success);
-                    setComposites(composites.filter(x => x.id !== r.id));
+                    addAlert(t("sxRoleDetailCompositeRemoved"), AlertVariant.success);
+                    setComposites(prev => prev.filter(x => x.id !== r.id));
                     reload();
                 } catch (e) {
-                    addError("Kaldırılamadı.", e);
+                    addError(t("sxRoleDetailCompositeRemoveError"), e);
                 }
             }
         });
 
-    if (loading)
-        return (
-            <div className="grid place-items-center py-16">
-                <Spinner />
-            </div>
-        );
-
     return (
-        <div className="mx-auto max-w-xl space-y-3">
-            <div className="flex items-center justify-between">
-                <h3 className="ms-1 text-sm font-medium text-muted-foreground">
-                    İçerdiği roller
-                </h3>
-                <Button
-                    type="button"
-                    variant="plain"
-                    size="sm"
-                    onClick={() => setPicking(true)}
-                >
-                    <PlusIcon data-icon="inline-start" /> Rol ekle
-                </Button>
-            </div>
-            {composites.length === 0 ? (
-                <Empty>
-                    <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                            <StackIcon />
-                        </EmptyMedia>
-                        <EmptyTitle>Bileşen yok</EmptyTitle>
-                        <EmptyDescription>
-                            Bu role başka roller ekleyerek bileşik (composite) rol yap.
-                        </EmptyDescription>
-                    </EmptyHeader>
-                </Empty>
-            ) : (
-                <ItemGroup variant="inset">
-                    {composites.map((r, i) => (
-                        <Fragment key={r.id}>
-                            {i > 0 && <ItemSeparator />}
-                            <Item size="sm">
-                                <ItemMedia variant="icon">
-                                    <ShieldCheckIcon />
-                                </ItemMedia>
-                                <ItemContent className="min-w-0">
-                                    <ItemTitle>{r.name}</ItemTitle>
-                                    {r.clientRole && (
-                                        <ItemDescription>İstemci rolü</ItemDescription>
-                                    )}
-                                </ItemContent>
-                                <ItemActions>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        title="Sil"
-                                        aria-label="Sil"
-                                        onClick={() => removeComposite(r)}
-                                    >
-                                        <TrashIcon />
-                                    </Button>
-                                </ItemActions>
-                            </Item>
-                        </Fragment>
-                    ))}
-                </ItemGroup>
+        <Section
+            label={t("sxRoleDetailIncludedRoles")}
+            action={
+                status === "ready" && (
+                    <TextAction onClick={() => setPicking(true)}>
+                        <span className="inline-flex items-center gap-1">
+                            <PlusIcon className="size-3.5" weight="bold" /> {t("sxRoleDetailAddRole")}
+                        </span>
+                    </TextAction>
+                )
+            }
+        >
+            {status === "loading" && <ListSkeleton />}
+            {status === "error" && (
+                <Notice
+                    title={t("sxRoleDetailCompositesLoadError")}
+                    description={t("sxLoadErrorDescription")}
+                    onRetry={() => setAttempt(n => n + 1)}
+                />
             )}
-            <p className="mt-2 ms-1 text-sm text-muted-foreground">
-                Bileşik rol, içerdiği tüm rollerin yetkilerini taşır.
-            </p>
+            {status === "ready" &&
+                (composites.length === 0 ? (
+                    <Notice
+                        title={t("sxRoleDetailNoCompositesTitle")}
+                        description={t("sxRoleDetailNoCompositesDescription")}
+                        action={<Button onClick={() => setPicking(true)}>{t("sxRoleDetailAddRole")}</Button>}
+                    />
+                ) : (
+                    <Group>
+                        {composites.map(r => (
+                            <Row
+                                key={r.id}
+                                leading={
+                                    <span className="grid size-8 place-items-center rounded-lg bg-[#e5e5ea] dark:bg-[#2c2c2e]">
+                                        <ShieldCheckIcon className="size-4.5" />
+                                    </span>
+                                }
+                                title={r.name}
+                                subtitle={r.clientRole ? t("sxRoleDetailClientRole") : undefined}
+                                trailing={
+                                    <TextAction tone="danger" onClick={() => removeComposite(r)}>
+                                        {t("sxRoleDetailRemove")}
+                                    </TextAction>
+                                }
+                            />
+                        ))}
+                    </Group>
+                ))}
+            {status === "ready" && (
+                <p className="mt-2 px-0.5 text-[13px] text-muted-foreground">
+                    {t("sxRoleDetailCompositeHint")}
+                </p>
+            )}
             {picking && (
                 <PickCompositeModal
                     role={role}
@@ -606,63 +600,44 @@ function CompositeTab({ role, reload }: any) {
                     onClose={() => setPicking(false)}
                     onAdded={() => {
                         setPicking(false);
-                        load();
+                        setAttempt(n => n + 1);
                         reload();
                     }}
                 />
             )}
-            <Confirm open={!!confirmOpts} onOpenChange={o => !o && setConfirmOpts(null)}>
-                <ConfirmContent>
-                    <ConfirmHeader>
-                        <ConfirmTitle>{confirmOpts?.title}</ConfirmTitle>
-                        {confirmOpts?.message && (
-                            <ConfirmDescription>{confirmOpts.message}</ConfirmDescription>
-                        )}
-                    </ConfirmHeader>
-                    <ConfirmFooter>
-                        <ConfirmCancel>Vazgeç</ConfirmCancel>
-                        <ConfirmAction
-                            variant={confirmOpts?.danger ? "destructive" : "default"}
-                            onClick={() => {
-                                const fn = confirmOpts?.onConfirm;
-                                setConfirmOpts(null);
-                                fn?.();
-                            }}
-                        >
-                            {confirmOpts?.confirmLabel ?? "Onayla"}
-                        </ConfirmAction>
-                    </ConfirmFooter>
-                </ConfirmContent>
-            </Confirm>
-        </div>
+            <ConfirmDialog opts={confirmOpts} onClose={() => setConfirmOpts(null)} />
+        </Section>
     );
 }
 
 function PickCompositeModal({ role, existing, onClose, onAdded }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [roles, setRoles] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
+    const [attempt, setAttempt] = useState(0);
     const [sel, setSel] = useState<Set<string>>(new Set());
     const [saving, setSaving] = useState(false);
+    const existingRef = useRef(existing);
 
     useEffect(() => {
+        let alive = true;
+        setStatus("loading");
         (async () => {
             try {
                 const all = await adminClient.roles.find({ max: 1000 });
-                setRoles(
-                    (all || []).filter(
-                        (r: any) => r.id !== role.id && !existing.has(r.id)
-                    )
-                );
-            } catch (e) {
-                addError("Roller yüklenemedi.", e);
-            } finally {
-                setLoading(false);
+                if (!alive) return;
+                setRoles((all || []).filter((r: any) => r.id !== role.id && !existingRef.current.has(r.id)));
+                setStatus("ready");
+            } catch {
+                if (alive) setStatus("error");
             }
         })();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [role.id, addError, existing.has, adminClient.roles.find]);
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, role.id, attempt]);
 
     const toggle = (id: string) =>
         setSel(prev => {
@@ -677,10 +652,10 @@ function PickCompositeModal({ role, existing, onClose, onAdded }: any) {
         setSaving(true);
         try {
             await adminClient.roles.createComposite({ roleId: role.id }, chosen);
-            addAlert(`${chosen.length} rol eklendi.`, AlertVariant.success);
+            addAlert(t("sxRoleDetailRolesAdded", { total: chosen.length }), AlertVariant.success);
             onAdded();
         } catch (e) {
-            addError("Eklenemedi.", e);
+            addError(t("sxRoleDetailRolesAddError"), e);
             setSaving(false);
         }
     };
@@ -689,54 +664,48 @@ function PickCompositeModal({ role, existing, onClose, onAdded }: any) {
         <Modal open onOpenChange={o => !o && onClose()}>
             <ModalContent className="sm:max-w-2xl">
                 <ModalHeader>
-                    <ModalTitle>Bileşene rol ekle</ModalTitle>
+                    <ModalTitle>{t("sxRoleDetailAddCompositeTitle")}</ModalTitle>
                 </ModalHeader>
                 <ModalBody>
-                    {loading ? (
-                        <div className="grid place-items-center py-16">
-                            <Spinner />
-                        </div>
+                    {status === "loading" ? (
+                        <ListSkeleton />
+                    ) : status === "error" ? (
+                        <Notice
+                            title={t("sxRoleDetailRolesLoadError")}
+                            description={t("sxLoadErrorDescription")}
+                            onRetry={() => setAttempt(n => n + 1)}
+                        />
+                    ) : roles.length === 0 ? (
+                        <Notice
+                            title={t("sxRoleDetailNoAvailableRolesTitle")}
+                            description={t("sxRoleDetailNoAvailableRolesDescription")}
+                        />
                     ) : (
-                        <ItemGroup variant="inset">
-                            {roles.length === 0 ? (
-                                <Item size="sm">
-                                    <ItemContent>
-                                        <ItemDescription className="text-center">
-                                            Eklenebilecek rol yok.
-                                        </ItemDescription>
-                                    </ItemContent>
-                                </Item>
-                            ) : (
-                                roles.map((r, i) => (
-                                    <Fragment key={r.id}>
-                                        {i > 0 && <ItemSeparator />}
-                                        <Item size="sm" asChild>
-                                            <label>
-                                                <ItemMedia>
-                                                    <Checkbox
-                                                        checked={sel.has(r.id)}
-                                                        onCheckedChange={() => toggle(r.id)}
-                                                    />
-                                                </ItemMedia>
-                                                <ItemContent className="min-w-0">
-                                                    <ItemTitle>{r.name}</ItemTitle>
-                                                    {r.description && (
-                                                        <ItemDescription className="truncate">
-                                                            {r.description}
-                                                        </ItemDescription>
-                                                    )}
-                                                </ItemContent>
-                                            </label>
-                                        </Item>
-                                    </Fragment>
-                                ))
-                            )}
-                        </ItemGroup>
+                        <ul className={GROUP}>
+                            {roles.map((r, i) => (
+                                <Fragment key={r.id}>
+                                    {i > 0 && <li aria-hidden className={SEPARATOR} />}
+                                    <li>
+                                        <label className="flex min-h-14 cursor-pointer items-center gap-3 px-4 py-2.5 hover:bg-black/3 dark:hover:bg-white/4">
+                                            <Checkbox checked={sel.has(r.id)} onCheckedChange={() => toggle(r.id)} />
+                                            <span className="min-w-0">
+                                                <span className="block truncate text-base font-medium">{r.name}</span>
+                                                {r.description && (
+                                                    <span className="mt-0.5 block truncate text-[13px] text-muted-foreground">
+                                                        {r.description}
+                                                    </span>
+                                                )}
+                                            </span>
+                                        </label>
+                                    </li>
+                                </Fragment>
+                            ))}
+                        </ul>
                     )}
                 </ModalBody>
                 <ModalFooter>
                     <Button disabled={saving || sel.size === 0} onClick={save}>
-                        {saving ? "Ekleniyor…" : `Ekle (${sel.size})`}
+                        {saving ? t("sxRoleDetailAdding") : t("sxRoleDetailAddCount", { total: sel.size })}
                     </Button>
                 </ModalFooter>
             </ModalContent>
@@ -745,100 +714,95 @@ function PickCompositeModal({ role, existing, onClose, onAdded }: any) {
 }
 
 function UsersTab({ role }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addError } = useAlerts();
     const [users, setUsers] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
+    const [attempt, setAttempt] = useState(0);
+    const [loadingMore, setLoadingMore] = useState(false);
     const [more, setMore] = useState(false);
+    const usersRef = useRef(users);
+    usersRef.current = users;
 
-    const load = useCallback(
-        async (reset = true) => {
-            setLoading(reset);
-            try {
-                const first = reset ? 0 : users.length;
-                const u = await adminClient.roles.findUsersWithRole({
-                    name: role.name,
-                    first,
-                    max: 50
-                });
-                const list = Array.isArray(u) ? u : [];
-                setUsers(reset ? list : [...users, ...list]);
-                setMore(list.length === 50);
-            } catch (e) {
-                addError("Kullanıcılar yüklenemedi.", e);
-            } finally {
-                setLoading(false);
-            }
-        },
-        [adminClient, role.name, users, addError]
-    );
+    const fetchPage = (first: number) => adminClient.roles.findUsersWithRole({ name: role.name, first, max: 50 });
 
     useEffect(() => {
-        load(true);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [load]);
+        let alive = true;
+        setStatus("loading");
+        fetchPage(0)
+            .then(u => {
+                if (!alive) return;
+                const list = Array.isArray(u) ? u : [];
+                setUsers(list);
+                setMore(list.length === 50);
+                setStatus("ready");
+            })
+            .catch(() => alive && setStatus("error"));
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, role.name, attempt]);
 
-    if (loading)
-        return (
-            <div className="grid place-items-center py-16">
-                <Spinner />
-            </div>
-        );
+    const loadMore = async () => {
+        setLoadingMore(true);
+        try {
+            const u = await fetchPage(usersRef.current.length);
+            const list = Array.isArray(u) ? u : [];
+            setUsers(prev => [...prev, ...list]);
+            setMore(list.length === 50);
+        } catch (e) {
+            addError(t("sxRoleDetailUsersLoadMoreError"), e);
+        } finally {
+            setLoadingMore(false);
+        }
+    };
 
     return (
-        <div className="mx-auto max-w-xl space-y-3">
-            <h3 className="mb-2 ms-1 text-sm font-medium text-muted-foreground">
-                {users.length}
-                {more ? "+" : ""} kullanıcı
-            </h3>
-            {users.length === 0 ? (
-                <Empty>
-                    <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                            <UsersThreeIcon />
-                        </EmptyMedia>
-                        <EmptyTitle>Kimse yok</EmptyTitle>
-                        <EmptyDescription>
-                            Bu role doğrudan sahip kullanıcı bulunmuyor.
-                        </EmptyDescription>
-                    </EmptyHeader>
-                </Empty>
-            ) : (
-                <ItemGroup variant="inset">
-                    {users.map((u, i) => (
-                        <Fragment key={u.id}>
-                            {i > 0 && <ItemSeparator />}
-                            <Item size="sm">
-                                <ItemMedia>
-                                    <Avatar>
-                                        <AvatarFallback>{initials(u.username)}</AvatarFallback>
-                                    </Avatar>
-                                </ItemMedia>
-                                <ItemContent className="min-w-0">
-                                    <ItemTitle>{u.username}</ItemTitle>
-                                    <ItemDescription className="truncate">
-                                        {u.email || "—"}
-                                    </ItemDescription>
-                                </ItemContent>
-                            </Item>
-                        </Fragment>
-                    ))}
-                    {more && (
-                        <>
-                            <ItemSeparator />
-                            <Item size="sm" asChild>
-                                <button type="button" onClick={() => load(false)}>
-                                    <ItemContent>
-                                        <ItemTitle className="text-primary">
-                                            Daha fazla yükle
-                                        </ItemTitle>
-                                    </ItemContent>
-                                </button>
-                            </Item>
-                        </>
-                    )}
-                </ItemGroup>
+        <Section
+            label={
+                status === "ready"
+                    ? t("sxRoleDetailUsersCount", { total: `${users.length}${more ? "+" : ""}` })
+                    : t("sxRoleDetailTabUsers")
+            }
+        >
+            {status === "loading" && <ListSkeleton />}
+            {status === "error" && (
+                <Notice
+                    title={t("sxRoleDetailUsersLoadError")}
+                    description={t("sxLoadErrorDescription")}
+                    onRetry={() => setAttempt(n => n + 1)}
+                />
             )}
-        </div>
+            {status === "ready" &&
+                (users.length === 0 ? (
+                    <Notice title={t("sxRoleDetailNoUsersTitle")} description={t("sxRoleDetailNoUsersDescription")} />
+                ) : (
+                    <>
+                        <Group>
+                            {users.map(u => (
+                                <Row
+                                    key={u.id}
+                                    leading={
+                                        <span className="grid size-8 place-items-center rounded-full bg-[#6e6e73] text-[11px] font-semibold text-white dark:bg-[#48484a]">
+                                            {initials(u.username)}
+                                        </span>
+                                    }
+                                    title={u.username}
+                                    subtitle={u.email || "—"}
+                                />
+                            ))}
+                        </Group>
+                        {more && (
+                            <div className="mt-3 flex justify-center">
+                                <Button type="button" variant="plain" onClick={loadMore} disabled={loadingMore}>
+                                    {loadingMore && <Spinner data-icon="inline-start" />}
+                                    {t("sxRoleDetailLoadMore")}
+                                </Button>
+                            </div>
+                        )}
+                    </>
+                ))}
+        </Section>
     );
 }

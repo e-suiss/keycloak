@@ -1,59 +1,11 @@
 // @ts-nocheck
 
-import {
-    CaretLeftIcon,
-    CheckCircleIcon,
-    DeviceMobileIcon,
-    DotsThreeIcon,
-    KeyIcon,
-    LinkIcon,
-    MonitorIcon,
-    PlugIcon,
-    PlusIcon,
-    ShieldCheckIcon,
-    SignOutIcon,
-    TrashIcon,
-    UserSwitchIcon,
-    UsersThreeIcon
-} from "@phosphor-icons/react";
-import { Badge } from "@ui/components/badge";
 import { Button } from "@ui/components/button";
 import { Checkbox } from "@ui/components/checkbox";
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger
-} from "@ui/components/dropdown-menu";
-import {
-    Empty,
-    EmptyDescription,
-    EmptyHeader,
-    EmptyMedia,
-    EmptyTitle
-} from "@ui/components/empty";
+import { Field, FieldLabel } from "@ui/components/field";
 import { Input } from "@ui/components/input";
-import {
-    Item,
-    ItemActions,
-    ItemContent,
-    ItemDescription,
-    ItemGroup,
-    ItemMedia,
-    ItemSeparator,
-    ItemTitle
-} from "@ui/components/item";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue
-} from "@ui/components/select";
-import { Spinner } from "@ui/components/spinner";
+import { NativeSelect, NativeSelectOption } from "@ui/components/native-select";
 import { Switch } from "@ui/components/switch";
-import { Tabs, TabsList, TabsTrigger } from "@ui/components/tabs";
 import {
     Confirm,
     ConfirmAction,
@@ -72,19 +24,27 @@ import {
     ModalHeader,
     ModalTitle
 } from "@ui/patterns/modal";
-import {
-    Children,
-    Fragment,
-    type ReactNode,
-    useCallback,
-    useEffect,
-    useState
-} from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AlertVariant, useAlerts } from "../../shared/keycloak-ui-shared";
 import { useAdminClient } from "../admin-client";
+import { i18n } from "../i18n/i18n";
+import { useT } from "../ui/i18n";
+import {
+    AdminPage,
+    Chip,
+    GROUP,
+    Group,
+    ListSkeleton,
+    Notice,
+    Row,
+    SEPARATOR,
+    Section,
+    SegmentTabs,
+    TextAction
+} from "../ui/kit";
 import { useRealm } from "../ui/realm";
-import { fmtDate, fmtRelative } from "../ui/util";
+import { initials } from "../ui/util";
 
 const EMPTY = {
     username: "",
@@ -95,116 +55,96 @@ const EMPTY = {
     emailVerified: false
 };
 
-const PAGE = "mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 sm:py-8";
+const DANGER_BUTTON =
+    "bg-[#d70015] text-white hover:bg-[#d70015]/90 dark:bg-[#ff453a] dark:hover:bg-[#ff453a]/90";
 
-/* ── Local layout helpers (composed only from esuiss components) ─────── */
+function useResource(fetcher: () => Promise<any>, deps: any[]) {
+    const [state, setState] = useState<{ status: "loading" | "error" | "ready"; data: any }>({
+        status: "loading",
+        data: null
+    });
+    const [attempt, setAttempt] = useState(0);
+    useEffect(() => {
+        let alive = true;
+        setState(s => (s.status === "ready" ? s : { status: "loading", data: null }));
+        fetcher()
+            .then(data => alive && setState({ status: "ready", data }))
+            .catch(() => alive && setState({ status: "error", data: null }));
+        return () => {
+            alive = false;
+        };
+    }, [...deps, attempt]);
+    const setData = (updater: any) =>
+        setState(s => ({ ...s, data: typeof updater === "function" ? updater(s.data) : updater }));
+    const reload = () => setAttempt(n => n + 1);
+    return { status: state.status, data: state.data, setData, reload };
+}
 
-/** Inset list; separators are inserted between the (non-null) children. */
-function List({ children }: { children: ReactNode }) {
-    const items = Children.toArray(children);
+const asList = (value: any) => (Array.isArray(value) ? value : []);
+
+const toDate = (v: any) => new Date(typeof v === "number" ? v : Number(v) || v);
+const locale = () => i18n.language || undefined;
+const formatDate = (v: any) => (v ? toDate(v).toLocaleString(locale()) : "—");
+
+function formatRelative(v: any) {
+    if (!v) return "—";
+    const time = toDate(v).getTime();
+    const rtf = new Intl.RelativeTimeFormat(locale(), { numeric: "auto" });
+    const sec = Math.round((Date.now() - time) / 1000);
+    if (sec < 60) return rtf.format(0, "second");
+    const min = Math.round(sec / 60);
+    if (min < 60) return rtf.format(-min, "minute");
+    const hr = Math.round(min / 60);
+    if (hr < 24) return rtf.format(-hr, "hour");
+    const day = Math.round(hr / 24);
+    if (day < 30) return rtf.format(-day, "day");
+    return new Date(time).toLocaleDateString(locale());
+}
+
+function Monogram({ name }: { name: string }) {
     return (
-        <ItemGroup variant="inset">
-            {items.map((c: any, i) => (
-                <Fragment key={c?.key ?? i}>
-                    {i > 0 && <ItemSeparator />}
-                    {c}
-                </Fragment>
-            ))}
-        </ItemGroup>
+        <span className="grid size-8 place-items-center rounded-full bg-[#6e6e73] text-[11px] font-semibold text-white dark:bg-[#48484a]">
+            {initials(name)}
+        </span>
     );
 }
 
-function Caption({ children }: { children: ReactNode }) {
-    return <h3 className="mb-2 ms-1 text-sm font-medium text-muted-foreground">{children}</h3>;
-}
-
-function Loading() {
+function TextField({ id, label, ...props }: any) {
     return (
-        <div className="flex justify-center py-16">
-            <Spinner className="size-6" />
-        </div>
+        <Field size="lg">
+            <FieldLabel htmlFor={id}>{label}</FieldLabel>
+            <Input size="lg" id={id} {...props} />
+        </Field>
     );
 }
 
-function EmptyBlock({ icon, title, desc }: any) {
+function SwitchRow({ label, checked, onChange, disabled }: any) {
     return (
-        <Empty>
-            <EmptyHeader>
-                <EmptyMedia variant="icon">{icon}</EmptyMedia>
-                <EmptyTitle>{title}</EmptyTitle>
-                {desc && <EmptyDescription>{desc}</EmptyDescription>}
-            </EmptyHeader>
-        </Empty>
+        <Row
+            className="min-h-13"
+            title={label}
+            trailing={
+                <Switch
+                    aria-label={typeof label === "string" ? label : undefined}
+                    checked={!!checked}
+                    disabled={disabled}
+                    onCheckedChange={(v: boolean) => onChange(v)}
+                />
+            }
+        />
     );
 }
 
-function EmptyLine({ children }: { children: ReactNode }) {
-    return (
-        <Item size="sm">
-            <ItemContent>
-                <ItemDescription className="text-center">{children}</ItemDescription>
-            </ItemContent>
-        </Item>
-    );
+function SaveBar({ children }: { children: ReactNode }) {
+    return <div className="flex justify-end">{children}</div>;
 }
 
-/** Label on top, full-width input below. */
-function InputItem({ label, ...props }: any) {
-    return (
-        <Item size="sm">
-            <ItemContent>
-                <ItemTitle className="font-normal">{label}</ItemTitle>
-                <Input size="md" {...props} />
-            </ItemContent>
-        </Item>
-    );
+function Footnote({ children }: { children: ReactNode }) {
+    return <p className="mt-2 px-0.5 text-[13px] leading-[1.4] text-muted-foreground">{children}</p>;
 }
 
-function SwitchItem({ label, checked, onChange }: any) {
-    return (
-        <Item size="sm">
-            <ItemContent>
-                <ItemTitle className="font-normal">{label}</ItemTitle>
-            </ItemContent>
-            <ItemActions>
-                <Switch checked={!!checked} onCheckedChange={(v: boolean) => onChange(v)} />
-            </ItemActions>
-        </Item>
-    );
-}
-
-function DeleteButton({ onClick, title = "Sil" }: any) {
-    return (
-        <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={onClick}
-            title={title}
-            aria-label={title}
-        >
-            <TrashIcon />
-        </Button>
-    );
-}
-
-/** Icon + title/subtitle row with a trailing action. */
-function EntityItem({ icon, title, subtitle, action, mono }: any) {
-    return (
-        <Item size="sm">
-            <ItemMedia variant="icon">{icon}</ItemMedia>
-            <ItemContent className="min-w-0">
-                <ItemTitle className={mono ? "font-mono text-sm font-normal" : "text-sm"}>
-                    {title}
-                </ItemTitle>
-                {subtitle && <ItemDescription className="truncate">{subtitle}</ItemDescription>}
-            </ItemContent>
-            <ItemActions>{action}</ItemActions>
-        </Item>
-    );
-}
-
-/** Confirm dialog — returns a [confirm(opts), node] pair (built on @ui/patterns/confirm). */
 function useConfirm() {
+    const t = useT();
     const [opts, setOpts] = useState<any>(null);
     const [open, setOpen] = useState(false);
     const confirm = (o: {
@@ -222,17 +162,15 @@ function useConfirm() {
             <ConfirmContent>
                 <ConfirmHeader>
                     <ConfirmTitle>{opts?.title}</ConfirmTitle>
-                    {opts?.message && (
-                        <ConfirmDescription>{opts.message}</ConfirmDescription>
-                    )}
+                    {opts?.message && <ConfirmDescription>{opts.message}</ConfirmDescription>}
                 </ConfirmHeader>
                 <ConfirmFooter>
-                    <ConfirmCancel>Vazgeç</ConfirmCancel>
+                    <ConfirmCancel>{t("sxCommonCancel")}</ConfirmCancel>
                     <ConfirmAction
                         variant={opts?.danger ? "destructive" : "default"}
                         onClick={() => opts?.onConfirm?.()}
                     >
-                        {opts?.confirmLabel ?? "Onayla"}
+                        {opts?.confirmLabel ?? t("sxCommonConfirm")}
                     </ConfirmAction>
                 </ConfirmFooter>
             </ConfirmContent>
@@ -241,164 +179,167 @@ function useConfirm() {
     return [confirm, node] as const;
 }
 
+function ListState({
+    status,
+    count,
+    onRetry,
+    errorTitle,
+    emptyTitle,
+    emptyDescription,
+    emptyAction,
+    children
+}: {
+    status: string;
+    count: number;
+    onRetry: () => void;
+    errorTitle: string;
+    emptyTitle: string;
+    emptyDescription?: string;
+    emptyAction?: ReactNode;
+    children: ReactNode;
+}) {
+    const t = useT();
+    if (status === "loading") return <ListSkeleton />;
+    if (status === "error")
+        return (
+            <Notice title={errorTitle} description={t("sxLoadErrorDescription")} onRetry={onRetry} />
+        );
+    if (count === 0) return <Notice title={emptyTitle} description={emptyDescription} action={emptyAction} />;
+    return <>{children}</>;
+}
+
+const TABS = [
+    { value: "general", label: "sxUserDetailTabGeneral" },
+    { value: "attributes", label: "sxUserDetailTabAttributes" },
+    { value: "credentials", label: "sxUserDetailTabCredentials" },
+    { value: "roles", label: "sxUserDetailTabRoles" },
+    { value: "groups", label: "sxUserDetailTabGroups" },
+    { value: "sessions", label: "sxUserDetailTabSessions" },
+    { value: "consents", label: "sxUserDetailTabConsents" },
+    { value: "idp", label: "sxUserDetailTabIdp" }
+];
+
 export default function UserDetail() {
+    const { id } = useParams();
+    if (id === "new") return <NewUser />;
+    return <ExistingUser key={id} id={id} />;
+}
+
+function ExistingUser({ id }: { id: string }) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
-    const { id } = useParams();
     const navigate = useNavigate();
     const { addAlert, addError } = useAlerts();
     const [confirm, confirmNode] = useConfirm();
-
-    const isNew = id === "new";
-    const [loading, setLoading] = useState(!isNew);
-    const [user, setUser] = useState<any>(null);
     const [tab, setTab] = useState("general");
+    const { status, data: user, reload } = useResource(() => adminClient.users.findOne({ id }), [adminClient, id]);
 
-    const reload = useCallback(async () => {
-        try {
-            const u = await adminClient.users.findOne({ id });
-            setUser(u);
-        } catch (e) {
-            addError("Kullanıcı yüklenemedi.", e);
-        } finally {
-            setLoading(false);
-        }
-    }, [adminClient, id, addError]);
+    const back = { label: t("sxUsersTitle"), to: `/${realm}/users` };
 
-    useEffect(() => {
-        if (isNew) {
-            setLoading(false);
-            return;
-        }
-        setLoading(true);
-        reload();
-    }, [reload, isNew]);
-
-    if (isNew) return <NewUser />;
-    if (loading)
+    if (status === "loading")
         return (
-            <div className={PAGE}>
-                <Loading />
-            </div>
+            <AdminPage title={t("sxUserDetailTitle")} back={back}>
+                <ListSkeleton rows={4} />
+            </AdminPage>
         );
-    if (!user)
+    if (status === "error" || !user)
         return (
-            <div className={PAGE}>
-                <EmptyBlock icon={<UsersThreeIcon />} title="Kullanıcı bulunamadı" />
-            </div>
+            <AdminPage title={t("sxUserDetailTitle")} back={back}>
+                {status === "error" ? (
+                    <Notice title={t("sxUserDetailLoadError")} description={t("sxLoadErrorDescription")} onRetry={reload} />
+                ) : (
+                    <Notice
+                        title={t("sxUserDetailNotFound")}
+                        description={t("sxUserDetailNotFoundDescription")}
+                        action={
+                            <Button size="sm" className="h-8.5 px-4 font-medium" onClick={() => navigate(back.to)}>
+                                {t("sxUserDetailBackToList")}
+                            </Button>
+                        }
+                    />
+                )}
+            </AdminPage>
         );
 
     const impersonate = async () => {
         try {
-            const res = await adminClient.users.impersonation(
-                { id },
-                { user: id, realm }
-            );
+            const res = await adminClient.users.impersonation({ id }, { user: id, realm });
             if (res?.redirect) window.open(res.redirect, "_blank");
-            else addAlert("Impersonation başlatıldı.", AlertVariant.success);
+            else addAlert(t("sxUserDetailImpersonationStarted"), AlertVariant.success);
         } catch (e) {
-            addError("Impersonation başarısız.", e);
+            addError(t("sxUserDetailImpersonationError"), e);
         }
     };
     const logout = async () => {
         try {
             await adminClient.users.logout({ id });
-            addAlert("Oturumlar kapatıldı.", AlertVariant.success);
+            addAlert(t("sxUserDetailSessionsSignedOut"), AlertVariant.success);
         } catch (e) {
-            addError("Oturumlar kapatılamadı.", e);
+            addError(t("sxUserDetailSessionsSignOutError"), e);
         }
     };
     const remove = () =>
         confirm({
-            title: "Kullanıcıyı sil",
-            message: `“${user.username}” kalıcı olarak silinecek.`,
-            confirmLabel: "Sil",
+            title: t("sxUserDetailDelete"),
+            message: t("sxUserDetailDeleteConfirm", { username: user.username }),
+            confirmLabel: t("sxCommonDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.users.del({ id });
-                    addAlert("Kullanıcı silindi.", AlertVariant.success);
+                    addAlert(t("sxUserDetailDeleted"), AlertVariant.success);
                     navigate(`/${realm}/users`);
                 } catch (e) {
-                    addError("Silinemedi.", e);
+                    addError(t("sxCommonDeleteError"), e);
                 }
             }
         });
 
-    const tabs = [
-        { key: "general", label: "Genel" },
-        { key: "attributes", label: "Öznitelikler" },
-        { key: "credentials", label: "Kimlik bilgileri" },
-        { key: "roles", label: "Roller" },
-        { key: "groups", label: "Gruplar" },
-        { key: "sessions", label: "Oturumlar" },
-        { key: "consents", label: "Onaylar" },
-        { key: "idp", label: "IdP bağlantıları" }
-    ];
+    const fullName = `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim();
 
     return (
-        <div className={PAGE}>
-            <div className="relative mb-6 flex items-center">
-                <Button
-                    variant="secondary"
-                    size="icon"
-                    onClick={() => navigate(`/${realm}/users`)}
-                    aria-label="Geri"
-                >
-                    <CaretLeftIcon weight="bold" className="rtl:rotate-180" />
-                </Button>
-                <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-2 text-center">
-                    <p className="font-semibold">{user.username}</p>
-                    {!user.enabled && <Badge variant="destructive">Devre dışı</Badge>}
-                </div>
-                <div className="ms-auto">
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <Button variant="secondary" size="icon" aria-label="Eylemler">
-                                <DotsThreeIcon className="size-5" weight="bold" />
-                            </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={impersonate}>
-                                <UserSwitchIcon /> Impersonate
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={logout}>
-                                <SignOutIcon /> Oturumları kapat
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem variant="destructive" onClick={remove}>
-                                <TrashIcon /> Sil
-                            </DropdownMenuItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
-                </div>
-            </div>
-
-            <Tabs value={tab} onValueChange={setTab}>
-                <TabsList variant="line">
-                    {tabs.map(t => (
-                        <TabsTrigger key={t.key} value={t.key}>
-                            {t.label}
-                        </TabsTrigger>
-                    ))}
-                </TabsList>
-            </Tabs>
-            <div className="mt-5">
-                {tab === "general" && <GeneralTab user={user} reload={reload} />}
-                {tab === "attributes" && <AttributesTab user={user} reload={reload} />}
-                {tab === "credentials" && <CredentialsTab user={user} />}
-                {tab === "roles" && <RolesTab user={user} />}
-                {tab === "groups" && <GroupsTab user={user} />}
-                {tab === "sessions" && <SessionsTab user={user} />}
-                {tab === "consents" && <ConsentsTab user={user} />}
-                {tab === "idp" && <IdpTab user={user} />}
-            </div>
+        <AdminPage
+            back={back}
+            title={
+                <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="[overflow-wrap:anywhere]">{user.username}</span>
+                    {!user.enabled && <Chip tone="danger">{t("sxCommonDisabled")}</Chip>}
+                </span>
+            }
+            description={[fullName, user.email].filter(Boolean).join(" · ") || undefined}
+            actions={
+                <>
+                    <Button variant="secondary" onClick={impersonate}>
+                        {t("sxUserDetailImpersonate")}
+                    </Button>
+                    <Button variant="secondary" onClick={logout}>
+                        {t("sxUserDetailSignOutSessions")}
+                    </Button>
+                </>
+            }
+        >
+            <SegmentTabs
+                value={tab}
+                onChange={setTab}
+                items={TABS.map(item => ({ value: item.value, label: t(item.label) }))}
+                ariaLabel={t("sxUserDetailSections")}
+            />
+            {tab === "general" && <GeneralTab user={user} reload={reload} onDelete={remove} />}
+            {tab === "attributes" && <AttributesTab user={user} reload={reload} />}
+            {tab === "credentials" && <CredentialsTab user={user} />}
+            {tab === "roles" && <RolesTab user={user} />}
+            {tab === "groups" && <GroupsTab user={user} />}
+            {tab === "sessions" && <SessionsTab user={user} />}
+            {tab === "consents" && <ConsentsTab user={user} />}
+            {tab === "idp" && <IdpTab user={user} />}
             {confirmNode}
-        </div>
+        </AdminPage>
     );
 }
 
 function NewUser() {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
     const navigate = useNavigate();
@@ -419,88 +360,76 @@ function NewUser() {
                 enabled: !!f.enabled,
                 emailVerified: !!f.emailVerified
             });
-            addAlert("Kullanıcı oluşturuldu.", AlertVariant.success);
+            addAlert(t("sxUserDetailCreated"), AlertVariant.success);
             if (c?.id) navigate(`/${realm}/users/${c.id}`);
         } catch (e) {
-            addError("Oluşturulamadı.", e);
+            addError(t("sxUserDetailCreateError"), e);
         } finally {
             setSaving(false);
         }
     };
 
     return (
-        <div className={PAGE}>
-            <div className="relative mb-7 flex items-center">
-                <Button
-                    variant="secondary"
-                    size="icon"
-                    onClick={() => navigate(`/${realm}/users`)}
-                    aria-label="Geri"
-                >
-                    <CaretLeftIcon weight="bold" className="rtl:rotate-180" />
+        <AdminPage title={t("sxUsersNew")} back={{ label: t("sxUsersTitle"), to: `/${realm}/users` }}>
+            <Section label={t("sxUserDetailTitle")}>
+                <div className="flex flex-col gap-4">
+                    <TextField
+                        id="new-username"
+                        label={t("sxUserDetailUsername")}
+                        autoFocus
+                        value={f.username}
+                        onChange={(e: any) => set("username", e.target.value)}
+                        placeholder={t("sxUserDetailUsernamePlaceholder")}
+                    />
+                    <TextField
+                        id="new-email"
+                        label={t("sxUserDetailEmail")}
+                        type="email"
+                        value={f.email}
+                        onChange={(e: any) => set("email", e.target.value)}
+                        placeholder={t("sxUserDetailEmailPlaceholder")}
+                    />
+                    <TextField
+                        id="new-firstName"
+                        label={t("sxCommonName")}
+                        value={f.firstName}
+                        onChange={(e: any) => set("firstName", e.target.value)}
+                    />
+                    <TextField
+                        id="new-lastName"
+                        label={t("sxUserDetailLastName")}
+                        value={f.lastName}
+                        onChange={(e: any) => set("lastName", e.target.value)}
+                    />
+                </div>
+            </Section>
+            <Section label={t("sxUserDetailStatus")}>
+                <Group>
+                    <SwitchRow
+                        key="enabled"
+                        label={t("sxCommonEnabled")}
+                        checked={f.enabled}
+                        onChange={(v: boolean) => set("enabled", v)}
+                    />
+                    <SwitchRow
+                        key="emailVerified"
+                        label={t("sxUserDetailEmailVerified")}
+                        checked={f.emailVerified}
+                        onChange={(v: boolean) => set("emailVerified", v)}
+                    />
+                </Group>
+            </Section>
+            <SaveBar>
+                <Button size="form" disabled={saving || !f.username.trim()} onClick={create}>
+                    {saving ? t("sxCommonCreating") : t("sxCommonCreate")}
                 </Button>
-                <p className="absolute left-1/2 -translate-x-1/2 font-semibold">
-                    Yeni kullanıcı
-                </p>
-            </div>
-            <div className="mx-auto max-w-xl space-y-6">
-                <div>
-                    <Caption>Kullanıcı</Caption>
-                    <List>
-                        <InputItem
-                            key="username"
-                            label="Kullanıcı adı"
-                            autoFocus
-                            value={f.username}
-                            onChange={(e: any) => set("username", e.target.value)}
-                            placeholder="kullanici"
-                        />
-                        <InputItem
-                            key="email"
-                            label="E-posta"
-                            type="email"
-                            value={f.email}
-                            onChange={(e: any) => set("email", e.target.value)}
-                            placeholder="ornek@site.com"
-                        />
-                        <InputItem
-                            key="firstName"
-                            label="Ad"
-                            value={f.firstName}
-                            onChange={(e: any) => set("firstName", e.target.value)}
-                        />
-                        <InputItem
-                            key="lastName"
-                            label="Soyad"
-                            value={f.lastName}
-                            onChange={(e: any) => set("lastName", e.target.value)}
-                        />
-                        <SwitchItem
-                            key="enabled"
-                            label="Etkin"
-                            checked={f.enabled}
-                            onChange={(v: boolean) => set("enabled", v)}
-                        />
-                        <SwitchItem
-                            key="emailVerified"
-                            label="E-posta doğrulandı"
-                            checked={f.emailVerified}
-                            onChange={(v: boolean) => set("emailVerified", v)}
-                        />
-                    </List>
-                </div>
-                <div className="flex justify-end">
-                    <Button disabled={saving || !f.username.trim()} onClick={create}>
-                        {saving ? "Oluşturuluyor…" : "Oluştur"}
-                    </Button>
-                </div>
-            </div>
-        </div>
+            </SaveBar>
+        </AdminPage>
     );
 }
 
-/* ── Genel ────────────────────────────────────────────────────────────── */
-function GeneralTab({ user, reload }: any) {
+function GeneralTab({ user, reload, onDelete }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [f, setF] = useState({
@@ -526,77 +455,133 @@ function GeneralTab({ user, reload }: any) {
                     emailVerified: f.emailVerified
                 }
             );
-            addAlert("Kaydedildi.", AlertVariant.success);
+            addAlert(t("sxCommonSaved"), AlertVariant.success);
             reload();
         } catch (e) {
-            addError("Kaydedilemedi.", e);
+            addError(t("sxCommonSaveError"), e);
         } finally {
             setSaving(false);
         }
     };
 
     return (
-        <div className="mx-auto max-w-xl space-y-6">
-            <div>
-                <Caption>Profil</Caption>
-                <List>
-                    <Item key="username" size="sm">
-                        <ItemContent>
-                            <ItemTitle className="font-normal">Kullanıcı adı</ItemTitle>
-                        </ItemContent>
-                        <ItemActions>
-                            <span className="text-sm text-muted-foreground">
-                                {user.username}
-                            </span>
-                        </ItemActions>
-                    </Item>
-                    <InputItem
-                        key="email"
-                        label="E-posta"
+        <>
+            <Section label={t("sxUserDetailProfile")}>
+                <div className="flex flex-col gap-4">
+                    <TextField
+                        id="user-username"
+                        label={t("sxUserDetailUsername")}
+                        readOnly
+                        value={user.username}
+                        className="text-muted-foreground"
+                    />
+                    <TextField
+                        id="user-email"
+                        label={t("sxUserDetailEmail")}
                         type="email"
                         value={f.email}
                         onChange={(e: any) => set("email", e.target.value)}
                     />
-                    <InputItem
-                        key="firstName"
-                        label="Ad"
+                    <TextField
+                        id="user-firstName"
+                        label={t("sxCommonName")}
                         value={f.firstName}
                         onChange={(e: any) => set("firstName", e.target.value)}
                     />
-                    <InputItem
-                        key="lastName"
-                        label="Soyad"
+                    <TextField
+                        id="user-lastName"
+                        label={t("sxUserDetailLastName")}
                         value={f.lastName}
                         onChange={(e: any) => set("lastName", e.target.value)}
                     />
-                    <SwitchItem
+                </div>
+            </Section>
+            <Section label={t("sxUserDetailStatus")}>
+                <Group>
+                    <SwitchRow
                         key="enabled"
-                        label="Etkin"
+                        label={t("sxCommonEnabled")}
                         checked={f.enabled}
                         onChange={(v: boolean) => set("enabled", v)}
                     />
-                    <SwitchItem
+                    <SwitchRow
                         key="emailVerified"
-                        label="E-posta doğrulandı"
+                        label={t("sxUserDetailEmailVerified")}
                         checked={f.emailVerified}
                         onChange={(v: boolean) => set("emailVerified", v)}
                     />
-                </List>
-                <p className="mt-2 ms-1 text-sm text-muted-foreground">
-                    Oluşturulma: {fmtDate(user.createdTimestamp)}
-                </p>
-            </div>
-            <div className="flex justify-end">
-                <Button disabled={saving} onClick={save}>
-                    {saving ? "Kaydediliyor…" : "Kaydet"}
+                </Group>
+                <Footnote>{t("sxUserDetailCreatedAt", { date: formatDate(user.createdTimestamp) })}</Footnote>
+            </Section>
+            <SaveBar>
+                <Button size="form" disabled={saving} onClick={save}>
+                    {saving ? t("sxCommonSaving") : t("sxCommonSave")}
                 </Button>
-            </div>
-        </div>
+            </SaveBar>
+            <section className="border-t border-[#e5e5ea] pt-6 dark:border-[#38383a]">
+                <p className="mb-3 text-[13px] leading-[1.4] text-muted-foreground">
+                    {t("sxUserDetailDeleteConfirm", { username: user.username })}
+                </p>
+                <Button size="form" className={DANGER_BUTTON} onClick={onDelete}>
+                    {t("sxUserDetailDelete")}
+                </Button>
+            </section>
+        </>
     );
 }
 
-/* ── Öznitelikler ─────────────────────────────────────────────────────── */
+function AttributeEditor({ rows, setRows }: { rows: any[]; setRows: (rows: any[]) => void }) {
+    const t = useT();
+    const setRow = (i: number, field: string, val: string) =>
+        setRows(rows.map((r, idx) => (idx === i ? { ...r, [field]: val } : r)));
+    if (rows.length === 0)
+        return (
+            <Notice
+                title={t("sxUserDetailNoAttributes")}
+                description={t("sxUserDetailNoAttributesDescription")}
+                action={
+                    <Button size="sm" className="h-8.5 px-4 font-medium" onClick={() => setRows([{ k: "", v: "" }])}>
+                        {t("sxOrgDetailAddAttribute")}
+                    </Button>
+                }
+            />
+        );
+    return (
+        <ul className={GROUP}>
+            {rows.map((r, i) => (
+                <li key={i}>
+                    {i > 0 && <div className={SEPARATOR} />}
+                    <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:gap-3">
+                        <Input
+                            className="sm:w-2/5"
+                            aria-label={t("sxCommonKey")}
+                            value={r.k}
+                            onChange={(e: any) => setRow(i, "k", e.target.value)}
+                            placeholder={t("sxCommonKeyPlaceholder")}
+                        />
+                        <Input
+                            className="sm:flex-1"
+                            aria-label={t("sxCommonValue")}
+                            value={r.v}
+                            onChange={(e: any) => setRow(i, "v", e.target.value)}
+                            placeholder={t("sxOrgDetailValuePlaceholder")}
+                        />
+                        <TextAction
+                            tone="danger"
+                            className="self-end sm:self-auto"
+                            onClick={() => setRows(rows.filter((_, idx) => idx !== i))}
+                        >
+                            {t("sxCommonDelete")}
+                        </TextAction>
+                    </div>
+                </li>
+            ))}
+        </ul>
+    );
+}
+
 function AttributesTab({ user, reload }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const toRows = (attrs: any) =>
@@ -606,8 +591,6 @@ function AttributesTab({ user, reload }: any) {
         }));
     const [rows, setRows] = useState<any[]>(toRows(user.attributes));
     const [saving, setSaving] = useState(false);
-    const setRow = (i: number, field: string, val: string) =>
-        setRows(rows.map((r, idx) => (idx === i ? { ...r, [field]: val } : r)));
 
     const save = async () => {
         setSaving(true);
@@ -622,102 +605,48 @@ function AttributesTab({ user, reload }: any) {
                         .filter(Boolean);
             });
             await adminClient.users.update({ id: user.id }, { ...user, attributes });
-            addAlert("Öznitelikler kaydedildi.", AlertVariant.success);
+            addAlert(t("sxOrgDetailAttributesSaved"), AlertVariant.success);
             reload();
         } catch (e) {
-            addError("Kaydedilemedi.", e);
+            addError(t("sxCommonSaveError"), e);
         } finally {
             setSaving(false);
         }
     };
 
     return (
-        <div className="mx-auto max-w-xl space-y-3">
-            <Caption>Öznitelikler</Caption>
-            <List>
-                {rows.length === 0 ? (
-                    <EmptyLine key="empty">Öznitelik yok.</EmptyLine>
-                ) : (
-                    rows.map((r, i) => (
-                        <Item key={i} size="sm">
-                            <ItemContent className="flex-row items-center gap-2">
-                                <Input
-                                    size="md"
-                                    className="w-2/5"
-                                    value={r.k}
-                                    onChange={(e: any) => setRow(i, "k", e.target.value)}
-                                    placeholder="anahtar"
-                                />
-                                <span className="text-muted-foreground">:</span>
-                                <Input
-                                    size="md"
-                                    className="flex-1"
-                                    value={r.v}
-                                    onChange={(e: any) => setRow(i, "v", e.target.value)}
-                                    placeholder="değer (virgülle ayır)"
-                                />
-                            </ItemContent>
-                            <ItemActions>
-                                <DeleteButton
-                                    onClick={() =>
-                                        setRows(rows.filter((_, idx) => idx !== i))
-                                    }
-                                />
-                            </ItemActions>
-                        </Item>
-                    ))
-                )}
-                <Item key="add" size="sm" asChild>
-                    <button
-                        type="button"
-                        onClick={() => setRows([...rows, { k: "", v: "" }])}
-                    >
-                        <ItemMedia variant="icon" className="text-primary">
-                            <PlusIcon />
-                        </ItemMedia>
-                        <ItemContent>
-                            <ItemTitle className="text-sm text-primary">
-                                Öznitelik ekle
-                            </ItemTitle>
-                        </ItemContent>
-                    </button>
-                </Item>
-            </List>
-            <div className="flex justify-end">
-                <Button disabled={saving} onClick={save}>
-                    {saving ? "Kaydediliyor…" : "Kaydet"}
+        <>
+            <Section
+                label={t("sxUserDetailTabAttributes")}
+                action={
+                    <TextAction onClick={() => setRows([...rows, { k: "", v: "" }])}>
+                        {t("sxOrgDetailAddAttribute")}
+                    </TextAction>
+                }
+            >
+                <AttributeEditor rows={rows} setRows={setRows} />
+            </Section>
+            <SaveBar>
+                <Button size="form" disabled={saving} onClick={save}>
+                    {saving ? t("sxCommonSaving") : t("sxCommonSave")}
                 </Button>
-            </div>
-        </div>
+            </SaveBar>
+        </>
     );
 }
 
-/* ── Kimlik bilgileri ─────────────────────────────────────────────────── */
 function CredentialsTab({ user }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [confirm, confirmNode] = useConfirm();
-    const [creds, setCreds] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+    const creds = useResource(
+        () => adminClient.users.getCredentials({ id: user.id }).then(asList),
+        [adminClient, user.id]
+    );
     const [pw, setPw] = useState("");
     const [temp, setTemp] = useState(true);
     const [resetting, setResetting] = useState(false);
-
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            const c = await adminClient.users.getCredentials({ id: user.id });
-            setCreds(Array.isArray(c) ? c : []);
-        } catch (e) {
-            addError("Kimlik bilgileri yüklenemedi.", e);
-        } finally {
-            setLoading(false);
-        }
-    }, [adminClient, user.id, addError]);
-
-    useEffect(() => {
-        load();
-    }, [load]);
 
     const reset = async () => {
         if (!pw) return;
@@ -727,11 +656,11 @@ function CredentialsTab({ user }: any) {
                 id: user.id,
                 credential: { type: "password", value: pw, temporary: temp }
             });
-            addAlert("Şifre belirlendi.", AlertVariant.success);
+            addAlert(t("sxUserDetailPasswordSet"), AlertVariant.success);
             setPw("");
-            load();
+            creds.reload();
         } catch (e) {
-            addError("Şifre belirlenemedi.", e);
+            addError(t("sxUserDetailPasswordSetError"), e);
         } finally {
             setResetting(false);
         }
@@ -739,9 +668,9 @@ function CredentialsTab({ user }: any) {
 
     const del = (c: any) =>
         confirm({
-            title: "Kimlik bilgisini sil",
-            message: `${c.userLabel || c.type} silinecek.`,
-            confirmLabel: "Sil",
+            title: t("sxUserDetailDeleteCredential"),
+            message: t("sxUserDetailDeleteCredentialConfirm", { name: c.userLabel || c.type }),
+            confirmLabel: t("sxCommonDelete"),
             danger: true,
             onConfirm: async () => {
                 try {
@@ -749,113 +678,90 @@ function CredentialsTab({ user }: any) {
                         id: user.id,
                         credentialId: c.id
                     });
-                    addAlert("Silindi.", AlertVariant.success);
-                    setCreds(creds.filter(x => x.id !== c.id));
+                    addAlert(t("sxCommonDeleted"), AlertVariant.success);
+                    creds.setData((list: any[]) => (list || []).filter(x => x.id !== c.id));
                 } catch (e) {
-                    addError("Silinemedi.", e);
+                    addError(t("sxCommonDeleteError"), e);
                 }
             }
         });
 
+    const list = creds.data || [];
+
     return (
-        <div className="mx-auto max-w-xl space-y-6">
-            <div>
-                <Caption>Şifre belirle</Caption>
-                <List>
-                    <InputItem
-                        key="pw"
-                        label="Yeni şifre"
+        <>
+            <Section label={t("sxUserDetailSetPassword")}>
+                <div className="flex flex-col gap-4">
+                    <TextField
+                        id="user-new-password"
+                        label={t("sxUserDetailNewPassword")}
                         type="password"
                         value={pw}
                         onChange={(e: any) => setPw(e.target.value)}
                         placeholder="••••••••"
                     />
-                    <SwitchItem
-                        key="temp"
-                        label="Geçici (ilk girişte değiştir)"
-                        checked={temp}
-                        onChange={setTemp}
-                    />
-                    <Item key="reset" size="sm">
-                        <ItemContent>
-                            <Button
-                                variant="plain"
-                                block
-                                disabled={!pw || resetting}
-                                onClick={reset}
-                            >
-                                {resetting ? "Belirleniyor…" : "Şifreyi belirle"}
-                            </Button>
-                        </ItemContent>
-                    </Item>
-                </List>
-            </div>
-            <div>
-                <Caption>Kayıtlı kimlik bilgileri</Caption>
-                {loading ? (
-                    <Loading />
-                ) : creds.length === 0 ? (
-                    <EmptyBlock
-                        icon={<KeyIcon />}
-                        title="Kimlik bilgisi yok"
-                        desc="Kullanıcının kayıtlı şifresi veya OTP'si bulunmuyor."
-                    />
-                ) : (
-                    <List>
-                        {creds.map(c => (
-                            <EntityItem
+                    <Group>
+                        <SwitchRow label={t("sxUserDetailTemporaryPassword")} checked={temp} onChange={setTemp} />
+                    </Group>
+                    <SaveBar>
+                        <Button size="form" disabled={!pw || resetting} onClick={reset}>
+                            {resetting ? t("sxUserDetailSettingPassword") : t("sxUserDetailSetPasswordButton")}
+                        </Button>
+                    </SaveBar>
+                </div>
+            </Section>
+            <Section label={t("sxUserDetailStoredCredentials")}>
+                <ListState
+                    status={creds.status}
+                    count={list.length}
+                    onRetry={creds.reload}
+                    errorTitle={t("sxUserDetailCredentialsLoadError")}
+                    emptyTitle={t("sxUserDetailNoCredentials")}
+                    emptyDescription={t("sxUserDetailNoCredentialsDescription")}
+                >
+                    <Group>
+                        {list.map(c => (
+                            <Row
                                 key={c.id}
-                                icon={<KeyIcon />}
                                 title={c.userLabel || c.type}
                                 subtitle={
                                     <>
                                         {c.type}
-                                        {c.createdDate
-                                            ? ` · ${fmtDate(c.createdDate)}`
-                                            : ""}
+                                        {c.createdDate ? ` · ${formatDate(c.createdDate)}` : ""}
                                     </>
                                 }
-                                action={<DeleteButton onClick={() => del(c)} />}
+                                trailing={
+                                    <TextAction tone="danger" onClick={() => del(c)}>
+                                        {t("sxCommonDelete")}
+                                    </TextAction>
+                                }
                             />
                         ))}
-                    </List>
-                )}
-            </div>
+                    </Group>
+                </ListState>
+            </Section>
             {confirmNode}
-        </div>
+        </>
     );
 }
 
-/* ── Roller (realm + client) ──────────────────────────────────────────── */
 function RolesTab({ user }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [confirm, confirmNode] = useConfirm();
-    const [realmRoles, setRealmRoles] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+    const roles = useResource(
+        () => adminClient.users.listRealmRoleMappings({ id: user.id }).then(asList),
+        [adminClient, user.id]
+    );
     const [picking, setPicking] = useState(false);
-
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            const m = await adminClient.users.listRealmRoleMappings({ id: user.id });
-            setRealmRoles(Array.isArray(m) ? m : []);
-        } catch (e) {
-            addError("Roller yüklenemedi.", e);
-        } finally {
-            setLoading(false);
-        }
-    }, [adminClient, user.id, addError]);
-
-    useEffect(() => {
-        load();
-    }, [load]);
+    const realmRoles = roles.data || [];
 
     const removeRole = (r: any) =>
         confirm({
-            title: "Rolü kaldır",
-            message: `“${r.name}” kaldırılacak.`,
-            confirmLabel: "Kaldır",
+            title: t("sxUserDetailRemoveRole"),
+            message: t("sxUserDetailRemoveRoleConfirm", { name: r.name }),
+            confirmLabel: t("sxCommonRemove"),
             danger: true,
             onConfirm: async () => {
                 try {
@@ -863,84 +769,80 @@ function RolesTab({ user }: any) {
                         id: user.id,
                         roles: [{ id: r.id, name: r.name }]
                     });
-                    addAlert("Kaldırıldı.", AlertVariant.success);
-                    setRealmRoles(realmRoles.filter(x => x.id !== r.id));
+                    addAlert(t("sxCommonRemoved"), AlertVariant.success);
+                    roles.setData((list: any[]) => (list || []).filter(x => x.id !== r.id));
                 } catch (e) {
-                    addError("Kaldırılamadı.", e);
+                    addError(t("sxCommonRemoveError"), e);
                 }
             }
         });
 
-    if (loading) return <Loading />;
-
     return (
-        <div className="mx-auto max-w-xl space-y-3">
-            <div className="flex items-center justify-between">
-                <h3 className="ms-1 text-sm font-medium text-muted-foreground">
-                    Atanmış realm rolleri
-                </h3>
-                <Button variant="plain" size="sm" onClick={() => setPicking(true)}>
-                    <PlusIcon /> Rol ata
-                </Button>
-            </div>
-            {realmRoles.length === 0 ? (
-                <EmptyBlock
-                    icon={<ShieldCheckIcon />}
-                    title="Rol atanmamış"
-                    desc="Kullanıcıya realm rolü atayarak yetki ver."
-                />
-            ) : (
-                <List>
+        <Section
+            label={t("sxUserDetailAssignedRoles")}
+            action={
+                roles.status === "ready" && (
+                    <TextAction onClick={() => setPicking(true)}>{t("sxUserDetailAssignRole")}</TextAction>
+                )
+            }
+        >
+            <ListState
+                status={roles.status}
+                count={realmRoles.length}
+                onRetry={roles.reload}
+                errorTitle={t("sxUserDetailRolesLoadError")}
+                emptyTitle={t("sxUserDetailNoRoles")}
+                emptyDescription={t("sxUserDetailNoRolesDescription")}
+                emptyAction={
+                    <Button size="sm" className="h-8.5 px-4 font-medium" onClick={() => setPicking(true)}>
+                        {t("sxUserDetailAssignRole")}
+                    </Button>
+                }
+            >
+                <Group>
                     {realmRoles.map(r => (
-                        <EntityItem
+                        <Row
                             key={r.id}
-                            icon={<ShieldCheckIcon />}
                             title={r.name}
                             subtitle={r.description}
-                            action={<DeleteButton onClick={() => removeRole(r)} />}
+                            trailing={
+                                <TextAction tone="danger" onClick={() => removeRole(r)}>
+                                    {t("sxCommonRemove")}
+                                </TextAction>
+                            }
                         />
                     ))}
-                </List>
-            )}
+                </Group>
+            </ListState>
             {picking && (
                 <PickUserRoleModal
                     user={user}
-                    assigned={new Set(realmRoles.map(r => r.id))}
                     onClose={() => setPicking(false)}
                     onAdded={() => {
                         setPicking(false);
-                        load();
+                        roles.reload();
                     }}
                 />
             )}
             {confirmNode}
-        </div>
+        </Section>
     );
 }
 
-function PickUserRoleModal({ user, assigned, onClose, onAdded }: any) {
+function PickUserRoleModal({ user, onClose, onAdded }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
-    const [roles, setRoles] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+    const available = useResource(
+        () =>
+            adminClient.users
+                .listAvailableRealmRoleMappings({ id: user.id })
+                .then((a: any) => (a || []).filter((r: any) => r.name !== "uma_authorization")),
+        [adminClient, user.id]
+    );
+    const roles = available.data || [];
     const [sel, setSel] = useState<Set<string>>(new Set());
     const [saving, setSaving] = useState(false);
-
-    useEffect(() => {
-        (async () => {
-            try {
-                const a = await adminClient.users.listAvailableRealmRoleMappings({
-                    id: user.id
-                });
-                setRoles((a || []).filter((r: any) => r.name !== "uma_authorization"));
-            } catch (e) {
-                addError("Roller yüklenemedi.", e);
-            } finally {
-                setLoading(false);
-            }
-        })();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [user.id, adminClient.users.listAvailableRealmRoleMappings, addError]);
 
     const toggle = (id: string) =>
         setSel(p => {
@@ -950,64 +852,59 @@ function PickUserRoleModal({ user, assigned, onClose, onAdded }: any) {
         });
 
     const save = async () => {
-        const chosen = roles
-            .filter(r => sel.has(r.id))
-            .map(r => ({ id: r.id, name: r.name }));
+        const chosen = roles.filter(r => sel.has(r.id)).map(r => ({ id: r.id, name: r.name }));
         if (!chosen.length) return;
         setSaving(true);
         try {
             await adminClient.users.addRealmRoleMappings({ id: user.id, roles: chosen });
-            addAlert(`${chosen.length} rol atandı.`, AlertVariant.success);
+            addAlert(t("sxUserDetailRolesAssigned", { total: chosen.length }), AlertVariant.success);
             onAdded();
         } catch (e) {
-            addError("Atanamadı.", e);
+            addError(t("sxUserDetailRolesAssignError"), e);
             setSaving(false);
         }
     };
 
     return (
         <Modal open onOpenChange={o => !o && onClose()}>
-            <ModalContent className="sm:max-w-2xl">
+            <ModalContent className="sm:max-w-lg">
                 <ModalHeader>
-                    <ModalTitle>Rol ata</ModalTitle>
+                    <ModalTitle>{t("sxUserDetailAssignRole")}</ModalTitle>
                 </ModalHeader>
                 <ModalBody>
-                    {loading ? (
-                        <Loading />
-                    ) : (
-                        <List>
-                            {roles.length === 0 ? (
-                                <EmptyLine key="empty">Atanabilecek rol yok.</EmptyLine>
-                            ) : (
-                                roles.map(r => (
-                                    <Item key={r.id} size="sm" asChild>
-                                        <label>
-                                            <ItemMedia>
-                                                <Checkbox
-                                                    checked={sel.has(r.id)}
-                                                    onCheckedChange={() => toggle(r.id)}
-                                                />
-                                            </ItemMedia>
-                                            <ItemContent className="min-w-0">
-                                                <ItemTitle className="text-sm">
-                                                    {r.name}
-                                                </ItemTitle>
+                    <div className="max-h-[50svh] overflow-y-auto">
+                        <ListState
+                            status={available.status}
+                            count={roles.length}
+                            onRetry={available.reload}
+                            errorTitle={t("sxUserDetailRolesLoadError")}
+                            emptyTitle={t("sxUserDetailNoAssignableRoles")}
+                            emptyDescription={t("sxUserDetailNoAssignableRolesDescription")}
+                        >
+                            <ul className={GROUP}>
+                                {roles.map((r, i) => (
+                                    <li key={r.id}>
+                                        {i > 0 && <div className={SEPARATOR} />}
+                                        <label className="flex min-h-14 cursor-pointer items-center gap-3 px-4 py-3 transition-colors hover:bg-black/3 dark:hover:bg-white/4">
+                                            <Checkbox checked={sel.has(r.id)} onCheckedChange={() => toggle(r.id)} />
+                                            <span className="min-w-0">
+                                                <span className="block truncate text-base font-medium">{r.name}</span>
                                                 {r.description && (
-                                                    <ItemDescription className="truncate">
+                                                    <span className="mt-0.5 block truncate text-[13px] text-muted-foreground">
                                                         {r.description}
-                                                    </ItemDescription>
+                                                    </span>
                                                 )}
-                                            </ItemContent>
+                                            </span>
                                         </label>
-                                    </Item>
-                                ))
-                            )}
-                        </List>
-                    )}
+                                    </li>
+                                ))}
+                            </ul>
+                        </ListState>
+                    </div>
                 </ModalBody>
                 <ModalFooter>
-                    <Button disabled={saving || sel.size === 0} onClick={save}>
-                        {saving ? "Atanıyor…" : `Ata (${sel.size})`}
+                    <Button size="form" block disabled={saving || sel.size === 0} onClick={save}>
+                        {saving ? t("sxUserDetailAssigning") : t("sxUserDetailAssignCount", { total: sel.size })}
                     </Button>
                 </ModalFooter>
             </ModalContent>
@@ -1015,146 +912,135 @@ function PickUserRoleModal({ user, assigned, onClose, onAdded }: any) {
     );
 }
 
-/* ── Gruplar ──────────────────────────────────────────────────────────── */
 function GroupsTab({ user }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [confirm, confirmNode] = useConfirm();
-    const [groups, setGroups] = useState<any[]>([]);
-    const [all, setAll] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [add, setAdd] = useState("");
-
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            const [mine, every] = await Promise.all([
+    const res = useResource(
+        () =>
+            Promise.all([
                 adminClient.users.listGroups({ id: user.id }),
                 adminClient.groups.find({ briefRepresentation: true })
-            ]);
-            setGroups(Array.isArray(mine) ? mine : []);
-            setAll(Array.isArray(every) ? every : []);
-        } catch (e) {
-            addError("Gruplar yüklenemedi.", e);
-        } finally {
-            setLoading(false);
-        }
-    }, [adminClient, user.id, addError]);
-
-    useEffect(() => {
-        load();
-    }, [load]);
-
+            ]).then(([mine, every]) => ({ groups: asList(mine), all: asList(every) })),
+        [adminClient, user.id]
+    );
+    const [add, setAdd] = useState("");
+    const groups = res.data?.groups || [];
+    const all = res.data?.all || [];
     const joinable = all.filter(g => !groups.some(m => m.id === g.id));
 
     const join = async () => {
         if (!add) return;
         try {
             await adminClient.users.addToGroup({ id: user.id, groupId: add });
-            addAlert("Gruba eklendi.", AlertVariant.success);
+            addAlert(t("sxUserDetailAddedToGroup"), AlertVariant.success);
             setAdd("");
-            load();
+            res.reload();
         } catch (e) {
-            addError("Eklenemedi.", e);
+            addError(t("sxUserDetailAddToGroupError"), e);
         }
     };
     const leave = (g: any) =>
         confirm({
-            title: "Gruptan çıkar",
-            message: `“${g.name}” grubundan çıkarılacak.`,
-            confirmLabel: "Çıkar",
+            title: t("sxUserDetailLeaveGroup"),
+            message: t("sxUserDetailLeaveGroupConfirm", { name: g.name }),
+            confirmLabel: t("sxCommonRemoveFrom"),
             danger: true,
             onConfirm: async () => {
                 try {
                     await adminClient.users.delFromGroup({ id: user.id, groupId: g.id });
-                    addAlert("Çıkarıldı.", AlertVariant.success);
-                    setGroups(groups.filter(x => x.id !== g.id));
+                    addAlert(t("sxUserDetailRemovedFromGroup"), AlertVariant.success);
+                    res.setData((d: any) => ({ ...d, groups: (d?.groups || []).filter(x => x.id !== g.id) }));
                 } catch (e) {
-                    addError("Çıkarılamadı.", e);
+                    addError(t("sxUserDetailRemoveFromGroupError"), e);
                 }
             }
         });
 
-    if (loading) return <Loading />;
+    if (res.status !== "ready")
+        return (
+            <Section label={t("sxUserDetailMemberships")}>
+                {res.status === "loading" ? (
+                    <ListSkeleton />
+                ) : (
+                    <Notice
+                        title={t("sxUserDetailGroupsLoadError")}
+                        description={t("sxLoadErrorDescription")}
+                        onRetry={res.reload}
+                    />
+                )}
+            </Section>
+        );
 
     return (
-        <div className="mx-auto max-w-xl space-y-3">
-            <Caption>Üyelikler</Caption>
-            <List>
+        <>
+            <Section label={t("sxUserDetailMemberships")}>
                 {groups.length === 0 ? (
-                    <EmptyLine key="empty">Üye olunan grup yok.</EmptyLine>
+                    <Notice title={t("sxUserDetailNoGroups")} description={t("sxUserDetailNoGroupsDescription")} />
                 ) : (
-                    groups.map(g => (
-                        <EntityItem
-                            key={g.id}
-                            icon={<UsersThreeIcon />}
-                            title={g.path || g.name}
-                            mono
-                            action={
-                                <DeleteButton
-                                    onClick={() => leave(g)}
-                                    title="Gruptan çıkar"
-                                />
-                            }
-                        />
-                    ))
+                    <Group>
+                        {groups.map(g => (
+                            <Row
+                                key={g.id}
+                                title={<span className="font-mono text-[15px]">{g.path || g.name}</span>}
+                                trailing={
+                                    <TextAction tone="danger" onClick={() => leave(g)}>
+                                        {t("sxCommonRemoveFrom")}
+                                    </TextAction>
+                                }
+                            />
+                        ))}
+                    </Group>
                 )}
-                <Item key="join" size="sm">
-                    <ItemContent>
-                        <Select
-                            value={add || "__none__"}
-                            onValueChange={(v: string) =>
-                                setAdd(v === "__none__" ? "" : v)
-                            }
+            </Section>
+            <Section label={t("sxUserDetailAddToGroup")}>
+                {joinable.length === 0 ? (
+                    <Notice
+                        title={t("sxUserDetailNoJoinableGroups")}
+                        description={
+                            all.length === 0
+                                ? t("sxUserDetailNoRealmGroupsDescription")
+                                : t("sxUserDetailNoJoinableGroupsDescription")
+                        }
+                    />
+                ) : (
+                    <div className="flex flex-col gap-3 sm:flex-row">
+                        <NativeSelect
+                            size="lg"
+                            className="w-full sm:flex-1"
+                            aria-label={t("sxUserDetailSelectGroup")}
+                            value={add}
+                            onChange={(e: any) => setAdd(e.target.value)}
                         >
-                            <SelectTrigger size="sm" className="w-full">
-                                <SelectValue placeholder="Grup seç…" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="__none__">Grup seç…</SelectItem>
-                                {joinable.map(g => (
-                                    <SelectItem key={g.id} value={g.id}>
-                                        {g.path || g.name}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    </ItemContent>
-                    <ItemActions>
-                        <Button variant="tinted" size="sm" disabled={!add} onClick={join}>
-                            Ekle
+                            <NativeSelectOption value="">{t("sxUserDetailSelectGroup")}</NativeSelectOption>
+                            {joinable.map(g => (
+                                <NativeSelectOption key={g.id} value={g.id}>
+                                    {g.path || g.name}
+                                </NativeSelectOption>
+                            ))}
+                        </NativeSelect>
+                        <Button size="form" disabled={!add} onClick={join}>
+                            {t("sxCommonAdd")}
                         </Button>
-                    </ItemActions>
-                </Item>
-            </List>
+                    </div>
+                )}
+            </Section>
             {confirmNode}
-        </div>
+        </>
     );
 }
 
-/* ── Oturumlar ────────────────────────────────────────────────────────── */
 function SessionsTab({ user }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { realm } = useRealm();
     const { addAlert, addError } = useAlerts();
-    const [sessions, setSessions] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
-
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            const s = await adminClient.users.listSessions({ id: user.id });
-            setSessions(Array.isArray(s) ? s : []);
-        } catch (e) {
-            addError("Oturumlar yüklenemedi.", e);
-        } finally {
-            setLoading(false);
-        }
-    }, [adminClient, user.id, addError]);
-
-    useEffect(() => {
-        load();
-    }, [load]);
+    const res = useResource(
+        () => adminClient.users.listSessions({ id: user.id }).then(asList),
+        [adminClient, user.id]
+    );
+    const sessions = res.data || [];
 
     const signOut = async (s: any) => {
         try {
@@ -1163,87 +1049,71 @@ function SessionsTab({ user }: any) {
                 session: s.id,
                 isOffline: false
             });
-            addAlert("Oturum kapatıldı.", AlertVariant.success);
-            setSessions(sessions.filter(x => x.id !== s.id));
+            addAlert(t("sxUserDetailSessionSignedOut"), AlertVariant.success);
+            res.setData((list: any[]) => (list || []).filter(x => x.id !== s.id));
         } catch (e) {
-            addError("Kapatılamadı.", e);
+            addError(t("sxUserDetailSessionSignOutError"), e);
         }
     };
 
-    if (loading) return <Loading />;
-
     return (
-        <div className="mx-auto max-w-xl space-y-3">
-            <Caption>{sessions.length} aktif oturum</Caption>
-            {sessions.length === 0 ? (
-                <EmptyBlock
-                    icon={<MonitorIcon />}
-                    title="Aktif oturum yok"
-                    desc="Kullanıcının açık oturumu bulunmuyor."
-                />
-            ) : (
-                <List>
+        <Section
+            label={
+                res.status === "ready"
+                    ? t("sxUserDetailActiveSessionsCount", { total: sessions.length })
+                    : t("sxUserDetailTabSessions")
+            }
+        >
+            <ListState
+                status={res.status}
+                count={sessions.length}
+                onRetry={res.reload}
+                errorTitle={t("sxUserDetailSessionsLoadError")}
+                emptyTitle={t("sxUserDetailNoSessions")}
+                emptyDescription={t("sxUserDetailNoSessionsDescription")}
+            >
+                <Group>
                     {sessions.map(s => {
                         const clients = Object.values(s.clients || {});
                         return (
-                            <EntityItem
+                            <Row
                                 key={s.id}
-                                icon={<DeviceMobileIcon />}
-                                title={s.ipAddress || "—"}
+                                title={<span className="tabular-nums">{s.ipAddress || "—"}</span>}
                                 subtitle={
                                     <>
-                                        {clients.join(", ") || "—"} ·{" "}
-                                        {fmtRelative(s.lastAccess)}
+                                        {clients.join(", ") || "—"} · {formatRelative(s.lastAccess)}
                                     </>
                                 }
-                                action={
-                                    <Button
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        onClick={() => signOut(s)}
-                                        aria-label="Kapat"
-                                    >
-                                        <SignOutIcon />
-                                    </Button>
+                                trailing={
+                                    <TextAction tone="danger" onClick={() => signOut(s)}>
+                                        {t("sxUserDetailSignOutSession")}
+                                    </TextAction>
                                 }
                             />
                         );
                     })}
-                </List>
-            )}
-        </div>
+                </Group>
+            </ListState>
+        </Section>
     );
 }
 
-/* ── Onaylar ──────────────────────────────────────────────────────────── */
 function ConsentsTab({ user }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [confirm, confirmNode] = useConfirm();
-    const [consents, setConsents] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
-
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            const c = await adminClient.users.listConsents({ id: user.id });
-            setConsents(Array.isArray(c) ? c : []);
-        } catch (e) {
-            addError("Onaylar yüklenemedi.", e);
-        } finally {
-            setLoading(false);
-        }
-    }, [adminClient, user.id, addError]);
-
-    useEffect(() => {
-        load();
-    }, [load]);
+    const res = useResource(
+        () => adminClient.users.listConsents({ id: user.id }).then(asList),
+        [adminClient, user.id]
+    );
+    const consents = res.data || [];
 
     const revoke = (c: any) =>
         confirm({
-            title: "Onayı geri al",
-            message: `“${c.clientId}” istemcisine verilen onay geri alınacak.`,
-            confirmLabel: "Geri al",
+            title: t("sxUserDetailRevokeConsent"),
+            message: t("sxUserDetailRevokeConsentConfirm", { clientId: c.clientId }),
+            confirmLabel: t("sxUserDetailRevoke"),
             danger: true,
             onConfirm: async () => {
                 try {
@@ -1251,77 +1121,60 @@ function ConsentsTab({ user }: any) {
                         id: user.id,
                         clientId: c.clientId
                     });
-                    addAlert("Onay geri alındı.", AlertVariant.success);
-                    setConsents(consents.filter(x => x.clientId !== c.clientId));
+                    addAlert(t("sxUserDetailConsentRevoked"), AlertVariant.success);
+                    res.setData((list: any[]) => (list || []).filter(x => x.clientId !== c.clientId));
                 } catch (e) {
-                    addError("Geri alınamadı.", e);
+                    addError(t("sxUserDetailConsentRevokeError"), e);
                 }
             }
         });
 
-    if (loading) return <Loading />;
-
     return (
-        <div className="mx-auto max-w-xl space-y-3">
-            <Caption>Verilen onaylar</Caption>
-            {consents.length === 0 ? (
-                <EmptyBlock
-                    icon={<CheckCircleIcon />}
-                    title="Onay yok"
-                    desc="Kullanıcı henüz hiçbir istemciye onay vermemiş."
-                />
-            ) : (
-                <List>
+        <Section label={t("sxUserDetailGrantedConsents")}>
+            <ListState
+                status={res.status}
+                count={consents.length}
+                onRetry={res.reload}
+                errorTitle={t("sxUserDetailConsentsLoadError")}
+                emptyTitle={t("sxUserDetailNoConsents")}
+                emptyDescription={t("sxUserDetailNoConsentsDescription")}
+            >
+                <Group>
                     {consents.map(c => (
-                        <EntityItem
+                        <Row
                             key={c.clientId}
-                            icon={<CheckCircleIcon />}
                             title={c.clientId}
                             subtitle={(c.grantedClientScopes || []).join(", ") || "—"}
-                            action={
-                                <DeleteButton
-                                    onClick={() => revoke(c)}
-                                    title="Onayı geri al"
-                                />
+                            trailing={
+                                <TextAction tone="danger" onClick={() => revoke(c)}>
+                                    {t("sxUserDetailRevoke")}
+                                </TextAction>
                             }
                         />
                     ))}
-                </List>
-            )}
+                </Group>
+            </ListState>
             {confirmNode}
-        </div>
+        </Section>
     );
 }
 
-/* ── IdP bağlantıları ─────────────────────────────────────────────────── */
 function IdpTab({ user }: any) {
+    const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [confirm, confirmNode] = useConfirm();
-    const [links, setLinks] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
-
-    const load = useCallback(async () => {
-        setLoading(true);
-        try {
-            const l = await adminClient.users.listFederatedIdentities({ id: user.id });
-            setLinks(Array.isArray(l) ? l : []);
-        } catch (e) {
-            addError("Bağlantılar yüklenemedi.", e);
-        } finally {
-            setLoading(false);
-        }
-    }, [adminClient, user.id, addError]);
-
-    useEffect(() => {
-        load();
-    }, [load]);
+    const res = useResource(
+        () => adminClient.users.listFederatedIdentities({ id: user.id }).then(asList),
+        [adminClient, user.id]
+    );
+    const links = res.data || [];
 
     const unlink = (l: any) =>
         confirm({
-            title: "Bağlantıyı kaldır",
-            message: `“${l.identityProvider}” bağlantısı kaldırılacak.`,
-            confirmLabel: "Kaldır",
+            title: t("sxUserDetailUnlinkIdp"),
+            message: t("sxUserDetailUnlinkIdpConfirm", { name: l.identityProvider }),
+            confirmLabel: t("sxCommonRemove"),
             danger: true,
             onConfirm: async () => {
                 try {
@@ -1329,46 +1182,43 @@ function IdpTab({ user }: any) {
                         id: user.id,
                         federatedIdentityId: l.identityProvider
                     });
-                    addAlert("Kaldırıldı.", AlertVariant.success);
-                    setLinks(
-                        links.filter(x => x.identityProvider !== l.identityProvider)
+                    addAlert(t("sxUserDetailIdpUnlinked"), AlertVariant.success);
+                    res.setData((list: any[]) =>
+                        (list || []).filter(x => x.identityProvider !== l.identityProvider)
                     );
                 } catch (e) {
-                    addError("Kaldırılamadı.", e);
+                    addError(t("sxCommonRemoveError"), e);
                 }
             }
         });
 
-    if (loading) return <Loading />;
-
     return (
-        <div className="mx-auto max-w-xl space-y-3">
-            <Caption>Kimlik sağlayıcı bağlantıları</Caption>
-            {links.length === 0 ? (
-                <EmptyBlock
-                    icon={<PlugIcon />}
-                    title="Bağlantı yok"
-                    desc="Bu kullanıcı harici bir kimlik sağlayıcıya bağlı değil."
-                />
-            ) : (
-                <List>
+        <Section label={t("sxUserDetailIdpLinks")}>
+            <ListState
+                status={res.status}
+                count={links.length}
+                onRetry={res.reload}
+                errorTitle={t("sxUserDetailIdpLinksLoadError")}
+                emptyTitle={t("sxUserDetailNoIdpLinks")}
+                emptyDescription={t("sxUserDetailNoIdpLinksDescription")}
+            >
+                <Group>
                     {links.map(l => (
-                        <EntityItem
+                        <Row
                             key={l.identityProvider}
-                            icon={<LinkIcon />}
+                            leading={<Monogram name={l.identityProvider} />}
                             title={l.identityProvider}
                             subtitle={l.userName || l.userId}
-                            action={
-                                <DeleteButton
-                                    onClick={() => unlink(l)}
-                                    title="Bağlantıyı kaldır"
-                                />
+                            trailing={
+                                <TextAction tone="danger" onClick={() => unlink(l)}>
+                                    {t("sxCommonRemove")}
+                                </TextAction>
                             }
                         />
                     ))}
-                </List>
-            )}
+                </Group>
+            </ListState>
             {confirmNode}
-        </div>
+        </Section>
     );
 }
