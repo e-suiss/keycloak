@@ -163,7 +163,7 @@ export function RouteSkeleton() {
                 <SessionsSkeleton />
             </PageFrame>
         );
-    if (["account-security/linked-accounts", "applications", "groups"].includes(path))
+    if (["account-security/linked-accounts", "applications", "groups", "organizations", "resources", "oid4vci"].includes(path))
         return (
             <PageFrame>
                 <ListSkeleton />
