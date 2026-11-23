@@ -14,6 +14,8 @@
   "verifyEmail": false,
   "editUsernameAllowed": false,
   "organizationsEnabled": true,
+  "userManagedAccessAllowed": true,
+  "verifiableCredentialsEnabled": true,
   "sslRequired": "external",
   "passwordPolicy": "length(6) and regexPattern(^[0-9]{6}$) and passwordHistory(3) and pinStrength",
   "bruteForceProtected": true,
@@ -59,7 +61,7 @@
     },
     {
       "alias": "suiss forms",
-      "description": "Security image and OTP after phone + PIN",
+      "description": "Phone, PIN or passkey, security image, then SMS, authenticator app, security key or recovery code",
       "providerId": "basic-flow",
       "topLevel": false,
       "builtIn": false,
@@ -75,8 +77,8 @@
           "requirement": "REQUIRED",
           "priority": 20,
           "userSetupAllowed": false,
-          "autheticatorFlow": false,
-          "authenticator": "phone-password-form"
+          "autheticatorFlow": true,
+          "flowAlias": "suiss first factor"
         },
         {
           "requirement": "REQUIRED",
@@ -90,8 +92,8 @@
           "requirement": "REQUIRED",
           "priority": 40,
           "userSetupAllowed": false,
-          "autheticatorFlow": false,
-          "authenticator": "phone-otp"
+          "autheticatorFlow": true,
+          "flowAlias": "suiss second factor"
         }
       ]
     },
@@ -125,6 +127,30 @@
           "userSetupAllowed": false,
           "autheticatorFlow": false,
           "authenticator": "register-or-resume"
+        },
+        {
+          "authenticator": "term-registration",
+          "authenticatorConfig": "suiss-term-tos",
+          "requirement": "REQUIRED",
+          "priority": 30,
+          "userSetupAllowed": false,
+          "autheticatorFlow": false
+        },
+        {
+          "authenticator": "term-registration",
+          "authenticatorConfig": "suiss-term-privacy",
+          "requirement": "REQUIRED",
+          "priority": 40,
+          "userSetupAllowed": false,
+          "autheticatorFlow": false
+        },
+        {
+          "authenticator": "term-registration",
+          "authenticatorConfig": "suiss-term-marketing",
+          "requirement": "REQUIRED",
+          "priority": 50,
+          "userSetupAllowed": false,
+          "autheticatorFlow": false
         }
       ]
     },
@@ -157,13 +183,100 @@
           "authenticator": "reset-password"
         }
       ]
+    },
+    {
+      "alias": "suiss first factor",
+      "description": "PIN or passkey",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "requirement": "ALTERNATIVE",
+          "priority": 10,
+          "userSetupAllowed": false,
+          "autheticatorFlow": false,
+          "authenticator": "phone-password-form"
+        },
+        {
+          "requirement": "ALTERNATIVE",
+          "priority": 20,
+          "userSetupAllowed": false,
+          "autheticatorFlow": false,
+          "authenticator": "webauthn-authenticator-passwordless"
+        }
+      ]
+    },
+    {
+      "alias": "suiss second factor",
+      "description": "SMS code, authenticator app, security key or recovery code",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "requirement": "ALTERNATIVE",
+          "priority": 10,
+          "userSetupAllowed": false,
+          "autheticatorFlow": false,
+          "authenticator": "phone-otp"
+        },
+        {
+          "requirement": "ALTERNATIVE",
+          "priority": 20,
+          "userSetupAllowed": false,
+          "autheticatorFlow": false,
+          "authenticator": "auth-otp-form"
+        },
+        {
+          "requirement": "ALTERNATIVE",
+          "priority": 30,
+          "userSetupAllowed": false,
+          "autheticatorFlow": false,
+          "authenticator": "webauthn-authenticator"
+        },
+        {
+          "requirement": "ALTERNATIVE",
+          "priority": 40,
+          "userSetupAllowed": false,
+          "autheticatorFlow": false,
+          "authenticator": "auth-recovery-authn-code-form"
+        }
+      ]
     }
   ],
   "authenticatorConfig": [
     {
       "alias": "suiss-security-image",
       "config": {
-        "imageUrls": "/resources/img/security/anchor.svg##/resources/img/security/bicycle.svg##/resources/img/security/compass.svg##/resources/img/security/feather.svg##/resources/img/security/lighthouse.svg##/resources/img/security/mountain.svg##/resources/img/security/sailboat.svg##/resources/img/security/tree.svg"
+        "imageUrls": "circle##diamond##triangle##square##ring##plus"
+      }
+    },
+    {
+      "alias": "suiss-term-tos",
+      "config": {
+        "key": "tos",
+        "title": "Kullanım Koşulları",
+        "mode": "required_read",
+        "content": "<h3>1. Taraflar</h3><p>Bu koşullar suiss ile hizmeti kullanan kişi arasında geçerlidir.</p><h3>2. Hesap güvenliği</h3><p>PIN kodunuzu ve telefonunuza gelen doğrulama kodlarını kimseyle paylaşmayın.</p><h3>3. Hizmetin kullanımı</h3><p>Hizmeti yürürlükteki mevzuata uygun şekilde kullanmayı kabul edersiniz.</p><h3>4. Değişiklikler</h3><p>Koşullar güncellendiğinde bir sonraki girişinizde yeniden onayınız istenir.</p>"
+      }
+    },
+    {
+      "alias": "suiss-term-privacy",
+      "config": {
+        "key": "privacy",
+        "title": "KVKK Aydınlatma Metni",
+        "mode": "required",
+        "content": "<p>6698 sayılı Kişisel Verilerin Korunması Kanunu kapsamında ad, soyad, T.C. kimlik numarası, doğum tarihi, telefon ve e-posta bilgileriniz kimlik doğrulama ve hesap güvenliği amacıyla işlenir.</p><p>Verileriniz yasal zorunluluklar dışında üçüncü kişilerle paylaşılmaz. Kanunun 11. maddesindeki haklarınız için bizimle iletişime geçebilirsiniz.</p>"
+      }
+    },
+    {
+      "alias": "suiss-term-marketing",
+      "config": {
+        "key": "marketing",
+        "title": "Ticari Elektronik İleti İzni",
+        "mode": "optional",
+        "content": "<p>Kampanya, duyuru ve yeniliklerden SMS ve e-posta ile haberdar olmak istiyorum. Bu izni dilediğim zaman geri alabilirim.</p>"
       }
     }
   ],
@@ -217,9 +330,63 @@
       "alias": "delete_account",
       "name": "Delete Account",
       "providerId": "delete_account",
-      "enabled": false,
+      "enabled": true,
       "defaultAction": false,
       "priority": 60,
+      "config": {}
+    },
+    {
+      "alias": "UPDATE_EMAIL",
+      "name": "Update Email",
+      "providerId": "UPDATE_EMAIL",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 70,
+      "config": {}
+    },
+    {
+      "alias": "CONFIGURE_TOTP",
+      "name": "Configure OTP",
+      "providerId": "CONFIGURE_TOTP",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 80,
+      "config": {}
+    },
+    {
+      "alias": "webauthn-register",
+      "name": "Webauthn Register",
+      "providerId": "webauthn-register",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 81,
+      "config": {}
+    },
+    {
+      "alias": "webauthn-register-passwordless",
+      "name": "Webauthn Register Passwordless",
+      "providerId": "webauthn-register-passwordless",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 82,
+      "config": {}
+    },
+    {
+      "alias": "CONFIGURE_RECOVERY_AUTHN_CODES",
+      "name": "Recovery Authentication Codes",
+      "providerId": "CONFIGURE_RECOVERY_AUTHN_CODES",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 83,
+      "config": {}
+    },
+    {
+      "alias": "delete_credential",
+      "name": "Delete Credential",
+      "providerId": "delete_credential",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 84,
       "config": {}
     }
   ],
@@ -230,7 +397,7 @@
         "subComponents": {},
         "config": {
           "kc.user.profile.config": [
-            "{\"attributes\": [{\"name\": \"username\", \"displayName\": \"${username}\", \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false, \"validations\": {\"length\": {\"min\": 3, \"max\": 255}}}, {\"name\": \"email\", \"displayName\": \"${email}\", \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false, \"validations\": {\"email\": {}, \"length\": {\"max\": 255}}}, {\"name\": \"firstName\", \"displayName\": \"${firstName}\", \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false, \"validations\": {\"length\": {\"max\": 255}, \"person-name-prohibited-characters\": {}}}, {\"name\": \"lastName\", \"displayName\": \"${lastName}\", \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false, \"validations\": {\"length\": {\"max\": 255}, \"person-name-prohibited-characters\": {}}}, {\"name\": \"tc\", \"displayName\": \"Turkish ID number\", \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false, \"validations\": {\"tc-kimlik\": {}}}, {\"name\": \"birthDate\", \"displayName\": \"Date of birth\", \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false, \"validations\": {\"min-age\": {\"min\": 18}}}, {\"name\": \"phoneNumber\", \"displayName\": \"Phone\", \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false, \"validations\": {\"pattern\": {\"pattern\": \"^5[0-9]{9}$\"}}}, {\"name\": \"phoneNumberVerified\", \"displayName\": \"Phone verified\", \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false}, {\"name\": \"securityImage\", \"displayName\": \"Security image\", \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false}], \"groups\": [], \"unmanagedAttributePolicy\": \"ENABLED\"}"
+            "{\"attributes\": [{\"name\": \"username\", \"displayName\": \"${username}\", \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false, \"validations\": {\"length\": {\"min\": 3, \"max\": 255}}}, {\"name\": \"firstName\", \"displayName\": \"${firstName}\", \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false, \"validations\": {\"length\": {\"max\": 255}, \"person-name-prohibited-characters\": {}}}, {\"name\": \"lastName\", \"displayName\": \"${lastName}\", \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false, \"validations\": {\"length\": {\"max\": 255}, \"person-name-prohibited-characters\": {}}}, {\"name\": \"email\", \"displayName\": \"${email}\", \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false, \"validations\": {\"email\": {}, \"length\": {\"max\": 255}}}, {\"name\": \"tc\", \"displayName\": \"Turkish ID number\", \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\"]}, \"multivalued\": false, \"validations\": {\"tc-kimlik\": {}}}, {\"name\": \"birthDate\", \"displayName\": \"Date of birth\", \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false, \"validations\": {\"min-age\": {\"min\": 18}}}, {\"name\": \"phoneNumber\", \"displayName\": \"Phone\", \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false, \"validations\": {\"pattern\": {\"pattern\": \"^5[0-9]{9}$\"}}}, {\"name\": \"phoneNumberVerified\", \"displayName\": \"Phone verified\", \"permissions\": {\"view\": [\"admin\"], \"edit\": [\"admin\"]}, \"multivalued\": false}, {\"name\": \"securityImage\", \"displayName\": \"Security image\", \"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}, \"multivalued\": false, \"validations\": {\"options\": {\"options\": [\"circle\", \"diamond\", \"triangle\", \"square\", \"ring\", \"plus\"]}}}], \"groups\": [], \"unmanagedAttributePolicy\": \"ENABLED\"}"
           ]
         }
       }
@@ -295,6 +462,74 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "suiss-documents",
+      "name": "suiss belgeler",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": true,
+      "authorizationSettings": {
+        "allowRemoteResourceManagement": true,
+        "policyEnforcementMode": "ENFORCING",
+        "decisionStrategy": "UNANIMOUS",
+        "scopes": [
+          {
+            "name": "view",
+            "displayName": "Görüntüleme"
+          },
+          {
+            "name": "download",
+            "displayName": "İndirme"
+          }
+        ],
+        "resources": [
+          {
+            "name": "kimlik-belgesi",
+            "displayName": "Kimlik belgesi",
+            "type": "urn:suiss-documents:resources:document",
+            "ownerManagedAccess": true,
+            "owner": {
+              "name": "admin"
+            },
+            "uris": [
+              "/documents/kimlik-belgesi"
+            ],
+            "scopes": [
+              {
+                "name": "view"
+              },
+              {
+                "name": "download"
+              }
+            ]
+          },
+          {
+            "name": "ikametgah-belgesi",
+            "displayName": "İkametgah belgesi",
+            "type": "urn:suiss-documents:resources:document",
+            "ownerManagedAccess": true,
+            "owner": {
+              "name": "admin"
+            },
+            "uris": [
+              "/documents/ikametgah-belgesi"
+            ],
+            "scopes": [
+              {
+                "name": "view"
+              },
+              {
+                "name": "download"
+              }
+            ]
+          }
+        ],
+        "policies": []
+      }
     }
   ],
   "roles": {
@@ -332,6 +567,25 @@
         ],
         "birthDate": [
           "1990-01-01"
+        ],
+        "terms.accepted.tos": [
+          "8732d0111ef2d943"
+        ],
+        "terms.consent.tos": [
+          "578e30fb58c60a00|1773136800",
+          "8732d0111ef2d943|1789466400"
+        ],
+        "terms.accepted.privacy": [
+          "b456ee6de7d03147"
+        ],
+        "terms.consent.privacy": [
+          "b456ee6de7d03147|1773136800"
+        ],
+        "terms.accepted.marketing": [
+          "6d5e068d9622e539"
+        ],
+        "terms.consent.marketing": [
+          "6d5e068d9622e539|1773136800"
         ]
       },
       "credentials": [
@@ -341,11 +595,78 @@
           "temporary": false
         }
       ],
+      "realmRoles": [
+        "default-roles-suiss"
+      ],
       "clientRoles": {
         "realm-management": [
           "realm-admin"
         ]
+      },
+      "groups": [
+        "/Yöneticiler",
+        "/Beta kullanıcıları"
+      ],
+      "federatedIdentities": [
+        {
+          "identityProvider": "google",
+          "userId": "100000000000000000001",
+          "userName": "admin@suiss.local"
+        }
+      ]
+    }
+  ],
+  "identityProviders": [
+    {
+      "alias": "google",
+      "displayName": "Google",
+      "providerId": "google",
+      "enabled": true,
+      "trustEmail": true,
+      "storeToken": false,
+      "addReadTokenRoleOnCreate": false,
+      "linkOnly": false,
+      "firstBrokerLoginFlowAlias": "first broker login",
+      "config": {
+        "clientId": "${GOOGLE_CLIENT_ID:change-me}",
+        "clientSecret": "${GOOGLE_CLIENT_SECRET:change-me}",
+        "syncMode": "IMPORT"
       }
     }
-  ]
+  ],
+  "groups": [
+    {
+      "name": "Yöneticiler"
+    },
+    {
+      "name": "Beta kullanıcıları"
+    }
+  ],
+  "organizations": [
+    {
+      "name": "suiss",
+      "alias": "suiss",
+      "enabled": true,
+      "description": "suiss kurumsal hesabı",
+      "redirectUrl": "",
+      "domains": [
+        {
+          "name": "suiss.local",
+          "verified": false
+        }
+      ],
+      "members": [
+        {
+          "username": "admin",
+          "membershipType": "UNMANAGED"
+        }
+      ]
+    }
+  ],
+  "attributes": {
+    "terms.tos.8732d0111ef2d943": "{\"title\": \"Kullanım Koşulları\", \"content\": \"<h3>1. Taraflar</h3><p>Bu koşullar suiss ile hizmeti kullanan kişi arasında geçerlidir.</p><h3>2. Hesap güvenliği</h3><p>PIN kodunuzu ve telefonunuza gelen doğrulama kodlarını kimseyle paylaşmayın.</p><h3>3. Hizmetin kullanımı</h3><p>Hizmeti yürürlükteki mevzuata uygun şekilde kullanmayı kabul edersiniz.</p><h3>4. Değişiklikler</h3><p>Koşullar güncellendiğinde bir sonraki girişinizde yeniden onayınız istenir.</p>\"}",
+    "terms.tos.578e30fb58c60a00": "{\"title\": \"Kullanım Koşulları\", \"content\": \"<h3>1. Taraflar</h3><p>Bu koşullar suiss ile hizmeti kullanan kişi arasında geçerlidir.</p><h3>2. Hesap güvenliği</h3><p>Şifrenizi kimseyle paylaşmayın.</p>\"}",
+    "terms.privacy.b456ee6de7d03147": "{\"title\": \"KVKK Aydınlatma Metni\", \"content\": \"<p>6698 sayılı Kişisel Verilerin Korunması Kanunu kapsamında ad, soyad, T.C. kimlik numarası, doğum tarihi, telefon ve e-posta bilgileriniz kimlik doğrulama ve hesap güvenliği amacıyla işlenir.</p><p>Verileriniz yasal zorunluluklar dışında üçüncü kişilerle paylaşılmaz. Kanunun 11. maddesindeki haklarınız için bizimle iletişime geçebilirsiniz.</p>\"}",
+    "terms.marketing.6d5e068d9622e539": "{\"title\": \"Ticari Elektronik İleti İzni\", \"content\": \"<p>Kampanya, duyuru ve yeniliklerden SMS ve e-posta ile haberdar olmak istiyorum. Bu izni dilediğim zaman geri alabilirim.</p>\"}"
+  }
 }

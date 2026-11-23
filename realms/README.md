@@ -15,6 +15,9 @@ Test ve geliştirme realm'i. `master` yalnız yönetim içindir, akışlar orada
 | Şifre politikası | `length(6)`, `^[0-9]{6}$`, `passwordHistory(3)`, `pinStrength` (Böl. 7) |
 | Brute force | Kademeli: 6 hatada kilit, artan bekleme, kalıcı kilit yok (Böl. 7) |
 | Varsayılan admin | `admin` / `482916`, yalnız bu realm'in `realm-admin`'i; `/admin/suiss/console/` kullanıcı adı + şifreyle girer. Yerel geliştirme içindir, prod realm dosyasına konmaz |
+| Account ekranları | Gruplar, bağlı hesaplar, kaynaklar (UMA), doğrulanabilir kimlik bilgileri (OID4VCI, `oid4vc-vci` özelliği), hesap silme ve e-posta güncelleme açık |
+| Örnek veri | `admin` iki gruba üye (`Yöneticiler`, `Beta kullanıcıları`), Google hesabına bağlı ve `suiss-documents` client'ında iki UMA kaynağının sahibi. Kayıt formunda üç sözleşme var (`tos` okuma zorunlu, `privacy` zorunlu, `marketing` isteğe bağlı); `admin` üçünü onaylamış, `tos` için eski sürüm onayı da geçmişte görünür. Yerel geliştirme içindir |
+| Google | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` içe aktarmada `.env`'den okunur; gerçek değer girilmeden Google ile giriş çalışmaz |
 | Access token | 5 dk (Böl. 7 "kısa access token") |
 
 ### Akışlar
