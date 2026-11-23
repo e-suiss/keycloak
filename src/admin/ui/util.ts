@@ -1,15 +1,20 @@
 // @ts-nocheck
+import { i18n } from "../i18n/i18n";
 // Shared admin helpers: date formatting + raw admin-REST / admin-UI-ext fetch.
+
+function lang() {
+    return i18n.language || "en";
+}
 
 export const fmtDate = (v: any) =>
     v
-        ? new Date(typeof v === "number" ? v : Number(v) || v).toLocaleString("tr-TR")
+        ? new Date(typeof v === "number" ? v : Number(v) || v).toLocaleString(lang())
         : "—";
 
 export const fmtDateShort = (v: any) =>
     v
         ? new Date(typeof v === "number" ? v : Number(v) || v).toLocaleDateString(
-              "tr-TR",
+              lang(),
               {
                   day: "2-digit",
                   month: "short",
@@ -22,16 +27,14 @@ export const fmtDateShort = (v: any) =>
 export function fmtRelative(v: any) {
     if (!v) return "—";
     const t = new Date(typeof v === "number" ? v : Number(v) || v).getTime();
-    const diff = Date.now() - t;
-    const sec = Math.round(diff / 1000);
-    if (sec < 60) return "az önce";
-    const min = Math.round(sec / 60);
-    if (min < 60) return `${min} dk önce`;
-    const hr = Math.round(min / 60);
-    if (hr < 24) return `${hr} sa önce`;
-    const day = Math.round(hr / 24);
-    if (day < 30) return `${day} gün önce`;
-    return new Date(t).toLocaleDateString("tr-TR");
+    const sec = Math.round((t - Date.now()) / 1000);
+    const rtf = new Intl.RelativeTimeFormat(lang(), { numeric: "auto" });
+    const abs = Math.abs(sec);
+    if (abs < 60) return rtf.format(sec, "second");
+    if (abs < 3600) return rtf.format(Math.round(sec / 60), "minute");
+    if (abs < 86400) return rtf.format(Math.round(sec / 3600), "hour");
+    if (abs < 2592000) return rtf.format(Math.round(sec / 86400), "day");
+    return new Date(t).toLocaleDateString(lang());
 }
 
 /**
@@ -72,4 +75,9 @@ export function initials(name: string) {
     if (parts.length === 0) return "?";
     if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+export async function registrationFlowAlias(adminClient: any, realm: string) {
+    const rep = await adminClient.realms.findOne({ realm }).catch(() => null);
+    return rep?.registrationFlow || "registration";
 }

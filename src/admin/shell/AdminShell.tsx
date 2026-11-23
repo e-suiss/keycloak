@@ -1,8 +1,6 @@
 // @ts-nocheck
-// Custom shadcn admin shell — replaces the PatternFly Page/PageNav/PageHeader.
 
 import {
-    AppleLogoIcon,
     AppWindowIcon,
     BuildingsIcon,
     ClockCounterClockwiseIcon,
@@ -17,241 +15,191 @@ import {
     LockKeyIcon,
     ShareNetworkIcon,
     ShieldCheckIcon,
+    SidebarSimpleIcon,
     StackIcon,
     UserGearIcon,
     UserIcon,
     UsersThreeIcon
 } from "@phosphor-icons/react";
-import { NavUser } from "../../shared/NavUser";
-import { Badge } from "@ui/components/badge";
-import { Separator } from "@ui/components/separator";
-import {
-    Sidebar,
-    SidebarContent,
-    SidebarGroup,
-    SidebarGroupLabel,
-    SidebarHeader,
-    SidebarInset,
-    SidebarMenu,
-    SidebarMenuButton,
-    SidebarMenuItem,
-    SidebarProvider,
-    SidebarTrigger
-} from "@ui/components/sidebar";
-import { Tabs, TabsList, TabsTrigger } from "@ui/components/tabs";
+import { cn } from "@ui/lib/utils";
 import type { PropsWithChildren } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useEnvironment } from "../../shared/keycloak-ui-shared";
-import { useTheme } from "../theme";
+import { HAIRLINE, NavBrandBar, navLinkClass, Shell, useNavDrawer } from "../../shared/shell/Shell";
+import { UserMenu } from "../../shared/shell/UserMenu";
 import { useCapabilities } from "../ui/capabilities";
+import { useT } from "../ui/i18n";
 import { useRealm } from "../ui/realm";
 
-const ICON = {
-    dashboard: HouseIcon,
-    clients: AppWindowIcon,
-    clientScopes: StackIcon,
-    roles: ShieldCheckIcon,
-    users: UserIcon,
-    groups: UsersThreeIcon,
-    sessions: ClockCounterClockwiseIcon,
-    events: LightningIcon,
-    settings: GearSixIcon,
-    auth: FingerprintIcon,
-    idp: ShareNetworkIcon,
-    federation: DatabaseIcon,
-    iam: UserGearIcon,
-    organizations: BuildingsIcon,
-    workflows: FlowArrowIcon,
-    permissions: LockKeyIcon,
-    terms: FileTextIcon,
-    registration: IdentificationCardIcon
-};
+type NavItem = { to: string; label: string; icon: any; show?: boolean };
 
-function BrandMark({ className }: { className?: string }) {
-    return <AppleLogoIcon weight="fill" className={className} />;
-}
-
-export function AdminShell({ children }: PropsWithChildren) {
+function useNavGroups() {
     const { realm } = useRealm();
-    const { pathname } = useLocation();
     const caps = useCapabilities();
+    const t = useT();
     const r = (p: string) => `/${realm}/${p}`;
 
-    // `show` defaults to true; feature-gated items stay hidden until caps load,
-    // then appear only when their realm feature/toggle is on (matches the console).
-    const rawGroups = [
+    const groups: { label: string; items: NavItem[] }[] = [
         {
-            label: "Genel",
+            label: t("sxNavGeneral"),
             items: [
-                { to: r("dashboard"), label: "Genel Bakış", icon: ICON.dashboard },
-                { to: r("users"), label: "Kullanıcılar", icon: ICON.users },
-                { to: r("groups"), label: "Gruplar", icon: ICON.groups },
-                { to: r("sessions"), label: "Oturumlar", icon: ICON.sessions },
-                { to: r("events"), label: "Olaylar", icon: ICON.events },
-                { to: r("iam-management"), label: "Yetki Yönetimi", icon: ICON.iam }
+                { to: r("dashboard"), label: t("sxNavDashboard"), icon: HouseIcon },
+                { to: r("users"), label: t("sxNavUsers"), icon: UserIcon },
+                { to: r("groups"), label: t("sxNavGroups"), icon: UsersThreeIcon },
+                { to: r("sessions"), label: t("sxNavSessions"), icon: ClockCounterClockwiseIcon },
+                { to: r("events"), label: t("sxNavEvents"), icon: LightningIcon },
+                { to: r("iam-management"), label: t("sxNavIam"), icon: UserGearIcon }
             ]
         },
         {
-            label: "Yönet",
+            label: t("sxNavManage"),
             items: [
-                { to: r("clients"), label: "İstemciler", icon: ICON.clients },
-                {
-                    to: r("client-scopes"),
-                    label: "İstemci Kapsamları",
-                    icon: ICON.clientScopes
-                },
-                { to: r("roles"), label: "Realm Rolleri", icon: ICON.roles },
+                { to: r("clients"), label: t("sxNavClients"), icon: AppWindowIcon },
+                { to: r("client-scopes"), label: t("sxNavClientScopes"), icon: StackIcon },
+                { to: r("roles"), label: t("sxNavRealmRoles"), icon: ShieldCheckIcon },
                 {
                     to: r("organizations"),
-                    label: "Organizasyonlar",
-                    icon: ICON.organizations,
+                    label: t("sxNavOrganizations"),
+                    icon: BuildingsIcon,
                     show: caps.organizationsEnabled
                 }
             ]
         },
         {
-            label: "Yapılandır",
+            label: t("sxNavConfigure"),
             items: [
-                { to: r("realm-settings"), label: "Realm Ayarları", icon: ICON.settings },
-                { to: r("authentication"), label: "Kimlik Doğrulama", icon: ICON.auth },
-                {
-                    to: r("identity-providers"),
-                    label: "Kimlik Sağlayıcılar",
-                    icon: ICON.idp
-                },
-                {
-                    to: r("user-federation"),
-                    label: "Kullanıcı Federasyonu",
-                    icon: ICON.federation
-                },
+                { to: r("realm-settings"), label: t("sxNavRealmSettings"), icon: GearSixIcon },
+                { to: r("authentication"), label: t("sxNavAuthentication"), icon: FingerprintIcon },
+                { to: r("identity-providers"), label: t("sxNavIdentityProviders"), icon: ShareNetworkIcon },
+                { to: r("user-federation"), label: t("sxNavUserFederation"), icon: DatabaseIcon },
                 {
                     to: r("permissions"),
-                    label: "İzinler",
-                    icon: ICON.permissions,
+                    label: t("sxNavAdminPermissions"),
+                    icon: LockKeyIcon,
                     show: caps.adminPermissionsEnabled
                 },
-                {
-                    to: r("workflows"),
-                    label: "İş Akışları",
-                    icon: ICON.workflows,
-                    show: caps.workflowsEnabled
-                }
+                { to: r("workflows"), label: t("sxNavWorkflows"), icon: FlowArrowIcon, show: caps.workflowsEnabled }
             ]
         },
         {
-            label: "Uzantılar",
+            label: t("sxNavExtensions"),
             items: [
-                { to: r("terms"), label: "Sözleşmeler", icon: ICON.terms },
-                {
-                    to: r("registration-config"),
-                    label: "Kayıt Yapılandırması",
-                    icon: ICON.registration
-                }
+                { to: r("terms"), label: t("sxNavTerms"), icon: FileTextIcon },
+                { to: r("registration-config"), label: t("sxNavRegistrationConfig"), icon: IdentificationCardIcon }
             ]
         }
     ];
 
-    const groups = rawGroups
-        .map(g => ({ ...g, items: g.items.filter(it => it.show !== false) }))
-        .filter(g => g.items.length > 0);
+    return groups;
+}
 
-    const all = groups.flatMap(g => g.items);
-    const isActive = (to: string) => pathname === to || pathname.startsWith(`${to}/`);
-    const activeItem = all.find(item => isActive(item.to));
-    const title = activeItem?.label ?? "Genel Bakış";
+function visible(groups: { label: string; items: NavItem[] }[]) {
+    return groups
+        .map(group => ({ ...group, items: group.items.filter(item => item.show !== false) }))
+        .filter(group => group.items.length > 0);
+}
+
+function useActive() {
+    const { pathname } = useLocation();
+    return (to: string) => pathname === to || pathname.startsWith(`${to}/`);
+}
+
+function AdminNav() {
+    const t = useT();
+    const groups = visible(useNavGroups());
+    const isActive = useActive();
+    const { setOpen } = useNavDrawer();
 
     return (
-        <SidebarProvider>
-            <Sidebar>
-                <SidebarHeader>
-                    <div className="flex items-center gap-2 font-semibold">
-                        <BrandMark className="size-5" />
-                        Wallet
-                        <Badge variant="secondary">Admin</Badge>
-                    </div>
-                    <span className="text-xs text-muted-foreground">Yönetim Konsolu</span>
-                </SidebarHeader>
-
-                <SidebarContent>
-                    {groups.map(g => (
-                        <SidebarGroup key={g.label}>
-                            <SidebarGroupLabel>{g.label}</SidebarGroupLabel>
-                            <SidebarMenu>
-                                {g.items.map(item => (
-                                    <SidebarMenuItem key={item.to}>
-                                        <SidebarMenuButton
-                                            asChild
-                                            isActive={isActive(item.to)}
+        <>
+            <NavBrandBar title={t("sxBrandTitle")} suffix={t("sxBrandSuffix")} />
+            <nav aria-label={t("sxMenu")}>
+                {groups.map(group => (
+                    <div key={group.label}>
+                        <div className="px-2.5 pt-4.5 pb-1.5 text-xs text-muted-foreground">{group.label}</div>
+                        <ul>
+                            {group.items.map(item => {
+                                const active = isActive(item.to);
+                                return (
+                                    <li key={item.to}>
+                                        <Link
+                                            to={item.to}
+                                            aria-current={active ? "page" : undefined}
+                                            onClick={() => setOpen(false)}
+                                            className={navLinkClass(active)}
                                         >
-                                            <Link to={item.to}>
-                                                <item.icon
-                                                    weight={
-                                                        isActive(item.to)
-                                                            ? "fill"
-                                                            : "regular"
-                                                    }
-                                                    className="size-5"
-                                                />
-                                                <span className="flex-1">
-                                                    {item.label}
-                                                </span>
-                                            </Link>
-                                        </SidebarMenuButton>
-                                    </SidebarMenuItem>
-                                ))}
-                            </SidebarMenu>
-                        </SidebarGroup>
-                    ))}
-                </SidebarContent>
-            </Sidebar>
-
-            <SidebarInset>
-                <header className="sticky top-0 z-40 bg-background">
-                    <div className="flex items-center justify-between gap-3 px-5 py-3.5 sm:px-8">
-                        <div className="flex min-w-0 items-center gap-2">
-                            <SidebarTrigger className="md:hidden" />
-                            <h1 className="truncate text-xl font-semibold tracking-tight">
-                                {title}
-                            </h1>
-                        </div>
-                        <AccountMenu />
+                                            <item.icon
+                                                className={cn(
+                                                    "size-4 shrink-0",
+                                                    active ? "text-primary" : "text-muted-foreground"
+                                                )}
+                                            />
+                                            <span className="flex-1 truncate">{item.label}</span>
+                                        </Link>
+                                    </li>
+                                );
+                            })}
+                        </ul>
                     </div>
-
-                    <Tabs value={activeItem?.to ?? ""} className="px-5 pb-3 md:hidden">
-                        <TabsList>
-                            {all.map(item => (
-                                <TabsTrigger key={item.to} value={item.to} asChild>
-                                    <Link to={item.to}>{item.label}</Link>
-                                </TabsTrigger>
-                            ))}
-                        </TabsList>
-                    </Tabs>
-                    <Separator />
-                </header>
-
-                <main>{children}</main>
-            </SidebarInset>
-        </SidebarProvider>
+                ))}
+            </nav>
+        </>
     );
 }
 
-function AccountMenu() {
-    const { keycloak } = useEnvironment();
-    const { mode, setMode } = useTheme();
-
+function AdminUserMenu() {
+    const t = useT();
+    const { keycloak, environment } = useEnvironment();
+    const { realm } = useRealm();
     const user = keycloak?.idTokenParsed as
         | { name?: string; preferred_username?: string; email?: string }
         | undefined;
     const name = user?.name || user?.preferred_username || user?.email || "Admin";
-    const email = user?.email || "";
+    const accountUrl = `${environment.serverBaseUrl}/realms/${encodeURIComponent(realm)}/account/`;
 
     return (
-        <NavUser
+        <UserMenu
             name={name}
-            email={email}
-            mode={mode}
-            onModeChange={setMode}
+            email={user?.email}
+            items={[{ label: t("sxMyAccount"), onSelect: () => window.open(accountUrl, "_blank", "noopener") }]}
+            signOutLabel={t("sxSignOut")}
             onSignOut={() => keycloak.logout()}
         />
+    );
+}
+
+function AdminHeader() {
+    const t = useT();
+    const groups = useNavGroups();
+    const isActive = useActive();
+    const { setOpen } = useNavDrawer();
+    const title = groups.flatMap(group => group.items).find(item => isActive(item.to))?.label ?? t("sxNavDashboard");
+
+    return (
+        <header
+            className={`sticky top-0 z-40 flex h-12 shrink-0 items-center justify-between border-b bg-background px-4 sm:h-15 sm:px-7 ${HAIRLINE}`}
+        >
+            <button
+                type="button"
+                aria-label={t("sxOpenMenu")}
+                onClick={() => setOpen(true)}
+                className="grid size-7 place-items-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/50 sm:hidden"
+            >
+                <SidebarSimpleIcon className="size-5" />
+            </button>
+            <span className="pointer-events-none absolute inset-x-14 truncate text-center text-base font-semibold sm:static sm:text-left sm:text-lg">
+                {title}
+            </span>
+            <AdminUserMenu />
+        </header>
+    );
+}
+
+export function AdminShell({ children }: PropsWithChildren) {
+    const t = useT();
+    return (
+        <Shell header={<AdminHeader />} sidebar={<AdminNav />} menuLabel={t("sxMenu")}>
+            {children}
+        </Shell>
     );
 }

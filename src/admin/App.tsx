@@ -6,11 +6,12 @@ import { Suspense, useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
 import { useEnvironment } from "../shared/keycloak-ui-shared";
 import { SessionExpirationWarningOverlay } from "../shared/SessionExpirationWarningOverlay";
-import { Spinner } from "@ui/components/spinner";
 
 import { AdminClientContext, initAdminClient } from "./admin-client";
 import type { Environment } from "./environment";
 import { AdminShell } from "./shell/AdminShell";
+import { initAdminI18n } from "./ui/i18n";
+import { AppSkeleton, PageSkeleton } from "./ui/kit";
 import { RealmProvider } from "./ui/realm";
 
 export const App = () => {
@@ -23,15 +24,16 @@ export const App = () => {
             const newPath = window.location.pathname.replace(fragment, "");
             window.history.replaceState(null, "", newPath);
         }
-        initAdminClient(keycloak, environment).then(setAdminClient).catch(console.error);
+        initAdminClient(keycloak, environment)
+            .then(async client => {
+                await initAdminI18n(client, environment).catch(() => {});
+                setAdminClient(client);
+            })
+            .catch(console.error);
     }, [environment, keycloak]);
 
     if (!adminClient) {
-        return (
-            <div className="grid min-h-svh place-items-center">
-                <Spinner />
-            </div>
-        );
+        return <AppSkeleton />;
     }
 
     return (
@@ -39,11 +41,7 @@ export const App = () => {
             <RealmProvider>
                 <AdminShell>
                     <Suspense
-                        fallback={
-                            <div className="grid min-h-[60svh] place-items-center">
-                                <Spinner />
-                            </div>
-                        }
+                        fallback={<PageSkeleton />}
                     >
                         <Outlet />
                     </Suspense>

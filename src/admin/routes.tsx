@@ -4,6 +4,7 @@ import { Empty, EmptyHeader, EmptyTitle } from "@ui/components/empty";
 import { lazy } from "react";
 import { Navigate, type RouteObject } from "react-router-dom";
 import { environment } from "./environment";
+import { useT } from "./ui/i18n";
 import { Root } from "./Root";
 
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -34,10 +35,11 @@ const RegistrationConfig = lazy(() => import("./pages/RegistrationConfig"));
 const IamManagement = lazy(() => import("./iam-management/IamManagement"));
 
 function NotFound() {
+    const t = useT();
     return (
         <Empty className="py-24">
             <EmptyHeader>
-                <EmptyTitle>Sayfa bulunamadı.</EmptyTitle>
+                <EmptyTitle>{t("sxNotFoundTitle")}</EmptyTitle>
             </EmptyHeader>
         </Empty>
     );
