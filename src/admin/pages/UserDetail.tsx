@@ -2,20 +2,8 @@
 
 import { Button } from "@ui/components/button";
 import { Checkbox } from "@ui/components/checkbox";
-import { Field, FieldLabel } from "@ui/components/field";
 import { Input } from "@ui/components/input";
 import { NativeSelect, NativeSelectOption } from "@ui/components/native-select";
-import { Switch } from "@ui/components/switch";
-import {
-    Confirm,
-    ConfirmAction,
-    ConfirmCancel,
-    ConfirmContent,
-    ConfirmDescription,
-    ConfirmFooter,
-    ConfirmHeader,
-    ConfirmTitle
-} from "@ui/patterns/confirm";
 import {
     Modal,
     ModalBody,
@@ -24,11 +12,11 @@ import {
     ModalHeader,
     ModalTitle
 } from "@ui/patterns/modal";
-import { type ReactNode, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AlertVariant, useAlerts } from "../../shared/keycloak-ui-shared";
 import { useAdminClient } from "../admin-client";
-import { i18n } from "../i18n/i18n";
+import { useCapabilities } from "../ui/capabilities";
 import { useT } from "../ui/i18n";
 import {
     AdminPage,
@@ -44,169 +32,32 @@ import {
     TextAction
 } from "../ui/kit";
 import { useRealm } from "../ui/realm";
-import { initials } from "../ui/util";
-
-const EMPTY = {
-    username: "",
-    email: "",
-    firstName: "",
-    lastName: "",
-    enabled: true,
-    emailVerified: false
-};
-
-const DANGER_BUTTON =
-    "bg-[#d70015] text-white hover:bg-[#d70015]/90 dark:bg-[#ff453a] dark:hover:bg-[#ff453a]/90";
-
-function useResource(fetcher: () => Promise<any>, deps: any[]) {
-    const [state, setState] = useState<{ status: "loading" | "error" | "ready"; data: any }>({
-        status: "loading",
-        data: null
-    });
-    const [attempt, setAttempt] = useState(0);
-    useEffect(() => {
-        let alive = true;
-        setState(s => (s.status === "ready" ? s : { status: "loading", data: null }));
-        fetcher()
-            .then(data => alive && setState({ status: "ready", data }))
-            .catch(() => alive && setState({ status: "error", data: null }));
-        return () => {
-            alive = false;
-        };
-    }, [...deps, attempt]);
-    const setData = (updater: any) =>
-        setState(s => ({ ...s, data: typeof updater === "function" ? updater(s.data) : updater }));
-    const reload = () => setAttempt(n => n + 1);
-    return { status: state.status, data: state.data, setData, reload };
-}
-
-const asList = (value: any) => (Array.isArray(value) ? value : []);
-
-const toDate = (v: any) => new Date(typeof v === "number" ? v : Number(v) || v);
-const locale = () => i18n.language || undefined;
-const formatDate = (v: any) => (v ? toDate(v).toLocaleString(locale()) : "—");
-
-function formatRelative(v: any) {
-    if (!v) return "—";
-    const time = toDate(v).getTime();
-    const rtf = new Intl.RelativeTimeFormat(locale(), { numeric: "auto" });
-    const sec = Math.round((Date.now() - time) / 1000);
-    if (sec < 60) return rtf.format(0, "second");
-    const min = Math.round(sec / 60);
-    if (min < 60) return rtf.format(-min, "minute");
-    const hr = Math.round(min / 60);
-    if (hr < 24) return rtf.format(-hr, "hour");
-    const day = Math.round(hr / 24);
-    if (day < 30) return rtf.format(-day, "day");
-    return new Date(time).toLocaleDateString(locale());
-}
-
-function Monogram({ name }: { name: string }) {
-    return (
-        <span className="grid size-8 place-items-center rounded-full bg-[#6e6e73] text-[11px] font-semibold text-white dark:bg-[#48484a]">
-            {initials(name)}
-        </span>
-    );
-}
-
-function TextField({ id, label, ...props }: any) {
-    return (
-        <Field size="lg">
-            <FieldLabel htmlFor={id}>{label}</FieldLabel>
-            <Input size="lg" id={id} {...props} />
-        </Field>
-    );
-}
-
-function SwitchRow({ label, checked, onChange, disabled }: any) {
-    return (
-        <Row
-            className="min-h-13"
-            title={label}
-            trailing={
-                <Switch
-                    aria-label={typeof label === "string" ? label : undefined}
-                    checked={!!checked}
-                    disabled={disabled}
-                    onCheckedChange={(v: boolean) => onChange(v)}
-                />
-            }
-        />
-    );
-}
-
-function SaveBar({ children }: { children: ReactNode }) {
-    return <div className="flex justify-end">{children}</div>;
-}
-
-function Footnote({ children }: { children: ReactNode }) {
-    return <p className="mt-2 px-0.5 text-[13px] leading-[1.4] text-muted-foreground">{children}</p>;
-}
-
-function useConfirm() {
-    const t = useT();
-    const [opts, setOpts] = useState<any>(null);
-    const [open, setOpen] = useState(false);
-    const confirm = (o: {
-        title: ReactNode;
-        message?: ReactNode;
-        confirmLabel?: ReactNode;
-        danger?: boolean;
-        onConfirm: () => void;
-    }) => {
-        setOpts(o);
-        setOpen(true);
-    };
-    const node = (
-        <Confirm open={open} onOpenChange={setOpen}>
-            <ConfirmContent>
-                <ConfirmHeader>
-                    <ConfirmTitle>{opts?.title}</ConfirmTitle>
-                    {opts?.message && <ConfirmDescription>{opts.message}</ConfirmDescription>}
-                </ConfirmHeader>
-                <ConfirmFooter>
-                    <ConfirmCancel>{t("sxCommonCancel")}</ConfirmCancel>
-                    <ConfirmAction
-                        variant={opts?.danger ? "destructive" : "default"}
-                        onClick={() => opts?.onConfirm?.()}
-                    >
-                        {opts?.confirmLabel ?? t("sxCommonConfirm")}
-                    </ConfirmAction>
-                </ConfirmFooter>
-            </ConfirmContent>
-        </Confirm>
-    );
-    return [confirm, node] as const;
-}
-
-function ListState({
-    status,
-    count,
-    onRetry,
-    errorTitle,
-    emptyTitle,
-    emptyDescription,
-    emptyAction,
-    children
-}: {
-    status: string;
-    count: number;
-    onRetry: () => void;
-    errorTitle: string;
-    emptyTitle: string;
-    emptyDescription?: string;
-    emptyAction?: ReactNode;
-    children: ReactNode;
-}) {
-    const t = useT();
-    if (status === "loading") return <ListSkeleton />;
-    if (status === "error")
-        return (
-            <Notice title={errorTitle} description={t("sxLoadErrorDescription")} onRetry={onRetry} />
-        );
-    if (count === 0) return <Notice title={emptyTitle} description={emptyDescription} action={emptyAction} />;
-    return <>{children}</>;
-}
+import { CredentialsTab } from "./user/CredentialsTab";
+import { EventsTab } from "./user/EventsTab";
+import { IdpTab } from "./user/IdpTab";
+import { ExecuteActionsModal, GroupPickerModal } from "./user/modals";
+import { OrganizationsTab } from "./user/OrganizationsTab";
+import {
+    GroupedChips,
+    ProfileFields,
+    profileErrors,
+    toFormValues,
+    toRepresentation,
+    visibleAttributes
+} from "./user/profile";
+import {
+    DANGER_BUTTON,
+    Footnote,
+    ListState,
+    RequiredActionsPicker,
+    SaveBar,
+    SwitchRow,
+    asList,
+    formatDate,
+    formatRelative,
+    useConfirm,
+    useResource
+} from "./user/shared";
 
 const TABS = [
     { value: "general", label: "sxUserDetailTabGeneral" },
@@ -214,10 +65,24 @@ const TABS = [
     { value: "credentials", label: "sxUserDetailTabCredentials" },
     { value: "roles", label: "sxUserDetailTabRoles" },
     { value: "groups", label: "sxUserDetailTabGroups" },
+    { value: "organizations", label: "sxUserDetailXTabOrganizations" },
     { value: "sessions", label: "sxUserDetailTabSessions" },
     { value: "consents", label: "sxUserDetailTabConsents" },
-    { value: "idp", label: "sxUserDetailTabIdp" }
+    { value: "idp", label: "sxUserDetailTabIdp" },
+    { value: "events", label: "sxUserDetailXTabEvents" }
 ];
+
+function fallbackMetadata(t: any, editUsername: boolean) {
+    return {
+        attributes: [
+            { name: "username", displayName: t("sxUserDetailUsername"), required: true, readOnly: !editUsername },
+            { name: "email", displayName: t("sxUserDetailEmail") },
+            { name: "firstName", displayName: t("sxCommonName") },
+            { name: "lastName", displayName: t("sxUserDetailLastName") }
+        ],
+        groups: []
+    };
+}
 
 export default function UserDetail() {
     const { id } = useParams();
@@ -233,7 +98,36 @@ function ExistingUser({ id }: { id: string }) {
     const { addAlert, addError } = useAlerts();
     const [confirm, confirmNode] = useConfirm();
     const [tab, setTab] = useState("general");
-    const { status, data: user, reload } = useResource(() => adminClient.users.findOne({ id }), [adminClient, id]);
+    const { ready, realmRep: capRealm, isFeatureEnabled } = useCapabilities();
+    const [hasOrganizations, setHasOrganizations] = useState(false);
+    const res = useResource(async () => {
+        const [userData, attack, unmanaged, upConfig, realmRep] = await Promise.all([
+            adminClient.users.findOne({ id, userProfileMetadata: true }),
+            adminClient.attackDetection.findOne({ id }).catch(() => null),
+            adminClient.users.getUnmanagedAttributes({ id }).catch(() => null),
+            adminClient.users.getProfile().catch(() => null),
+            adminClient.realms.findOne({ realm }).catch(() => null)
+        ]);
+        if (!userData) return null;
+        const { userProfileMetadata, ...user } = userData;
+        return { user, metadata: userProfileMetadata, attack, unmanaged, upConfig, realmRep };
+    }, [adminClient, id, realm]);
+    const { status, data, reload } = res;
+    const user = data?.user;
+
+    const showOrganizations = ready && isFeatureEnabled("ORGANIZATION") && !!capRealm?.organizationsEnabled;
+
+    useEffect(() => {
+        if (!showOrganizations) return;
+        let alive = true;
+        adminClient.organizations
+            .find({ first: 0, max: 1 })
+            .then((list: any) => alive && setHasOrganizations(Array.isArray(list) && list.length > 0))
+            .catch(() => {});
+        return () => {
+            alive = false;
+        };
+    }, [adminClient, realm, showOrganizations]);
 
     const back = { label: t("sxUsersTitle"), to: `/${realm}/users` };
 
@@ -264,8 +158,8 @@ function ExistingUser({ id }: { id: string }) {
 
     const impersonate = async () => {
         try {
-            const res = await adminClient.users.impersonation({ id }, { user: id, realm });
-            if (res?.redirect) window.open(res.redirect, "_blank");
+            const r = await adminClient.users.impersonation({ id }, { user: id, realm });
+            if (r?.redirect) window.open(r.redirect, "_blank");
             else addAlert(t("sxUserDetailImpersonationStarted"), AlertVariant.success);
         } catch (e) {
             addError(t("sxUserDetailImpersonationError"), e);
@@ -297,6 +191,9 @@ function ExistingUser({ id }: { id: string }) {
         });
 
     const fullName = `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim();
+    const locked = !!data.realmRep?.bruteForceProtected && !!data.attack?.disabled;
+    const tabs = TABS.filter(item => item.value !== "organizations" || (showOrganizations && hasOrganizations));
+    const activeTab = tabs.some(item => item.value === tab) ? tab : "general";
 
     return (
         <AdminPage
@@ -305,12 +202,13 @@ function ExistingUser({ id }: { id: string }) {
                 <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
                     <span className="[overflow-wrap:anywhere]">{user.username}</span>
                     {!user.enabled && <Chip tone="danger">{t("sxCommonDisabled")}</Chip>}
+                    {locked && <Chip tone="warning">{t("sxUsersXTemporarilyLocked")}</Chip>}
                 </span>
             }
             description={[fullName, user.email].filter(Boolean).join(" · ") || undefined}
             actions={
                 <>
-                    <Button variant="secondary" onClick={impersonate}>
+                    <Button variant="secondary" onClick={impersonate} disabled={user.access?.impersonate === false}>
                         {t("sxUserDetailImpersonate")}
                     </Button>
                     <Button variant="secondary" onClick={logout}>
@@ -320,19 +218,21 @@ function ExistingUser({ id }: { id: string }) {
             }
         >
             <SegmentTabs
-                value={tab}
+                value={activeTab}
                 onChange={setTab}
-                items={TABS.map(item => ({ value: item.value, label: t(item.label) }))}
+                items={tabs.map(item => ({ value: item.value, label: t(item.label) }))}
                 ariaLabel={t("sxUserDetailSections")}
             />
-            {tab === "general" && <GeneralTab user={user} reload={reload} onDelete={remove} />}
-            {tab === "attributes" && <AttributesTab user={user} reload={reload} />}
-            {tab === "credentials" && <CredentialsTab user={user} />}
-            {tab === "roles" && <RolesTab user={user} />}
-            {tab === "groups" && <GroupsTab user={user} />}
-            {tab === "sessions" && <SessionsTab user={user} />}
-            {tab === "consents" && <ConsentsTab user={user} />}
-            {tab === "idp" && <IdpTab user={user} />}
+            {activeTab === "general" && <GeneralTab key={JSON.stringify(user)} data={data} reload={reload} onDelete={remove} />}
+            {activeTab === "attributes" && <AttributesTab key={JSON.stringify(user.attributes)} data={data} reload={reload} />}
+            {activeTab === "credentials" && <CredentialsTab user={user} />}
+            {activeTab === "roles" && <RolesTab user={user} />}
+            {activeTab === "groups" && <GroupsTab user={user} />}
+            {activeTab === "organizations" && <OrganizationsTab user={user} />}
+            {activeTab === "sessions" && <SessionsTab user={user} />}
+            {activeTab === "consents" && <ConsentsTab user={user} />}
+            {activeTab === "idp" && <IdpTab user={user} />}
+            {activeTab === "events" && <EventsTab user={user} />}
             {confirmNode}
         </AdminPage>
     );
@@ -344,26 +244,62 @@ function NewUser() {
     const { realm } = useRealm();
     const navigate = useNavigate();
     const { addAlert, addError } = useAlerts();
-    const [f, setF] = useState({ ...EMPTY });
-    const set = (k: string, v: any) => setF(p => ({ ...p, [k]: v }));
+    const meta = useResource(
+        () =>
+            Promise.all([
+                adminClient.users.getProfileMetadata({ realm }).catch(() => null),
+                adminClient.realms.findOne({ realm }).catch(() => null)
+            ]).then(([metadata, realmRep]) => ({ metadata, realmRep })),
+        [adminClient, realm]
+    );
+    const metadata = meta.data?.metadata?.attributes ? meta.data.metadata : fallbackMetadata(t, true);
+    const [values, setValues] = useState<Record<string, any>>({});
+    const [errors, setErrors] = useState<Record<string, string>>({});
+    const [enabled, setEnabled] = useState(true);
+    const [emailVerified, setEmailVerified] = useState(false);
+    const [requiredActions, setRequiredActions] = useState<string[]>([]);
+    const [groups, setGroups] = useState<any[]>([]);
+    const [picking, setPicking] = useState(false);
     const [saving, setSaving] = useState(false);
 
+    useEffect(() => {
+        if (meta.status === "ready") setValues(toFormValues({}, metadata));
+    }, [meta.status]);
+
+    const setValue = (name: string, value: any) => {
+        setValues(v => ({ ...v, [name]: value }));
+        setErrors(e => {
+            if (!e[name]) return e;
+            const n = { ...e };
+            delete n[name];
+            return n;
+        });
+    };
+
+    const needsUsername = visibleAttributes(metadata, true).some((a: any) => a.name === "username");
+    const canCreate = !needsUsername || String(values.username ?? "").trim() !== "";
+
     const create = async () => {
-        if (!f.username.trim()) return;
+        if (!canCreate) return;
         setSaving(true);
+        setErrors({});
         try {
+            const rep = toRepresentation(values, metadata, {});
             const c = await adminClient.users.create({
-                username: f.username.trim(),
-                email: f.email.trim() || undefined,
-                firstName: f.firstName.trim() || undefined,
-                lastName: f.lastName.trim() || undefined,
-                enabled: !!f.enabled,
-                emailVerified: !!f.emailVerified
+                ...rep,
+                enabled: !!enabled,
+                emailVerified: !!emailVerified,
+                requiredActions,
+                groups: groups.map(g => g.path).filter(Boolean)
             });
             addAlert(t("sxUserDetailCreated"), AlertVariant.success);
             if (c?.id) navigate(`/${realm}/users/${c.id}`);
         } catch (e) {
-            addError(t("sxUserDetailCreateError"), e);
+            const fieldErrors = profileErrors(e, t);
+            if (fieldErrors) {
+                setErrors(fieldErrors);
+                addAlert(t("sxUserDetailXFixErrors"), AlertVariant.danger);
+            } else addError(t("sxUserDetailCreateError"), e);
         } finally {
             setSaving(false);
         }
@@ -371,166 +307,322 @@ function NewUser() {
 
     return (
         <AdminPage title={t("sxUsersNew")} back={{ label: t("sxUsersTitle"), to: `/${realm}/users` }}>
-            <Section label={t("sxUserDetailTitle")}>
-                <div className="flex flex-col gap-4">
-                    <TextField
-                        id="new-username"
-                        label={t("sxUserDetailUsername")}
-                        autoFocus
-                        value={f.username}
-                        onChange={(e: any) => set("username", e.target.value)}
-                        placeholder={t("sxUserDetailUsernamePlaceholder")}
+            {meta.status === "loading" ? (
+                <ListSkeleton rows={4} />
+            ) : (
+                <>
+                    <ProfileFields
+                        idPrefix="new"
+                        metadata={metadata}
+                        values={values}
+                        onChange={setValue}
+                        errors={errors}
+                        hideReadOnly
+                        supportedLocales={meta.data?.realmRep?.internationalizationEnabled ? meta.data?.realmRep?.supportedLocales : []}
                     />
-                    <TextField
-                        id="new-email"
-                        label={t("sxUserDetailEmail")}
-                        type="email"
-                        value={f.email}
-                        onChange={(e: any) => set("email", e.target.value)}
-                        placeholder={t("sxUserDetailEmailPlaceholder")}
-                    />
-                    <TextField
-                        id="new-firstName"
-                        label={t("sxCommonName")}
-                        value={f.firstName}
-                        onChange={(e: any) => set("firstName", e.target.value)}
-                    />
-                    <TextField
-                        id="new-lastName"
-                        label={t("sxUserDetailLastName")}
-                        value={f.lastName}
-                        onChange={(e: any) => set("lastName", e.target.value)}
-                    />
-                </div>
-            </Section>
-            <Section label={t("sxUserDetailStatus")}>
-                <Group>
-                    <SwitchRow
-                        key="enabled"
-                        label={t("sxCommonEnabled")}
-                        checked={f.enabled}
-                        onChange={(v: boolean) => set("enabled", v)}
-                    />
-                    <SwitchRow
-                        key="emailVerified"
-                        label={t("sxUserDetailEmailVerified")}
-                        checked={f.emailVerified}
-                        onChange={(v: boolean) => set("emailVerified", v)}
-                    />
-                </Group>
-            </Section>
-            <SaveBar>
-                <Button size="form" disabled={saving || !f.username.trim()} onClick={create}>
-                    {saving ? t("sxCommonCreating") : t("sxCommonCreate")}
-                </Button>
-            </SaveBar>
+                    <Section label={t("sxUserDetailStatus")}>
+                        <Group>
+                            <SwitchRow key="enabled" label={t("sxCommonEnabled")} checked={enabled} onChange={setEnabled} />
+                            <SwitchRow
+                                key="emailVerified"
+                                label={t("sxUserDetailEmailVerified")}
+                                checked={emailVerified}
+                                onChange={setEmailVerified}
+                            />
+                        </Group>
+                    </Section>
+                    <Section label={t("sxUserDetailXRequiredActions")}>
+                        <RequiredActionsPicker value={requiredActions} onChange={setRequiredActions} />
+                        <Footnote>{t("sxUserDetailXRequiredActionsHint")}</Footnote>
+                    </Section>
+                    <Section
+                        label={t("sxUserDetailTabGroups")}
+                        action={groups.length > 0 && <TextAction onClick={() => setPicking(true)}>{t("sxUserDetailXJoinGroups")}</TextAction>}
+                    >
+                        {groups.length === 0 ? (
+                            <Notice
+                                title={t("sxUserDetailXNoGroupsSelected")}
+                                description={t("sxUserDetailXNoGroupsSelectedDescription")}
+                                action={
+                                    <Button size="sm" className="h-8.5 px-4 font-medium" onClick={() => setPicking(true)}>
+                                        {t("sxUserDetailXJoinGroups")}
+                                    </Button>
+                                }
+                            />
+                        ) : (
+                            <GroupedChips items={groups} onRemove={g => setGroups(list => list.filter(x => x.id !== g.id))} />
+                        )}
+                    </Section>
+                    <SaveBar>
+                        <Button size="form" variant="plain" onClick={() => navigate(`/${realm}/users`)}>
+                            {t("sxCommonCancel")}
+                        </Button>
+                        <Button size="form" disabled={saving || !canCreate} onClick={create}>
+                            {saving ? t("sxCommonCreating") : t("sxCommonCreate")}
+                        </Button>
+                    </SaveBar>
+                </>
+            )}
+            {picking && (
+                <GroupPickerModal
+                    exclude={groups}
+                    onClose={() => setPicking(false)}
+                    onPick={picked => {
+                        setGroups(list => [...list, ...picked.filter(p => !list.some(x => x.id === p.id))]);
+                        setPicking(false);
+                    }}
+                />
+            )}
         </AdminPage>
     );
 }
 
-function GeneralTab({ user, reload, onDelete }: any) {
+function GeneralTab({ data, reload, onDelete }: any) {
     const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
-    const [f, setF] = useState({
-        email: user.email || "",
-        firstName: user.firstName || "",
-        lastName: user.lastName || "",
+    const [confirm, confirmNode] = useConfirm();
+    const { user, attack, realmRep } = data;
+    const metadata = data.metadata?.attributes
+        ? data.metadata
+        : fallbackMetadata(t, realmRep?.editUsernameAllowed !== false);
+    const initial = () => ({
+        values: toFormValues(user, metadata),
         enabled: !!user.enabled,
-        emailVerified: !!user.emailVerified
+        emailVerified: !!user.emailVerified,
+        requiredActions: user.requiredActions || []
     });
-    const set = (k: string, v: any) => setF(p => ({ ...p, [k]: v }));
+    const [f, setF] = useState(initial);
+    const [errors, setErrors] = useState<Record<string, string>>({});
     const [saving, setSaving] = useState(false);
+    const [actionsOpen, setActionsOpen] = useState(false);
+    const [sendingVerify, setSendingVerify] = useState(false);
+    const [unlocking, setUnlocking] = useState(false);
+    const canManage = user.access?.manage !== false;
+    const allReadOnly = (metadata.attributes || []).every((a: any) => a.readOnly);
+    const pendingRaw = user.attributes?.["kc.email.pending"];
+    const pendingEmail = (Array.isArray(pendingRaw) ? pendingRaw[0] : pendingRaw) || "";
+    const bruteForce = !!realmRep?.bruteForceProtected;
+    const locked = bruteForce && !!attack?.disabled;
+
+    const setValue = (name: string, value: any) => {
+        setF(p => ({ ...p, values: { ...p.values, [name]: value } }));
+        setErrors(e => {
+            if (!e[name]) return e;
+            const n = { ...e };
+            delete n[name];
+            return n;
+        });
+    };
+
+    const persist = async (overrides: any, successMessage: string) => {
+        const base = toRepresentation(f.values, metadata, user);
+        const rep = {
+            ...base,
+            enabled: f.enabled,
+            emailVerified: f.emailVerified,
+            requiredActions: f.requiredActions,
+            ...overrides,
+            attributes: { ...base.attributes, ...(overrides.attributes || {}) }
+        };
+        await adminClient.users.update({ id: user.id }, rep);
+        addAlert(successMessage, AlertVariant.success);
+        reload();
+    };
 
     const save = async () => {
         setSaving(true);
+        setErrors({});
         try {
-            await adminClient.users.update(
-                { id: user.id },
-                {
-                    email: f.email.trim() || undefined,
-                    firstName: f.firstName.trim() || undefined,
-                    lastName: f.lastName.trim() || undefined,
-                    enabled: f.enabled,
-                    emailVerified: f.emailVerified
-                }
-            );
-            addAlert(t("sxCommonSaved"), AlertVariant.success);
-            reload();
+            await persist({}, t("sxCommonSaved"));
         } catch (e) {
-            addError(t("sxCommonSaveError"), e);
+            const fieldErrors = profileErrors(e, t);
+            if (fieldErrors) {
+                setErrors(fieldErrors);
+                addAlert(t("sxUserDetailXFixErrors"), AlertVariant.danger);
+            } else addError(t("sxCommonSaveError"), e);
         } finally {
             setSaving(false);
         }
     };
 
+    const cancelPendingEmail = () =>
+        confirm({
+            title: t("sxUserDetailXCancelEmailChange"),
+            message: t("sxUserDetailXCancelEmailChangeConfirm", { email: pendingEmail }),
+            confirmLabel: t("sxCommonConfirm"),
+            onConfirm: async () => {
+                try {
+                    await persist(
+                        {
+                            requiredActions: (user.requiredActions || []).filter((a: string) => a !== "UPDATE_EMAIL"),
+                            attributes: { "kc.email.pending": [] }
+                        },
+                        t("sxUserDetailXEmailChangeCancelled")
+                    );
+                } catch (e) {
+                    addError(t("sxCommonSaveError"), e);
+                }
+            }
+        });
+
+    const sendVerify = async () => {
+        setSendingVerify(true);
+        try {
+            await adminClient.users.sendVerifyEmail({ id: user.id });
+            addAlert(t("sxUserDetailXVerifyEmailSent"), AlertVariant.success);
+        } catch (e) {
+            addError(t("sxUserDetailXVerifyEmailError"), e);
+        } finally {
+            setSendingVerify(false);
+        }
+    };
+
+    const unlock = async () => {
+        setUnlocking(true);
+        try {
+            await adminClient.attackDetection.del({ id: user.id });
+            addAlert(t("sxUserDetailXUnlocked"), AlertVariant.success);
+            reload();
+        } catch (e) {
+            addError(t("sxUsersXUnlockError"), e);
+        } finally {
+            setUnlocking(false);
+        }
+    };
+
     return (
         <>
-            <Section label={t("sxUserDetailProfile")}>
-                <div className="flex flex-col gap-4">
-                    <TextField
-                        id="user-username"
-                        label={t("sxUserDetailUsername")}
-                        readOnly
-                        value={user.username}
-                        className="text-muted-foreground"
-                    />
-                    <TextField
-                        id="user-email"
-                        label={t("sxUserDetailEmail")}
-                        type="email"
-                        value={f.email}
-                        onChange={(e: any) => set("email", e.target.value)}
-                    />
-                    <TextField
-                        id="user-firstName"
-                        label={t("sxCommonName")}
-                        value={f.firstName}
-                        onChange={(e: any) => set("firstName", e.target.value)}
-                    />
-                    <TextField
-                        id="user-lastName"
-                        label={t("sxUserDetailLastName")}
-                        value={f.lastName}
-                        onChange={(e: any) => set("lastName", e.target.value)}
-                    />
-                </div>
-            </Section>
+            <ProfileFields
+                idPrefix="user"
+                metadata={metadata}
+                values={f.values}
+                onChange={setValue}
+                errors={errors}
+                disabled={!canManage}
+                supportedLocales={realmRep?.internationalizationEnabled ? realmRep?.supportedLocales : []}
+            />
+            {pendingEmail && (
+                <Notice
+                    title={t("sxUserDetailXPendingEmailTitle")}
+                    description={t("sxUserDetailXPendingEmailDescription", { email: pendingEmail })}
+                    action={
+                        canManage && (
+                            <Button size="sm" variant="plain" onClick={cancelPendingEmail}>
+                                {t("sxUserDetailXCancelEmailChange")}
+                            </Button>
+                        )
+                    }
+                />
+            )}
             <Section label={t("sxUserDetailStatus")}>
                 <Group>
                     <SwitchRow
                         key="enabled"
                         label={t("sxCommonEnabled")}
                         checked={f.enabled}
-                        onChange={(v: boolean) => set("enabled", v)}
+                        disabled={!canManage}
+                        onChange={(v: boolean) => setF(p => ({ ...p, enabled: v }))}
                     />
                     <SwitchRow
                         key="emailVerified"
                         label={t("sxUserDetailEmailVerified")}
                         checked={f.emailVerified}
-                        onChange={(v: boolean) => set("emailVerified", v)}
+                        disabled={!canManage}
+                        onChange={(v: boolean) => setF(p => ({ ...p, emailVerified: v }))}
                     />
                 </Group>
                 <Footnote>{t("sxUserDetailCreatedAt", { date: formatDate(user.createdTimestamp) })}</Footnote>
             </Section>
+            {bruteForce && (
+                <Section label={t("sxUserDetailXSignInProtection")}>
+                    <Group>
+                        <Row
+                            key="lock"
+                            title={locked ? t("sxUsersXTemporarilyLocked") : t("sxUserDetailXNotLocked")}
+                            subtitle={
+                                attack?.numFailures
+                                    ? t("sxUserDetailXFailedAttempts", {
+                                          total: attack.numFailures,
+                                          time: formatRelative(attack.lastFailure),
+                                          ip: attack.lastIPFailure || "—"
+                                      })
+                                    : t("sxUserDetailXNoFailedAttempts")
+                            }
+                            trailing={
+                                locked ? (
+                                    <TextAction disabled={unlocking || !canManage} onClick={unlock}>
+                                        {t("sxUsersXUnlock")}
+                                    </TextAction>
+                                ) : undefined
+                            }
+                        />
+                    </Group>
+                </Section>
+            )}
+            <Section label={t("sxUserDetailXRequiredActions")}>
+                <RequiredActionsPicker
+                    disabled={!canManage}
+                    value={f.requiredActions}
+                    onChange={v => setF(p => ({ ...p, requiredActions: v }))}
+                />
+                <Footnote>{t("sxUserDetailXRequiredActionsHint")}</Footnote>
+            </Section>
             <SaveBar>
-                <Button size="form" disabled={saving} onClick={save}>
+                <Button
+                    size="form"
+                    variant="plain"
+                    disabled={saving}
+                    onClick={() => {
+                        setF(initial());
+                        setErrors({});
+                    }}
+                >
+                    {t("sxUserDetailXRevert")}
+                </Button>
+                <Button size="form" disabled={saving || !canManage || (allReadOnly && !!data.metadata?.attributes)} onClick={save}>
                     {saving ? t("sxCommonSaving") : t("sxCommonSave")}
                 </Button>
             </SaveBar>
+            <Section label={t("sxUserDetailXEmails")}>
+                <Group>
+                    <Row
+                        key="verify"
+                        title={t("sxUserDetailXSendVerifyEmail")}
+                        subtitle={user.email ? t("sxUserDetailXSendVerifyEmailHint") : t("sxUserDetailXNoEmailHint")}
+                        trailing={
+                            <TextAction disabled={!user.email || sendingVerify} onClick={sendVerify}>
+                                {sendingVerify ? t("sxUserDetailXSending") : t("sxUserDetailXSend")}
+                            </TextAction>
+                        }
+                    />
+                    <Row
+                        key="actions"
+                        title={t("sxUserDetailXActionsEmailTitle")}
+                        subtitle={user.email ? t("sxUserDetailXActionsEmailHint") : t("sxUserDetailXNoEmailHint")}
+                        trailing={
+                            <TextAction disabled={!user.email} onClick={() => setActionsOpen(true)}>
+                                {t("sxUserDetailXSend")}
+                            </TextAction>
+                        }
+                    />
+                </Group>
+            </Section>
             <section className="border-t border-[#e5e5ea] pt-6 dark:border-[#38383a]">
                 <p className="mb-3 text-[13px] leading-[1.4] text-muted-foreground">
                     {t("sxUserDetailDeleteConfirm", { username: user.username })}
                 </p>
-                <Button size="form" className={DANGER_BUTTON} onClick={onDelete}>
+                <Button size="form" className={DANGER_BUTTON} onClick={onDelete} disabled={!canManage}>
                     {t("sxUserDetailDelete")}
                 </Button>
             </section>
+            {actionsOpen && <ExecuteActionsModal userId={user.id} onClose={() => setActionsOpen(false)} />}
+            {confirmNode}
         </>
     );
 }
 
-function AttributeEditor({ rows, setRows }: { rows: any[]; setRows: (rows: any[]) => void }) {
+function AttributeEditor({ rows, setRows, readOnly }: { rows: any[]; setRows: (rows: any[]) => void; readOnly?: boolean }) {
     const t = useT();
     const setRow = (i: number, field: string, val: string) =>
         setRows(rows.map((r, idx) => (idx === i ? { ...r, [field]: val } : r)));
@@ -540,9 +632,11 @@ function AttributeEditor({ rows, setRows }: { rows: any[]; setRows: (rows: any[]
                 title={t("sxUserDetailNoAttributes")}
                 description={t("sxUserDetailNoAttributesDescription")}
                 action={
-                    <Button size="sm" className="h-8.5 px-4 font-medium" onClick={() => setRows([{ k: "", v: "" }])}>
-                        {t("sxOrgDetailAddAttribute")}
-                    </Button>
+                    !readOnly && (
+                        <Button size="sm" className="h-8.5 px-4 font-medium" onClick={() => setRows([{ k: "", v: "" }])}>
+                            {t("sxOrgDetailAddAttribute")}
+                        </Button>
+                    )
                 }
             />
         );
@@ -556,6 +650,7 @@ function AttributeEditor({ rows, setRows }: { rows: any[]; setRows: (rows: any[]
                             className="sm:w-2/5"
                             aria-label={t("sxCommonKey")}
                             value={r.k}
+                            readOnly={readOnly}
                             onChange={(e: any) => setRow(i, "k", e.target.value)}
                             placeholder={t("sxCommonKeyPlaceholder")}
                         />
@@ -563,16 +658,19 @@ function AttributeEditor({ rows, setRows }: { rows: any[]; setRows: (rows: any[]
                             className="sm:flex-1"
                             aria-label={t("sxCommonValue")}
                             value={r.v}
+                            readOnly={readOnly}
                             onChange={(e: any) => setRow(i, "v", e.target.value)}
                             placeholder={t("sxOrgDetailValuePlaceholder")}
                         />
-                        <TextAction
-                            tone="danger"
-                            className="self-end sm:self-auto"
-                            onClick={() => setRows(rows.filter((_, idx) => idx !== i))}
-                        >
-                            {t("sxCommonDelete")}
-                        </TextAction>
+                        {!readOnly && (
+                            <TextAction
+                                tone="danger"
+                                className="self-end sm:self-auto"
+                                onClick={() => setRows(rows.filter((_, idx) => idx !== i))}
+                            >
+                                {t("sxCommonDelete")}
+                            </TextAction>
+                        )}
                     </div>
                 </li>
             ))}
@@ -580,35 +678,55 @@ function AttributeEditor({ rows, setRows }: { rows: any[]; setRows: (rows: any[]
     );
 }
 
-function AttributesTab({ user, reload }: any) {
+function AttributesTab({ data, reload }: any) {
     const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
+    const { user, unmanaged, upConfig } = data;
+    const profileKnown = !!upConfig;
+    const policy = upConfig?.unmanagedAttributePolicy;
+    const managedOnly = profileKnown && !policy;
+    const readOnly = policy === "ADMIN_VIEW";
+    const source = profileKnown ? unmanaged || {} : user.attributes || {};
     const toRows = (attrs: any) =>
         Object.entries(attrs || {}).map(([k, v]: any) => ({
             k,
             v: Array.isArray(v) ? v.join(", ") : String(v)
         }));
-    const [rows, setRows] = useState<any[]>(toRows(user.attributes));
+    const [rows, setRows] = useState<any[]>(toRows(source));
     const [saving, setSaving] = useState(false);
+
+    if (managedOnly)
+        return (
+            <Notice
+                title={t("sxUserDetailXUnmanagedOffTitle")}
+                description={t("sxUserDetailXUnmanagedOffDescription")}
+            />
+        );
 
     const save = async () => {
         setSaving(true);
         try {
-            const attributes: any = {};
+            const edited: any = {};
             rows.forEach(r => {
                 const key = r.k.trim();
                 if (key)
-                    attributes[key] = String(r.v)
+                    edited[key] = String(r.v)
                         .split(",")
                         .map((s: string) => s.trim())
                         .filter(Boolean);
             });
+            const managed = Object.fromEntries(
+                Object.entries(user.attributes || {}).filter(([k]) => !Object.hasOwn(source, k))
+            );
+            const attributes = profileKnown ? { ...managed, ...edited } : edited;
             await adminClient.users.update({ id: user.id }, { ...user, attributes });
             addAlert(t("sxOrgDetailAttributesSaved"), AlertVariant.success);
             reload();
         } catch (e) {
-            addError(t("sxCommonSaveError"), e);
+            const fieldErrors = profileErrors(e, t);
+            if (fieldErrors) addAlert(Object.values(fieldErrors).join(" "), AlertVariant.danger);
+            else addError(t("sxCommonSaveError"), e);
         } finally {
             setSaving(false);
         }
@@ -617,130 +735,25 @@ function AttributesTab({ user, reload }: any) {
     return (
         <>
             <Section
-                label={t("sxUserDetailTabAttributes")}
+                label={profileKnown ? t("sxUserDetailXUnmanagedAttributes") : t("sxUserDetailTabAttributes")}
                 action={
-                    <TextAction onClick={() => setRows([...rows, { k: "", v: "" }])}>
-                        {t("sxOrgDetailAddAttribute")}
-                    </TextAction>
+                    !readOnly && (
+                        <TextAction onClick={() => setRows([...rows, { k: "", v: "" }])}>
+                            {t("sxOrgDetailAddAttribute")}
+                        </TextAction>
+                    )
                 }
             >
-                <AttributeEditor rows={rows} setRows={setRows} />
+                <AttributeEditor rows={rows} setRows={setRows} readOnly={readOnly} />
+                {profileKnown && <Footnote>{t("sxUserDetailXUnmanagedAttributesHint")}</Footnote>}
             </Section>
-            <SaveBar>
-                <Button size="form" disabled={saving} onClick={save}>
-                    {saving ? t("sxCommonSaving") : t("sxCommonSave")}
-                </Button>
-            </SaveBar>
-        </>
-    );
-}
-
-function CredentialsTab({ user }: any) {
-    const t = useT();
-    const { adminClient } = useAdminClient();
-    const { addAlert, addError } = useAlerts();
-    const [confirm, confirmNode] = useConfirm();
-    const creds = useResource(
-        () => adminClient.users.getCredentials({ id: user.id }).then(asList),
-        [adminClient, user.id]
-    );
-    const [pw, setPw] = useState("");
-    const [temp, setTemp] = useState(true);
-    const [resetting, setResetting] = useState(false);
-
-    const reset = async () => {
-        if (!pw) return;
-        setResetting(true);
-        try {
-            await adminClient.users.resetPassword({
-                id: user.id,
-                credential: { type: "password", value: pw, temporary: temp }
-            });
-            addAlert(t("sxUserDetailPasswordSet"), AlertVariant.success);
-            setPw("");
-            creds.reload();
-        } catch (e) {
-            addError(t("sxUserDetailPasswordSetError"), e);
-        } finally {
-            setResetting(false);
-        }
-    };
-
-    const del = (c: any) =>
-        confirm({
-            title: t("sxUserDetailDeleteCredential"),
-            message: t("sxUserDetailDeleteCredentialConfirm", { name: c.userLabel || c.type }),
-            confirmLabel: t("sxCommonDelete"),
-            danger: true,
-            onConfirm: async () => {
-                try {
-                    await adminClient.users.deleteCredential({
-                        id: user.id,
-                        credentialId: c.id
-                    });
-                    addAlert(t("sxCommonDeleted"), AlertVariant.success);
-                    creds.setData((list: any[]) => (list || []).filter(x => x.id !== c.id));
-                } catch (e) {
-                    addError(t("sxCommonDeleteError"), e);
-                }
-            }
-        });
-
-    const list = creds.data || [];
-
-    return (
-        <>
-            <Section label={t("sxUserDetailSetPassword")}>
-                <div className="flex flex-col gap-4">
-                    <TextField
-                        id="user-new-password"
-                        label={t("sxUserDetailNewPassword")}
-                        type="password"
-                        value={pw}
-                        onChange={(e: any) => setPw(e.target.value)}
-                        placeholder="••••••••"
-                    />
-                    <Group>
-                        <SwitchRow label={t("sxUserDetailTemporaryPassword")} checked={temp} onChange={setTemp} />
-                    </Group>
-                    <SaveBar>
-                        <Button size="form" disabled={!pw || resetting} onClick={reset}>
-                            {resetting ? t("sxUserDetailSettingPassword") : t("sxUserDetailSetPasswordButton")}
-                        </Button>
-                    </SaveBar>
-                </div>
-            </Section>
-            <Section label={t("sxUserDetailStoredCredentials")}>
-                <ListState
-                    status={creds.status}
-                    count={list.length}
-                    onRetry={creds.reload}
-                    errorTitle={t("sxUserDetailCredentialsLoadError")}
-                    emptyTitle={t("sxUserDetailNoCredentials")}
-                    emptyDescription={t("sxUserDetailNoCredentialsDescription")}
-                >
-                    <Group>
-                        {list.map(c => (
-                            <Row
-                                key={c.id}
-                                title={c.userLabel || c.type}
-                                subtitle={
-                                    <>
-                                        {c.type}
-                                        {c.createdDate ? ` · ${formatDate(c.createdDate)}` : ""}
-                                    </>
-                                }
-                                trailing={
-                                    <TextAction tone="danger" onClick={() => del(c)}>
-                                        {t("sxCommonDelete")}
-                                    </TextAction>
-                                }
-                            />
-                        ))}
-                    </Group>
-                </ListState>
-            </Section>
-            {confirmNode}
+            {!readOnly && (
+                <SaveBar>
+                    <Button size="form" disabled={saving} onClick={save}>
+                        {saving ? t("sxCommonSaving") : t("sxCommonSave")}
+                    </Button>
+                </SaveBar>
+            )}
         </>
     );
 }
@@ -1148,70 +1161,6 @@ function ConsentsTab({ user }: any) {
                             trailing={
                                 <TextAction tone="danger" onClick={() => revoke(c)}>
                                     {t("sxUserDetailRevoke")}
-                                </TextAction>
-                            }
-                        />
-                    ))}
-                </Group>
-            </ListState>
-            {confirmNode}
-        </Section>
-    );
-}
-
-function IdpTab({ user }: any) {
-    const t = useT();
-    const { adminClient } = useAdminClient();
-    const { addAlert, addError } = useAlerts();
-    const [confirm, confirmNode] = useConfirm();
-    const res = useResource(
-        () => adminClient.users.listFederatedIdentities({ id: user.id }).then(asList),
-        [adminClient, user.id]
-    );
-    const links = res.data || [];
-
-    const unlink = (l: any) =>
-        confirm({
-            title: t("sxUserDetailUnlinkIdp"),
-            message: t("sxUserDetailUnlinkIdpConfirm", { name: l.identityProvider }),
-            confirmLabel: t("sxCommonRemove"),
-            danger: true,
-            onConfirm: async () => {
-                try {
-                    await adminClient.users.delFromFederatedIdentity({
-                        id: user.id,
-                        federatedIdentityId: l.identityProvider
-                    });
-                    addAlert(t("sxUserDetailIdpUnlinked"), AlertVariant.success);
-                    res.setData((list: any[]) =>
-                        (list || []).filter(x => x.identityProvider !== l.identityProvider)
-                    );
-                } catch (e) {
-                    addError(t("sxCommonRemoveError"), e);
-                }
-            }
-        });
-
-    return (
-        <Section label={t("sxUserDetailIdpLinks")}>
-            <ListState
-                status={res.status}
-                count={links.length}
-                onRetry={res.reload}
-                errorTitle={t("sxUserDetailIdpLinksLoadError")}
-                emptyTitle={t("sxUserDetailNoIdpLinks")}
-                emptyDescription={t("sxUserDetailNoIdpLinksDescription")}
-            >
-                <Group>
-                    {links.map(l => (
-                        <Row
-                            key={l.identityProvider}
-                            leading={<Monogram name={l.identityProvider} />}
-                            title={l.identityProvider}
-                            subtitle={l.userName || l.userId}
-                            trailing={
-                                <TextAction tone="danger" onClick={() => unlink(l)}>
-                                    {t("sxCommonRemove")}
                                 </TextAction>
                             }
                         />
