@@ -3,7 +3,6 @@
 import { Button } from "@ui/components/button";
 import { Field, FieldDescription, FieldLabel } from "@ui/components/field";
 import { Input } from "@ui/components/input";
-import { NativeSelect, NativeSelectOption } from "@ui/components/native-select";
 import { Switch } from "@ui/components/switch";
 import { Textarea } from "@ui/components/textarea";
 import {
@@ -33,6 +32,7 @@ import {
     AdminPage,
     Chip,
     GROUP,
+    Pager,
     Group,
     ListSkeleton,
     Notice,
@@ -45,11 +45,16 @@ import {
 } from "../ui/kit";
 import { useRealm } from "../ui/realm";
 import { initials } from "../ui/util";
+import { Invitations } from "./org/Invitations";
+import { LinkIdpModal, ORG_DOMAIN } from "./org/LinkIdpModal";
+import { OrgGroups } from "./org/OrgGroups";
+import { FilterChips, useDebounced } from "./org/shared";
 
 const TABS = [
     { value: "settings", label: "sxOrgDetailTabSettings" },
     { value: "attributes", label: "sxOrgDetailTabAttributes" },
     { value: "members", label: "sxOrgDetailTabMembers" },
+    { value: "groups", label: "sxNavGroups" },
     { value: "idps", label: "sxOrgDetailTabIdps" }
 ];
 
@@ -222,8 +227,9 @@ function OrganizationView({ id }: { id: string }) {
                 />
             )}
             {tab === "attributes" && <AttributesTab org={org} reload={reload} />}
-            {tab === "members" && <MembersTab org={org} />}
-            {tab === "idps" && <IdpTab org={org} />}
+            {tab === "members" && <MembersSection org={org} />}
+            {tab === "groups" && <OrgGroups org={org} />}
+            {tab === "idps" && <IdpTab org={org} domains={domains} />}
         </AdminPage>
     );
 }
@@ -236,6 +242,8 @@ function SettingsTab({ org, domains, reload, onDeleted }: any) {
     const confirm = setConfirmOpts;
     const [name, setName] = useState(org.name || "");
     const [description, setDescription] = useState(org.description || "");
+    const [redirectUrl, setRedirectUrl] = useState(org.redirectUrl || "");
+    const [enabled, setEnabled] = useState(org.enabled !== false);
     const [domainsText, setDomainsText] = useState(domains.join("\n"));
     const [saving, setSaving] = useState(false);
 
@@ -255,6 +263,8 @@ function SettingsTab({ org, domains, reload, onDeleted }: any) {
                 ...org,
                 name: n,
                 description: description.trim() || undefined,
+                redirectUrl: redirectUrl.trim() || undefined,
+                enabled,
                 domains: lines(domainsText).map(d => ({
                     name: d,
                     verified: !!verifiedBy.get(d)
@@ -318,6 +328,18 @@ function SettingsTab({ org, domains, reload, onDeleted }: any) {
                         <FieldDescription>{t("sxOrgsDomainsHelp")}</FieldDescription>
                     </Field>
                     <Field size="lg">
+                        <FieldLabel htmlFor="org-redirect-url">{t("sxOrgDetailRedirectUrl")}</FieldLabel>
+                        <Input
+                            size="lg"
+                            id="org-redirect-url"
+                            type="url"
+                            value={redirectUrl}
+                            onChange={(e: any) => setRedirectUrl(e.target.value)}
+                            placeholder="https://acme.com/welcome"
+                        />
+                        <FieldDescription>{t("sxOrgDetailRedirectUrlHint")}</FieldDescription>
+                    </Field>
+                    <Field size="lg">
                         <FieldLabel htmlFor="org-description">{t("sxCommonDescription")}</FieldLabel>
                         <Textarea
                             size="lg"
@@ -338,6 +360,20 @@ function SettingsTab({ org, domains, reload, onDeleted }: any) {
                             className="font-mono text-[15px] text-muted-foreground"
                         />
                     </Field>
+                    <Group>
+                        <Row
+                            className="min-h-13"
+                            title={t("sxCommonEnabled")}
+                            subtitle={t("sxOrgDetailEnabledHint")}
+                            trailing={
+                                <Switch
+                                    aria-label={t("sxCommonEnabled")}
+                                    checked={enabled}
+                                    onCheckedChange={(v: boolean) => setEnabled(v)}
+                                />
+                            }
+                        />
+                    </Group>
                 </div>
             </Section>
             <SaveBar>
@@ -455,17 +491,55 @@ function AttributesTab({ org, reload }: any) {
     );
 }
 
+function MembersSection({ org }: any) {
+    const t = useT();
+    const [view, setView] = useState("members");
+    return (
+        <>
+            <SegmentTabs
+                value={view}
+                onChange={setView}
+                ariaLabel={t("sxOrgDetailTabMembers")}
+                items={[
+                    { value: "members", label: t("sxOrgDetailTabMembers") },
+                    { value: "invitations", label: t("sxOrgDetailInvitations") }
+                ]}
+            />
+            {view === "members" ? <MembersTab org={org} /> : <Invitations org={org} />}
+        </>
+    );
+}
+
+const MEMBER_PAGE = 20;
+
 function MembersTab({ org }: any) {
     const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [confirmOpts, setConfirmOpts] = useState<any>(null);
     const confirm = setConfirmOpts;
+    const [searchInput, setSearchInput] = useState("");
+    const search = useDebounced(searchInput);
+    const [membership, setMembership] = useState("");
+    const [first, setFirst] = useState(0);
+    useEffect(() => setFirst(0), [search, membership]);
     const res = useResource(
-        () => adminClient.organizations.listMembers({ orgId: org.id, max: 200 }).then(asList),
-        [adminClient, org.id]
+        () =>
+            adminClient.organizations
+                .listMembers({
+                    orgId: org.id,
+                    first,
+                    max: MEMBER_PAGE + 1,
+                    ...(search ? { search } : {}),
+                    ...(membership ? { membershipType: membership } : {})
+                })
+                .then(asList),
+        [adminClient, org.id, search, membership, first]
     );
-    const members = res.data || [];
+    const all = res.data || [];
+    const members = all.slice(0, MEMBER_PAGE);
+    const hasMore = all.length > MEMBER_PAGE;
+    const filtered = !!search || !!membership;
     const [adding, setAdding] = useState(false);
 
     const removeMember = (u: any) =>
@@ -488,60 +562,114 @@ function MembersTab({ org }: any) {
             }
         });
 
+    const typeLabel = (type: string) =>
+        String(type).toUpperCase() === "MANAGED"
+            ? t("sxOrgDetailManaged")
+            : String(type).toUpperCase() === "UNMANAGED"
+              ? t("sxOrgDetailUnmanaged")
+              : type;
+
     return (
-        <Section
-            label={res.status === "ready" ? t("sxOrgDetailMemberCount", { total: members.length }) : t("sxOrgDetailTabMembers")}
-            action={res.status === "ready" && <TextAction onClick={() => setAdding(true)}>{t("sxOrgDetailAddMember")}</TextAction>}
-        >
-            <ListState
-                status={res.status}
-                count={members.length}
-                onRetry={res.reload}
-                errorTitle={t("sxOrgDetailMembersLoadError")}
-                emptyTitle={t("sxOrgDetailNoMembers")}
-                emptyDescription={t("sxOrgDetailNoMembersDescription")}
-                emptyAction={
-                    <Button size="sm" className="h-8.5 px-4 font-medium" onClick={() => setAdding(true)}>
-                        {t("sxOrgDetailAddMember")}
-                    </Button>
-                }
-            >
-                <Group>
-                    {members.map(u => (
-                        <Row
-                            key={u.id}
-                            leading={<Monogram name={u.username} />}
-                            title={u.username}
-                            subtitle={u.email || "—"}
-                            trailing={
-                                <>
-                                    {u.membershipType && (
-                                        <span className="hidden sm:inline-flex">
-                                            <Chip>{u.membershipType}</Chip>
-                                        </span>
-                                    )}
-                                    <TextAction tone="danger" onClick={() => removeMember(u)}>
-                                        {t("sxCommonRemoveFrom")}
-                                    </TextAction>
-                                </>
-                            }
-                        />
-                    ))}
-                </Group>
-            </ListState>
-            {adding && (
-                <AddMemberModal
-                    org={org}
-                    existing={new Set(members.map(m => m.id))}
-                    onClose={() => setAdding(false)}
-                    onAdded={() => {
-                        setAdding(false);
-                        res.reload();
-                    }}
+        <>
+            <div className="flex flex-col gap-3">
+                <SearchField value={searchInput} onChange={setSearchInput} placeholder={t("sxOrgDetailSearchMembers")} />
+                <FilterChips
+                    ariaLabel={t("sxOrgDetailFilterByMembership")}
+                    value={membership}
+                    onChange={setMembership}
+                    items={[
+                        { value: "", label: t("sxOrgDetailFilterAll") },
+                        { value: "MANAGED", label: t("sxOrgDetailManaged") },
+                        { value: "UNMANAGED", label: t("sxOrgDetailUnmanaged") }
+                    ]}
                 />
-            )}
-            <ConfirmDialog opts={confirmOpts} onClose={() => setConfirmOpts(null)} />
-        </Section>
+            </div>
+            <Section
+                label={t("sxOrgDetailTabMembers")}
+                action={res.status === "ready" && <TextAction onClick={() => setAdding(true)}>{t("sxOrgDetailAddMember")}</TextAction>}
+            >
+                <ListState
+                    status={res.status}
+                    count={members.length}
+                    onRetry={res.reload}
+                    errorTitle={t("sxOrgDetailMembersLoadError")}
+                    emptyTitle={filtered ? t("sxOrgDetailNoMembersMatch") : t("sxOrgDetailNoMembers")}
+                    emptyDescription={filtered ? t("sxCommonTryDifferentSearch") : t("sxOrgDetailNoMembersDescription")}
+                    emptyAction={
+                        filtered ? (
+                            <Button
+                                size="sm"
+                                variant="plain"
+                                onClick={() => {
+                                    setSearchInput("");
+                                    setMembership("");
+                                }}
+                            >
+                                {t("sxEventsClearFilters")}
+                            </Button>
+                        ) : (
+                            <Button size="sm" className="h-8.5 px-4 font-medium" onClick={() => setAdding(true)}>
+                                {t("sxOrgDetailAddMember")}
+                            </Button>
+                        )
+                    }
+                >
+                    <Group>
+                        {members.map(u => (
+                            <Row
+                                key={u.id}
+                                leading={<Monogram name={u.username} />}
+                                title={u.username}
+                                subtitle={
+                                    <>
+                                        {[u.firstName, u.lastName].filter(Boolean).join(" ")}
+                                        {(u.firstName || u.lastName) && u.email ? " · " : ""}
+                                        {u.email || (!u.firstName && !u.lastName ? "—" : "")}
+                                    </>
+                                }
+                                trailing={
+                                    <>
+                                        {u.membershipType && (
+                                            <span className="hidden sm:inline-flex">
+                                                <Chip tone={String(u.membershipType).toUpperCase() === "MANAGED" ? "info" : "neutral"}>
+                                                    {typeLabel(u.membershipType)}
+                                                </Chip>
+                                            </span>
+                                        )}
+                                        <TextAction tone="danger" onClick={() => removeMember(u)}>
+                                            {t("sxCommonRemoveFrom")}
+                                        </TextAction>
+                                    </>
+                                }
+                            />
+                        ))}
+                    </Group>
+                </ListState>
+                {res.status === "ready" && (
+                    <div className="mt-3">
+                        <Pager
+                            page={Math.floor(first / MEMBER_PAGE) + 1}
+                            hasPrev={first > 0}
+                            hasNext={hasMore}
+                            onPrev={() => setFirst(f => Math.max(0, f - MEMBER_PAGE))}
+                            onNext={() => setFirst(f => f + MEMBER_PAGE)}
+                        />
+                    </div>
+                )}
+                {adding && (
+                    <AddMemberModal
+                        org={org}
+                        existing={new Set(members.map(m => m.id))}
+                        onClose={() => setAdding(false)}
+                        onAdded={() => {
+                            setAdding(false);
+                            res.reload();
+                        }}
+                    />
+                )}
+                <ConfirmDialog opts={confirmOpts} onClose={() => setConfirmOpts(null)} />
+            </Section>
+        </>
     );
 }
 
@@ -646,31 +774,30 @@ function AddMemberModal({ org, existing, onClose, onAdded }: any) {
     );
 }
 
-const SHOWN_KEY = "kc.org.broker.public";
-
-function IdpTab({ org }: any) {
+function IdpTab({ org, domains }: any) {
     const t = useT();
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const [confirmOpts, setConfirmOpts] = useState<any>(null);
     const confirm = setConfirmOpts;
     const res = useResource(
-        () => adminClient.organizations.listIdentityProviders({ orgId: org.id }).then(asList),
+        () =>
+            adminClient.organizations
+                .listIdentityProviders({ orgId: org.id })
+                .then(asList)
+                .then(list => [...list].sort((a, b) => String(a.alias).localeCompare(String(b.alias)))),
         [adminClient, org.id]
     );
     const linked = res.data || [];
-    const [linking, setLinking] = useState(false);
+    const [linking, setLinking] = useState<any>(null);
 
     const toggleShown = async (idp: any) => {
-        const cfg = { ...(idp.config || {}) };
-        const next = cfg[SHOWN_KEY] === "true" ? "false" : "true";
-        cfg[SHOWN_KEY] = next;
+        const hideOnLogin = !idp.hideOnLogin;
         try {
-            await adminClient.identityProviders.update({ alias: idp.alias }, { ...idp, config: cfg });
-            addAlert(t("sxCommonUpdated"), AlertVariant.success);
-            res.setData((list: any[]) =>
-                (list || []).map(x => (x.alias === idp.alias ? { ...x, config: cfg } : x))
-            );
+            const found = await adminClient.identityProviders.findOne({ alias: idp.alias });
+            await adminClient.identityProviders.update({ alias: idp.alias }, { ...(found || idp), hideOnLogin });
+            addAlert(t("sxOrgDetailIdpLinkUpdated"), AlertVariant.success);
+            res.setData((list: any[]) => (list || []).map(x => (x.alias === idp.alias ? { ...x, hideOnLogin } : x)));
         } catch (e) {
             addError(t("sxCommonUpdateError"), e);
         }
@@ -696,11 +823,18 @@ function IdpTab({ org }: any) {
             }
         });
 
+    const domainLabel = (idp: any) => {
+        const d = idp.config?.[ORG_DOMAIN];
+        if (!d) return t("sxOrgDetailDomainNone");
+        if (d === "ANY") return t("sxOrgDetailDomainAny");
+        return d;
+    };
+
     return (
         <>
             <Section
                 label={res.status === "ready" ? t("sxOrgDetailIdpCount", { total: linked.length }) : t("sxOrgDetailTabIdps")}
-                action={res.status === "ready" && <TextAction onClick={() => setLinking(true)}>{t("sxOrgDetailLink")}</TextAction>}
+                action={res.status === "ready" && <TextAction onClick={() => setLinking({})}>{t("sxOrgDetailLink")}</TextAction>}
             >
                 <ListState
                     status={res.status}
@@ -710,7 +844,7 @@ function IdpTab({ org }: any) {
                     emptyTitle={t("sxOrgDetailNoIdps")}
                     emptyDescription={t("sxOrgDetailNoIdpsDescription")}
                     emptyAction={
-                        <Button size="sm" className="h-8.5 px-4 font-medium" onClick={() => setLinking(true)}>
+                        <Button size="sm" className="h-8.5 px-4 font-medium" onClick={() => setLinking({})}>
                             {t("sxOrgDetailLinkIdp")}
                         </Button>
                     }
@@ -721,14 +855,27 @@ function IdpTab({ org }: any) {
                                 key={idp.alias}
                                 title={idp.displayName || idp.alias}
                                 subtitle={
-                                    <span className="font-mono">
-                                        {idp.alias} · {idp.providerId}
-                                    </span>
+                                    <>
+                                        <span className="font-mono">
+                                            {idp.alias} · {idp.providerId}
+                                        </span>
+                                        {" · "}
+                                        {t("sxOrgDetailDomainValue", { domain: domainLabel(idp) })}
+                                        {String(idp.config?.["kc.org.broker.redirect.mode.email-matches"]) === "true" && (
+                                            <>
+                                                {" · "}
+                                                {t("sxOrgDetailRedirectOn")}
+                                            </>
+                                        )}
+                                    </>
                                 }
                                 trailing={
-                                    <TextAction tone="danger" onClick={() => unlink(idp)}>
-                                        {t("sxCommonRemove")}
-                                    </TextAction>
+                                    <>
+                                        <TextAction onClick={() => setLinking(idp)}>{t("sxOrgDetailEdit")}</TextAction>
+                                        <TextAction tone="danger" onClick={() => unlink(idp)}>
+                                            {t("sxCommonRemove")}
+                                        </TextAction>
+                                    </>
                                 }
                             />
                         ))}
@@ -747,7 +894,7 @@ function IdpTab({ org }: any) {
                                 trailing={
                                     <Switch
                                         aria-label={t("sxOrgDetailShowOnLoginAria", { name: idp.displayName || idp.alias })}
-                                        checked={idp.config?.[SHOWN_KEY] === "true"}
+                                        checked={!idp.hideOnLogin}
                                         onCheckedChange={() => toggleShown(idp)}
                                     />
                                 }
@@ -759,101 +906,17 @@ function IdpTab({ org }: any) {
             {linking && (
                 <LinkIdpModal
                     org={org}
+                    domains={domains}
                     linked={new Set(linked.map(i => i.alias))}
-                    onClose={() => setLinking(false)}
-                    onLinked={() => {
-                        setLinking(false);
+                    identityProvider={linking.alias ? linking : null}
+                    onClose={() => setLinking(null)}
+                    onSaved={() => {
+                        setLinking(null);
                         res.reload();
                     }}
                 />
             )}
             <ConfirmDialog opts={confirmOpts} onClose={() => setConfirmOpts(null)} />
         </>
-    );
-}
-
-function LinkIdpModal({ org, linked, onClose, onLinked }: any) {
-    const t = useT();
-    const { adminClient } = useAdminClient();
-    const { addAlert, addError } = useAlerts();
-    const [all, setAll] = useState<any[]>([]);
-    const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
-    const [attempt, setAttempt] = useState(0);
-    const [alias, setAlias] = useState("");
-    const [saving, setSaving] = useState(false);
-
-    useEffect(() => {
-        let alive = true;
-        setStatus("loading");
-        adminClient.identityProviders
-            .find()
-            .then(list => {
-                if (!alive) return;
-                setAll(Array.isArray(list) ? list.filter((i: any) => !linked.has(i.alias)) : []);
-                setStatus("ready");
-            })
-            .catch(() => alive && setStatus("error"));
-        return () => {
-            alive = false;
-        };
-    }, [adminClient, attempt]);
-
-    const link = async () => {
-        if (!alias) return;
-        setSaving(true);
-        try {
-            await adminClient.organizations.linkIdp({ orgId: org.id, alias });
-            addAlert(t("sxOrgDetailIdpLinked"), AlertVariant.success);
-            onLinked();
-        } catch (e) {
-            addError(t("sxOrgDetailIdpLinkError"), e);
-            setSaving(false);
-        }
-    };
-
-    return (
-        <Modal open onOpenChange={o => !o && onClose()}>
-            <ModalContent>
-                <ModalHeader>
-                    <ModalTitle>{t("sxOrgDetailLinkIdp")}</ModalTitle>
-                </ModalHeader>
-                <ModalBody>
-                    {status === "loading" ? (
-                        <ListSkeleton rows={1} />
-                    ) : status === "error" ? (
-                        <Notice
-                            title={t("sxOrgDetailIdpsLoadError")}
-                            description={t("sxLoadErrorDescription")}
-                            onRetry={() => setAttempt(n => n + 1)}
-                        />
-                    ) : all.length === 0 ? (
-                        <Notice title={t("sxOrgDetailNoLinkableIdps")} description={t("sxOrgDetailNoLinkableIdpsDescription")} />
-                    ) : (
-                        <Field size="lg">
-                            <FieldLabel htmlFor="org-link-idp">{t("sxOrgDetailIdp")}</FieldLabel>
-                            <NativeSelect
-                                id="org-link-idp"
-                                size="lg"
-                                className="w-full"
-                                value={alias}
-                                onChange={(e: any) => setAlias(e.target.value)}
-                            >
-                                <NativeSelectOption value="">{t("sxOrgDetailSelectIdp")}</NativeSelectOption>
-                                {all.map(i => (
-                                    <NativeSelectOption key={i.alias} value={i.alias}>
-                                        {i.displayName || i.alias} ({i.providerId})
-                                    </NativeSelectOption>
-                                ))}
-                            </NativeSelect>
-                        </Field>
-                    )}
-                </ModalBody>
-                <ModalFooter>
-                    <Button size="form" block disabled={saving || !alias} onClick={link}>
-                        {saving ? t("sxOrgDetailLinking") : t("sxOrgDetailLink")}
-                    </Button>
-                </ModalFooter>
-            </ModalContent>
-        </Modal>
     );
 }

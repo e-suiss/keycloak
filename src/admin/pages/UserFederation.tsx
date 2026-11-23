@@ -71,6 +71,7 @@ import {
     TextAction
 } from "../ui/kit";
 import { useRealm } from "../ui/realm";
+import { DynamicFields, FormField, propertyDefault, SwitchRow, TextField, useTx } from "./idp/shared";
 
 const PROVIDER_TYPE = "org.keycloak.storage.UserStorageProvider";
 const MAPPER_TYPE = "org.keycloak.storage.ldap.mappers.LDAPStorageMapper";
@@ -102,6 +103,21 @@ export default function UserFederation() {
     const [parentId, setParentId] = useState<string | undefined>();
     const [providers, setProviders] = useState<any[]>([]);
     const [creating, setCreating] = useState<string | null>(null);
+    const [types, setTypes] = useState<any[]>([]);
+
+    useEffect(() => {
+        let alive = true;
+        adminClient.serverInfo
+            .find()
+            .then((si: any) => alive && setTypes(si?.componentTypes?.[PROVIDER_TYPE] ?? []))
+            .catch(() => alive && setTypes([]));
+        return () => {
+            alive = false;
+        };
+    }, [adminClient]);
+    const customTypes = types
+        .filter((x: any) => x?.id && x.id !== "ldap" && x.id !== "kerberos")
+        .sort((a: any, b: any) => String(a.id).localeCompare(String(b.id)));
 
     const load = async () => {
         if (!parentId) {
@@ -178,6 +194,7 @@ export default function UserFederation() {
                 key={selected.id}
                 parentId={parentId}
                 provider={selected}
+                providerType={types.find((x: any) => x.id === selected.providerId)}
                 backTo={listPath}
                 onChanged={async () => {
                     await load();
@@ -224,6 +241,12 @@ export default function UserFederation() {
                 <DropdownMenuItem onClick={() => setCreating("kerberos")}>
                     <KeyIcon /> Kerberos
                 </DropdownMenuItem>
+                {customTypes.length > 0 && <DropdownMenuSeparator />}
+                {customTypes.map((ct: any) => (
+                    <DropdownMenuItem key={ct.id} onClick={() => setCreating(ct.id)}>
+                        <PlugsConnectedIcon /> {ct.id}
+                    </DropdownMenuItem>
+                ))}
             </DropdownMenuContent>
         </DropdownMenu>
     );
@@ -263,8 +286,10 @@ export default function UserFederation() {
                                         <span className="grid size-8 place-items-center rounded-full bg-[#6e6e73] text-white dark:bg-[#48484a]">
                                             {isKerberos ? (
                                                 <KeyIcon className="size-4" />
-                                            ) : (
+                                            ) : p.providerId === "ldap" ? (
                                                 <DatabaseIcon className="size-4" />
+                                            ) : (
+                                                <PlugsConnectedIcon className="size-4" />
                                             )}
                                         </span>
                                     }
@@ -289,7 +314,20 @@ export default function UserFederation() {
                 )}
             </Section>
 
-            {creating && parentId && (
+            {creating && parentId && creating !== "ldap" && creating !== "kerberos" && (
+                <CustomProviderModal
+                    providerType={types.find((x: any) => x.id === creating)}
+                    providerId={creating}
+                    parentId={parentId}
+                    onClose={() => setCreating(null)}
+                    onCreated={async id => {
+                        setCreating(null);
+                        const list = await load();
+                        if (id && list.some((p: any) => p.id === id)) openProvider(id);
+                    }}
+                />
+            )}
+            {creating && parentId && (creating === "ldap" || creating === "kerberos") && (
                 <CreateProviderModal
                     kind={creating}
                     parentId={parentId}
@@ -506,12 +544,14 @@ const KERBEROS_TABS = [
     { value: "cache", label: "sxFederationTabCache" }
 ];
 
-function ProviderDetail({ parentId, provider, backTo, onChanged, onDeleted }: any) {
+function ProviderDetail({ parentId, provider, providerType, backTo, onChanged, onDeleted }: any) {
     const { adminClient } = useAdminClient();
     const { addAlert, addError } = useAlerts();
     const t = useT();
     const [confirm, confirmNode] = useConfirm();
     const isLdap = provider.providerId === "ldap";
+    const isCustom = !isLdap && provider.providerId !== "kerberos";
+    const syncable = isLdap || (isCustom && !!providerType?.metadata?.synchronizable);
     const [tab, setTab] = useState("connection");
 
     const remove = () =>
@@ -588,7 +628,7 @@ function ProviderDetail({ parentId, provider, backTo, onChanged, onDeleted }: an
             }
         });
 
-    const tabs = (isLdap ? LDAP_TABS : KERBEROS_TABS).map(x => ({
+    const tabs = (isLdap ? LDAP_TABS : isCustom ? customTabs(syncable) : KERBEROS_TABS).map(x => ({
         value: x.value,
         label: t(x.label)
     }));
@@ -613,7 +653,7 @@ function ProviderDetail({ parentId, provider, backTo, onChanged, onDeleted }: an
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                        {isLdap && (
+                        {syncable && (
                             <>
                                 <DropdownMenuItem onClick={() => runSync("triggerFullSync")}>
                                     <ArrowsClockwiseIcon /> {t("sxFederationSyncAll")}
@@ -645,9 +685,14 @@ function ProviderDetail({ parentId, provider, backTo, onChanged, onDeleted }: an
             {tab === "connection" &&
                 (isLdap ? (
                     <ConnectionTab provider={provider} onChanged={onChanged} />
+                ) : isCustom ? (
+                    <CustomSettingsTab provider={provider} providerType={providerType} onChanged={onChanged} />
                 ) : (
                     <KerberosTab provider={provider} onChanged={onChanged} />
                 ))}
+            {tab === "sync" && isCustom && syncable && (
+                <CustomSyncTab provider={provider} onChanged={onChanged} onRunSync={runSync} />
+            )}
             {tab === "searching" && isLdap && (
                 <SearchingTab provider={provider} onChanged={onChanged} />
             )}
@@ -664,6 +709,288 @@ function ProviderDetail({ parentId, provider, backTo, onChanged, onDeleted }: an
 
             {confirmNode}
         </AdminPage>
+    );
+}
+
+const customTabs = (syncable: boolean) => [
+    { value: "connection", label: "sxFederationTabSettings" },
+    ...(syncable ? [{ value: "sync", label: "sxFederationTabSync" }] : []),
+    { value: "cache", label: "sxFederationTabCache" }
+];
+
+const readCfg = (config: any) => (name: string) => config?.[name];
+const writeVal = (v: any) => (Array.isArray(v) ? v : [v == null ? "" : String(v)]);
+
+function initialCustomConfig(providerType: any) {
+    const config: Record<string, string[]> = { enabled: ["true"] };
+    (providerType?.properties || []).forEach((p: any) => {
+        const d = propertyDefault(p);
+        if (d !== undefined) config[p.name] = Array.isArray(d) ? d : [d];
+    });
+    return config;
+}
+
+function missingRequired(providerType: any, config: any) {
+    return new Set(
+        (providerType?.properties || [])
+            .filter((p: any) => p?.required)
+            .filter((p: any) => {
+                const v = config?.[p.name];
+                return !Array.isArray(v) || !v.some((x: any) => String(x).trim() !== "");
+            })
+            .map((p: any) => p.name)
+    );
+}
+
+function CustomProviderModal({ providerType, providerId, parentId, onClose, onCreated }: any) {
+    const { adminClient } = useAdminClient();
+    const { addAlert, addError } = useAlerts();
+    const t = useT();
+    const tx = useTx();
+    const [name, setName] = useState(providerId);
+    const [config, setConfig] = useState<any>(() => initialCustomConfig(providerType));
+    const [showErrors, setShowErrors] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const missing = missingRequired(providerType, config);
+    const setCfg = (k: string, v: any) => setConfig((c: any) => ({ ...c, [k]: writeVal(v) }));
+
+    const create = async () => {
+        const n = name.trim();
+        if (!n || missing.size) {
+            setShowErrors(true);
+            addAlert(t("sxFederationRequiredMissing"), AlertVariant.warning);
+            return;
+        }
+        setSaving(true);
+        try {
+            const res = await adminClient.components.create({
+                name: n,
+                providerId,
+                providerType: PROVIDER_TYPE,
+                parentId,
+                config
+            });
+            addAlert(t("sxFederationProviderCreated"), AlertVariant.success);
+            onCreated(res?.id);
+        } catch (e) {
+            addError(t("sxFederationProviderCreateError"), e);
+            setSaving(false);
+        }
+    };
+
+    return (
+        <Modal open onOpenChange={o => !o && onClose()}>
+            <ModalContent className="sm:max-w-2xl">
+                <ModalHeader>
+                    <ModalTitle>{t("sxFederationAddCustomTitle", { provider: providerId })}</ModalTitle>
+                </ModalHeader>
+                <ModalBody className="flex flex-col gap-4">
+                    {providerType?.helpText && (
+                        <p className="px-0.5 text-[13px] leading-[1.4] text-muted-foreground">{tx(providerType.helpText)}</p>
+                    )}
+                    <TextField
+                        id="fed-custom-name"
+                        label={t("sxFederationDisplayName")}
+                        required
+                        error={showErrors && !name.trim() ? t("sxFederationFieldRequired") : undefined}
+                        value={name}
+                        onChange={setName}
+                    />
+                    <DynamicFields
+                        idPrefix="fed-custom"
+                        properties={providerType?.properties || []}
+                        errors={showErrors ? missing : null}
+                        read={readCfg(config)}
+                        write={setCfg}
+                    />
+                    {!providerType && (
+                        <Notice
+                            title={t("sxFederationTypeUnknownTitle")}
+                            description={t("sxFederationTypeUnknownDescription")}
+                        />
+                    )}
+                </ModalBody>
+                <ModalFooter>
+                    <Button disabled={saving} onClick={create}>
+                        {saving ? t("sxFederationCreating") : t("sxFederationCreate")}
+                    </Button>
+                </ModalFooter>
+            </ModalContent>
+        </Modal>
+    );
+}
+
+function CustomSettingsTab({ provider, providerType, onChanged }: any) {
+    const { adminClient } = useAdminClient();
+    const { addAlert, addError } = useAlerts();
+    const t = useT();
+    const tx = useTx();
+    const initial = () => ({ name: provider.name || "", config: { ...(provider.config || {}) } });
+    const [draft, setDraft] = useState(initial);
+    const [showErrors, setShowErrors] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const missing = missingRequired(providerType, draft.config);
+    const dirty = JSON.stringify(draft) !== JSON.stringify(initial());
+    const setCfg = (k: string, v: any) =>
+        setDraft((d: any) => ({ ...d, config: { ...d.config, [k]: writeVal(v) } }));
+
+    const save = async () => {
+        const n = draft.name.trim();
+        if (!n || missing.size) {
+            setShowErrors(true);
+            addAlert(t("sxFederationRequiredMissing"), AlertVariant.warning);
+            return;
+        }
+        setSaving(true);
+        try {
+            await adminClient.components.update(
+                { id: provider.id },
+                {
+                    ...provider,
+                    name: n,
+                    providerType: PROVIDER_TYPE,
+                    config: { ...(provider.config || {}), ...draft.config }
+                }
+            );
+            addAlert(t("sxFederationSaved"), AlertVariant.success);
+            setShowErrors(false);
+            await onChanged();
+        } catch (e) {
+            addError(t("sxFederationSaveError"), e);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div className="flex flex-col gap-6">
+            <Section label={t("sxFederationTabSettings")}>
+                <div className="flex flex-col gap-4">
+                    {providerType?.helpText && (
+                        <p className="px-0.5 text-[13px] leading-[1.4] text-muted-foreground">{tx(providerType.helpText)}</p>
+                    )}
+                    <TextField
+                        id="fed-custom-name"
+                        label={t("sxFederationDisplayName")}
+                        required
+                        error={showErrors && !draft.name.trim() ? t("sxFederationFieldRequired") : undefined}
+                        value={draft.name}
+                        onChange={(v: string) => setDraft((d: any) => ({ ...d, name: v }))}
+                    />
+                    <ul className={GROUP}>
+                        <SwitchRow
+                            label={t("sxFederationEnabled")}
+                            checked={get(draft.config, "enabled", "true") !== "false"}
+                            onChange={(v: boolean) => setCfg("enabled", v ? "true" : "false")}
+                        />
+                    </ul>
+                    {!providerType ? (
+                        <Notice
+                            title={t("sxFederationTypeUnknownTitle")}
+                            description={t("sxFederationTypeUnknownDescription")}
+                        />
+                    ) : (providerType.properties || []).length === 0 ? (
+                        <p className="px-0.5 text-[13px] text-muted-foreground">{t("sxFederationNoConfigFields")}</p>
+                    ) : (
+                        <DynamicFields
+                            idPrefix="fed-custom"
+                            properties={providerType.properties}
+                            errors={showErrors ? missing : null}
+                            read={readCfg(draft.config)}
+                            write={setCfg}
+                        />
+                    )}
+                </div>
+            </Section>
+            <div className="flex flex-col gap-1.5 sm:flex-row-reverse sm:justify-start">
+                <Button size="form" disabled={saving} onClick={save}>
+                    {saving ? t("sxFederationSaving") : t("sxFederationSave")}
+                </Button>
+                <Button
+                    variant="plain"
+                    size="form"
+                    disabled={saving || !dirty}
+                    onClick={() => {
+                        setDraft(initial());
+                        setShowErrors(false);
+                    }}
+                >
+                    {t("sxFederationCancel")}
+                </Button>
+            </div>
+        </div>
+    );
+}
+
+function CustomSyncTab({ provider, onChanged, onRunSync }: any) {
+    const t = useT();
+    const { save, saving } = useSaver(provider, onChanged);
+    const c = provider.config ?? {};
+    const [full, setFull] = useState(get(c, "fullSyncPeriod", "-1"));
+    const [changed, setChanged] = useState(get(c, "changedSyncPeriod", "-1"));
+    const fullOn = full !== "-1";
+    const changedOn = changed !== "-1";
+
+    return (
+        <div className="flex flex-col gap-6">
+            <Section label={t("sxFederationSyncSettings")}>
+                <SettingsGroup>
+                    <ToggleRow
+                        label={t("sxFederationPeriodicFullSync")}
+                        checked={fullOn}
+                        onCheckedChange={(v: boolean) => setFull(v ? "604800" : "-1")}
+                    />
+                    {fullOn && (
+                        <SettingRow label={t("sxFederationFullSyncPeriod")}>
+                            <Input
+                                size="md"
+                                type="number"
+                                min={1}
+                                className="w-28"
+                                value={full}
+                                onChange={(e: any) => setFull(e.target.value)}
+                            />
+                        </SettingRow>
+                    )}
+                    <ToggleRow
+                        label={t("sxFederationPeriodicChangedSync")}
+                        checked={changedOn}
+                        onCheckedChange={(v: boolean) => setChanged(v ? "86400" : "-1")}
+                    />
+                    {changedOn && (
+                        <SettingRow label={t("sxFederationChangedSyncPeriod")}>
+                            <Input
+                                size="md"
+                                type="number"
+                                min={1}
+                                className="w-28"
+                                value={changed}
+                                onChange={(e: any) => setChanged(e.target.value)}
+                            />
+                        </SettingRow>
+                    )}
+                </SettingsGroup>
+                <div className="mt-4 flex justify-end">
+                    <Button
+                        size="form"
+                        disabled={saving}
+                        onClick={() => save({ fullSyncPeriod: arr(full), changedSyncPeriod: arr(changed) })}
+                    >
+                        {saving ? t("sxFederationSaving") : t("sxFederationSave")}
+                    </Button>
+                </div>
+            </Section>
+            <Section label={t("sxFederationManualSync")}>
+                <SettingsGroup>
+                    <ActionItem onClick={() => onRunSync("triggerFullSync")}>
+                        <ArrowsClockwiseIcon /> {t("sxFederationSyncAll")}
+                    </ActionItem>
+                    <ActionItem onClick={() => onRunSync("triggerChangedUsersSync")}>
+                        <ArrowsClockwiseIcon /> {t("sxFederationSyncChanged")}
+                    </ActionItem>
+                </SettingsGroup>
+            </Section>
+        </div>
     );
 }
 

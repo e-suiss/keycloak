@@ -17,7 +17,7 @@ import { useNavigate } from "react-router-dom";
 import { AlertVariant, useAlerts } from "../../shared/keycloak-ui-shared";
 import { useAdminClient } from "../admin-client";
 import { useT } from "../ui/i18n";
-import { AdminPage, Group, ListSkeleton, Notice, Pager, Row, SearchField, Section } from "../ui/kit";
+import { AdminPage, Chip, Group, ListSkeleton, Notice, Pager, Row, SearchField, Section } from "../ui/kit";
 import { useRealm } from "../ui/realm";
 import { initials } from "../ui/util";
 
@@ -127,6 +127,9 @@ export default function Organizations() {
                                     }
                                     title={o.name}
                                     subtitle={domains.length ? domains.join(", ") : o.alias || "—"}
+                                    trailing={
+                                        o.enabled === false ? <Chip tone="danger">{t("sxCommonDisabled")}</Chip> : undefined
+                                    }
                                 />
                             );
                         })}
