@@ -4,7 +4,7 @@ FROM quay.io/keycloak/keycloak:26.7.3 AS builder
 ENV KC_DB=postgres
 ENV KC_HEALTH_ENABLED=true
 ENV KC_METRICS_ENABLED=true
-ENV KC_FEATURES=organization,dpop
+ENV KC_FEATURES=organization,dpop,oid4vc-vci
 
 WORKDIR /opt/keycloak
 COPY --chown=keycloak:keycloak --chmod=644 providers/*.jar /opt/keycloak/providers/
