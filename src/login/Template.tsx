@@ -1,6 +1,5 @@
 import { CheckCircleIcon, InfoIcon, WarningCircleIcon, WarningIcon, XIcon } from "@phosphor-icons/react";
 import { Alert, AlertDescription } from "@ui/components/alert";
-import { Badge } from "@ui/components/badge";
 import { Button } from "@ui/components/button";
 import { kcSanitize } from "keycloakify/lib/kcSanitize";
 import { useInitialize } from "keycloakify/login/Template.useInitialize";
@@ -13,6 +12,7 @@ import type { KcContext } from "./KcContext";
 import { isAdminLogin } from "./isAdminLogin";
 import logoUrl from "./assets/e-suiss-avatar.png";
 import { fillSlot } from "./fillSlot";
+import { EnvBadge } from "../shared/EnvBadge";
 
 export default function Template(props: TemplateProps<KcContext, I18n>) {
     const {
@@ -157,13 +157,7 @@ export default function Template(props: TemplateProps<KcContext, I18n>) {
 
     return (
         <div className={clsx("relative flex min-h-svh w-full flex-col items-center bg-background px-7.5 text-foreground", "kc-page")}>
-            {(environment === "dev" || environment === "test") && (
-                <Badge
-                    className={clsx("absolute top-4 left-6 text-white uppercase md:top-6", environment === "dev" ? "bg-indigo-500" : "bg-orange-500")}
-                >
-                    {environment}
-                </Badge>
-            )}
+            <EnvBadge environment={environment} className="absolute top-4 left-6 md:top-6" />
             <div className="flex w-full max-w-85 flex-1 flex-col items-center pt-14 pb-10 md:max-w-100 md:justify-center md:pt-10">
                 <main className={clsx("flex w-full flex-col items-center text-center", "kc-card")}>
                     <img src={logoUrl} alt="e-suiss" className="size-11" />
