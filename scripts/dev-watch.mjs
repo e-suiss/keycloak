@@ -12,6 +12,7 @@ const vite = spawn("npx", ["vite", "dev", "--port", "5173", "--strictPort"], {
     stdio: ["ignore", "inherit", "inherit"],
     env: { ...process.env, KEYCLOAKIFY_READ_KC_CONTEXT_FROM_URL: "true" }
 });
+vite.on("exit", code => process.exit(code ?? 1));
 
 function build() {
     if (building) {
