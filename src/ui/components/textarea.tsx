@@ -82,7 +82,7 @@ function Textarea({
       data-resizable={resizable}
       data-size={size}
       className={cn(
-        "field-sizing-content min-h-16 resize-none rounded-xl border border-border bg-background dark:bg-foreground/6 px-3 py-3 text-base transition-[color,box-shadow,background-color,border-color] caret-primary focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring aria-invalid:border-[1.5px] aria-invalid:border-destructive aria-invalid:focus-visible:border-destructive aria-invalid:focus-visible:ring-0 aria-invalid:bg-destructive/5 data-resizable:field-sizing-fixed data-resizable:min-h-24 dark:aria-invalid:bg-destructive/10 data-[size=lg]:min-h-13.5 data-[size=lg]:px-4 data-[size=lg]:py-3.5 data-[size=lg]:text-[17px] flex w-full outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 peer",
+        "field-sizing-content min-h-16 resize-none rounded-xl border border-border bg-background dark:bg-foreground/6 px-3 py-3 text-base transition-[color,box-shadow,background-color,border-color] caret-primary focus-visible:border-ring aria-invalid:border-[1.5px] aria-invalid:border-destructive aria-invalid:focus-visible:border-destructive aria-invalid:bg-destructive/5 data-resizable:field-sizing-fixed data-resizable:min-h-24 dark:aria-invalid:bg-destructive/10 data-[size=lg]:min-h-13.5 data-[size=lg]:px-4 data-[size=lg]:py-3.5 data-[size=lg]:text-[17px] flex w-full outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 peer",
         className
       )}
       {...props}

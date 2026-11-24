@@ -482,7 +482,7 @@ function QuestionnaireInput({
         {...questionnaireInput.inputProps}
         data-slot="questionnaire-input"
         className={cn(
-          "h-11 rounded-xl border border-border bg-background dark:bg-foreground/6 px-3 py-1 text-base focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring aria-invalid:border-[1.5px] aria-invalid:border-destructive aria-invalid:focus-visible:border-destructive aria-invalid:focus-visible:ring-0 aria-invalid:bg-destructive/5 dark:aria-invalid:bg-destructive/10 w-full min-w-0 transition-[color,box-shadow,background-color] outline-none disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
+          "h-11 rounded-xl border border-border bg-background dark:bg-foreground/6 px-3 py-1 text-base focus-visible:border-ring aria-invalid:border-[1.5px] aria-invalid:border-destructive aria-invalid:focus-visible:border-destructive aria-invalid:bg-destructive/5 dark:aria-invalid:bg-destructive/10 w-full min-w-0 transition-[color,box-shadow,background-color] outline-none disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
           "selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground",
           className
         )}

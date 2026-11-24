@@ -25,7 +25,7 @@ function NativeSelect({
       <select
         data-slot="native-select"
         data-size={size}
-        className="h-11 w-full min-w-0 appearance-none rounded-xl border border-border bg-background dark:bg-foreground/6 py-1 pe-8 ps-3 text-base transition-[color,box-shadow,background-color,border-color] select-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground has-[option[value='']:checked]:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring aria-invalid:border-[1.5px] aria-invalid:border-destructive aria-invalid:focus-visible:border-destructive aria-invalid:focus-visible:ring-0 aria-invalid:bg-destructive/5 dark:aria-invalid:bg-destructive/10 data-[size=sm]:h-9 data-[size=sm]:rounded-md data-[size=lg]:h-13.5 data-[size=lg]:ps-4 data-[size=lg]:pe-10 data-[size=lg]:text-[17px] outline-none disabled:pointer-events-none disabled:cursor-not-allowed"
+        className="h-11 w-full min-w-0 appearance-none rounded-xl border border-border bg-background dark:bg-foreground/6 py-1 pe-8 ps-3 text-base transition-[color,box-shadow,background-color,border-color] select-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground has-[option[value='']:checked]:text-muted-foreground focus-visible:border-ring aria-invalid:border-[1.5px] aria-invalid:border-destructive aria-invalid:focus-visible:border-destructive aria-invalid:bg-destructive/5 dark:aria-invalid:bg-destructive/10 data-[size=sm]:h-9 data-[size=sm]:rounded-md data-[size=lg]:h-13.5 data-[size=lg]:ps-4 data-[size=lg]:pe-10 data-[size=lg]:text-[17px] outline-none disabled:pointer-events-none disabled:cursor-not-allowed"
         {...props}
       />
       <CaretUpDownIcon
