@@ -31,14 +31,13 @@ export default defineConfig({
                 //  - workflows → kullanıcı yaşam döngüsü otomasyonu
                 //  - organization → multi-tenant (organizasyonlar)
                 keycloakExtraArgs: [
-                    "--features=admin-fine-grained-authz:v2,workflows,organization"
+                    "--features=admin-fine-grained-authz:v2,workflows,organization,dpop,oid4vc-vci"
                 ],
                 // Tüm sunucu SPI'larını dev Keycloak'a yükle (production'daki
                 // docker-compose ile aynı eklentiler). Böylece myrealm'de de
                 // register-mode (A1/L1), çoklu terms, security-image + phone OTP,
                 // authz PDP gibi custom provider'lar admin konsolda görünür.
                 extensionJars: [
-                    "./extensions/common/target/keycloak-common-1.0.0.jar",
                     "./extensions/registration/target/keycloak-registration-1.0.0.jar",
                     "./extensions/multi-terms/target/keycloak-multi-terms-1.0.0.jar",
                     "./extensions/login/target/keycloak-login-1.0.0.jar",

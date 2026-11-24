@@ -9,7 +9,7 @@ import {
     FieldLabel
 } from "@ui/components/field";
 import type { PropsWithChildren, ReactNode } from "react";
-import type { FieldError, UseFormReturn } from "react-hook-form";
+import type { FieldError as FormFieldError, UseFormReturn } from "react-hook-form";
 
 import {
     fieldName,
@@ -39,7 +39,7 @@ export const UserProfileGroup = ({
     } = form;
 
     const component = renderer?.(attribute);
-    const error = get(errors, fieldName(attribute.name)) as FieldError;
+    const error = get(errors, fieldName(attribute.name)) as FormFieldError;
     const fieldLabel = labelAttribute(t, attribute) || "";
 
     return (

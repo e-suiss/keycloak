@@ -67,3 +67,5 @@ jspm_packages
 # local secrets and certificates
 /.env
 /deploy/tls/
+
+.dev/
