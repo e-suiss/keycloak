@@ -11,7 +11,7 @@
 
 // @ts-nocheck
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import {
     createBrowserRouter,
     Outlet,
@@ -63,6 +63,11 @@ function mapRoutes(
 export const Root = () => {
     const context = useEnvironment<AccountEnvironment>();
     const { t } = useTranslation();
+
+    useEffect(() => {
+        document.title = `${context.environment.realm} · ${t("accountConsoleTitle")}`;
+    }, [context.environment.realm, t]);
+
     const [content, setContent] = useState<RouteObject[]>();
 
     usePromise(

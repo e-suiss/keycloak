@@ -20,7 +20,6 @@ import { i18n } from "./i18n/i18n";
 import { Root } from "./root/Root";
 import { AccountSkeleton } from "./root/Skeleton";
 
-document.title = "Account Management";
 
 const prI18nInitialized = i18n.init();
 startColorSchemeManagement();
