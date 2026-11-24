@@ -31,6 +31,7 @@ import { initials } from "../ui/util";
 import { labelOf } from "./user/profile";
 import { SwitchRow, useConfirm } from "./user/shared";
 import { UsersPermissions } from "./user/UsersPermissions";
+import { GrainAvatar } from "../../shared/brand";
 
 const PAGE_SIZE = 20;
 
@@ -40,9 +41,9 @@ const toQuery = (filters: { key: string; value: string }[]) =>
 
 function Avatar({ name }: { name: string }) {
     return (
-        <span className="grid size-8 place-items-center rounded-full bg-[#6e6e73] text-[11px] font-semibold text-white dark:bg-[#48484a]">
+        <GrainAvatar seed={name} className="size-8 text-[11px]">
             {initials(name)}
-        </span>
+        </GrainAvatar>
     );
 }
 

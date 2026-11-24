@@ -10,9 +10,10 @@ import { type ReactNode, useEffect } from "react";
 import type { I18n } from "./i18n";
 import type { KcContext } from "./KcContext";
 import { isAdminLogin } from "./isAdminLogin";
-import logoUrl from "./assets/e-suiss-avatar.png";
 import { fillSlot } from "./fillSlot";
 import { EnvBadge } from "../shared/EnvBadge";
+import { BRAND_GRADIENT, Grain } from "../shared/brand";
+import logoUrl from "./assets/e-suiss-avatar.png";
 
 export default function Template(props: TemplateProps<KcContext, I18n>) {
     const {
@@ -157,8 +158,17 @@ export default function Template(props: TemplateProps<KcContext, I18n>) {
 
     return (
         <div className={clsx("relative flex min-h-svh w-full flex-col items-center bg-background px-7.5 text-foreground", "kc-page")}>
-            <EnvBadge environment={environment} className="absolute top-4 left-6 md:top-6" />
-            <div className="flex w-full max-w-85 flex-1 flex-col items-center pt-14 pb-10 md:max-w-100 md:justify-center md:pt-10">
+            <div
+                aria-hidden
+                className={clsx(
+                    "pointer-events-none absolute inset-x-0 top-0 h-[420px] overflow-hidden opacity-35 [mask-image:radial-gradient(ellipse_70%_100%_at_50%_0%,black_20%,transparent_75%)] dark:opacity-25",
+                    BRAND_GRADIENT
+                )}
+            >
+                <Grain className="z-0" />
+            </div>
+            <EnvBadge environment={environment} className="absolute top-4 left-6 z-10 md:top-6" />
+            <div className="relative flex w-full max-w-85 flex-1 flex-col items-center pt-14 pb-10 md:max-w-100 md:justify-center md:pt-10">
                 <main className={clsx("flex w-full flex-col items-center text-center", "kc-card")}>
                     <img src={logoUrl} alt="e-suiss" className="size-11" />
                     {headerNode !== null &&

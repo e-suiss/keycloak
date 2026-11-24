@@ -45,6 +45,7 @@ import { useT } from "../ui/i18n";
 import { useRealm } from "../ui/realm";
 import { initials } from "../ui/util";
 import { PermissionsPanel, useFineGrainedV1 } from "./groups/PermissionsPanel";
+import { GrainAvatar } from "../../shared/brand";
 
 const TABS = [
     { value: "details", label: "sxRoleDetailTabDetails" },
@@ -788,9 +789,9 @@ function UsersTab({ role }: any) {
                                 <Row
                                     key={u.id}
                                     leading={
-                                        <span className="grid size-8 place-items-center rounded-full bg-[#6e6e73] text-[11px] font-semibold text-white dark:bg-[#48484a]">
+                                        <GrainAvatar seed={u.username} className="size-8 text-[11px]">
                                             {initials(u.username)}
-                                        </span>
+                                        </GrainAvatar>
                                     }
                                     title={u.username}
                                     subtitle={u.email || "—"}

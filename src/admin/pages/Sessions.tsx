@@ -40,6 +40,7 @@ import { useTranslation } from "react-i18next";
 import { useT } from "../ui/i18n";
 import { useRealm } from "../ui/realm";
 import { adminFetch, initials } from "../ui/util";
+import { GrainAvatar } from "../../shared/brand";
 
 const PAGE = 50;
 const FILTERS = [
@@ -301,9 +302,9 @@ function SessionRow({ s, busy, onSignOut }: any) {
     return (
         <Row
             leading={
-                <span className="grid size-8 place-items-center rounded-full bg-[#6e6e73] text-[11px] font-semibold text-white dark:bg-[#48484a]">
+                <GrainAvatar seed={s.username} className="size-8 text-[11px]">
                     {initials(s.username)}
-                </span>
+                </GrainAvatar>
             }
             title={s.username || t("sxSessionsUnknownUser")}
             subtitle={

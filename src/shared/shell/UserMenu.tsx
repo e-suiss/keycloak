@@ -6,6 +6,7 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger
 } from "@ui/components/dropdown-menu";
+import { GrainAvatar } from "../brand";
 
 export function initials(name: string) {
     return (
@@ -33,9 +34,11 @@ export function UserMenu({ name, email, items, signOutLabel, onSignOut }: UserMe
                 <button
                     type="button"
                     aria-label={name}
-                    className="grid size-7 shrink-0 place-items-center rounded-full bg-[#6e6e73] text-[11px] font-semibold text-white outline-none focus-visible:ring-2 focus-visible:ring-ring/50 sm:size-7.5 sm:text-xs dark:bg-[#48484a]"
+                    className="size-7 shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/50 sm:size-7.5"
                 >
-                    {initials(name)}
+                    <GrainAvatar seed={name} className="size-full text-[11px] sm:text-xs">
+                        {initials(name)}
+                    </GrainAvatar>
                 </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent

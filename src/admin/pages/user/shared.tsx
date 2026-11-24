@@ -20,6 +20,7 @@ import { i18n } from "../../i18n/i18n";
 import { useT } from "../../ui/i18n";
 import { GROUP, ListSkeleton, Notice, Row, SEPARATOR } from "../../ui/kit";
 import { initials } from "../../ui/util";
+import { GrainAvatar } from "../../../shared/brand";
 
 export const DANGER_BUTTON =
     "bg-[#d70015] text-white hover:bg-[#d70015]/90 dark:bg-[#ff453a] dark:hover:bg-[#ff453a]/90";
@@ -69,9 +70,9 @@ export function formatRelative(v: any) {
 
 export function Monogram({ name }: { name: string }) {
     return (
-        <span className="grid size-8 place-items-center rounded-full bg-[#6e6e73] text-[11px] font-semibold text-white dark:bg-[#48484a]">
+        <GrainAvatar seed={name} className="size-8 text-[11px]">
             {initials(name)}
-        </span>
+        </GrainAvatar>
     );
 }
 
