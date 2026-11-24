@@ -170,3 +170,12 @@
     }
   }
 }
+
+@keyframes sx-reveal {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

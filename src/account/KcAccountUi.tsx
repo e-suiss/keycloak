@@ -19,6 +19,7 @@ import { environment } from "./environment";
 import { i18n } from "./i18n/i18n";
 import { Root } from "./root/Root";
 import { AccountSkeleton } from "./root/Skeleton";
+import { DelayedReveal } from "../shared/DelayedReveal";
 
 
 const prI18nInitialized = i18n.init();
@@ -36,7 +37,7 @@ export default function KcAccountUi() {
     }
 
     return (
-        <KeycloakProvider environment={environment} fallback={<AccountSkeleton />}>
+        <KeycloakProvider environment={environment} fallback={<DelayedReveal><AccountSkeleton /></DelayedReveal>}>
             <Root />
             <SessionExpirationWarningOverlay warnUserSecondsBeforeAutoLogout={45} />
         </KeycloakProvider>
