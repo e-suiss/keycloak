@@ -43,16 +43,17 @@ type ShellProps = {
     header: ReactNode;
     sidebar: ReactNode;
     menuLabel: string;
+    wide?: boolean;
 };
 
-export function Shell({ header, sidebar, menuLabel, children }: PropsWithChildren<ShellProps>) {
+export function Shell({ header, sidebar, menuLabel, wide, children }: PropsWithChildren<ShellProps>) {
     const [open, setOpen] = useState(false);
     const drawer = useMemo(() => ({ open, setOpen }), [open]);
 
     return (
         <NavDrawerContext.Provider value={drawer}>
             <div className="min-h-svh bg-background text-foreground">
-                <div className="mx-auto flex min-h-svh w-full max-w-[1248px]">
+                <div className={cn("mx-auto flex min-h-svh w-full", wide ? "max-w-[calc((100vw+1248px)/2)]" : "max-w-[1248px]")}>
                     <aside
                         className={`sticky top-0 hidden h-svh w-60 shrink-0 flex-col overflow-y-auto border-e px-3 pb-5 sm:flex ${HAIRLINE}`}
                     >

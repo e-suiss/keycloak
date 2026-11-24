@@ -28,13 +28,8 @@ export function AdminPage({
     width?: "narrow" | "default" | "wide";
 }) {
     return (
-        <div className="flex justify-center px-5 pt-6 pb-12 sm:px-10 sm:pt-12">
-            <div
-                className={cn(
-                    "w-full",
-                    width === "narrow" ? "max-w-110" : width === "wide" ? "max-w-[1040px]" : "max-w-[880px]"
-                )}
-            >
+        <div className="flex justify-center px-5 pt-6 pb-12 sm:px-8 sm:pt-9 lg:px-10">
+            <div className={cn("w-full", width === "narrow" && "max-w-2xl")}>
                 {back && (
                     <Link
                         to={back.to}
@@ -369,8 +364,8 @@ export function Pager({
 
 export function PageSkeleton() {
     return (
-        <div aria-busy="true" className="flex justify-center px-5 pt-6 pb-12 sm:px-10 sm:pt-12">
-            <div className="w-full max-w-[880px]">
+        <div aria-busy="true" className="flex justify-center px-5 pt-6 pb-12 sm:px-8 sm:pt-9 lg:px-10">
+            <div className="w-full">
                 <Bar className="h-7 w-48" />
                 <Bar className="mt-3 h-4 w-80 max-w-full" />
                 <div className="mt-7 flex flex-col gap-6">
@@ -389,7 +384,7 @@ export function AppSkeleton() {
     const sections = [6, 4, 6, 2];
     return (
         <div className="min-h-svh bg-background">
-            <div className="mx-auto flex min-h-svh w-full max-w-[1248px]">
+            <div className="mx-auto flex min-h-svh w-full max-w-[calc((100vw+1248px)/2)]">
                 <aside className="sticky top-0 hidden h-svh w-60 shrink-0 flex-col border-e border-[#e5e5ea] px-3 pb-5 sm:flex dark:border-[#38383a]">
                     <div className="-mx-3 mb-3.5 flex h-15 shrink-0 items-center gap-2 border-b border-[#e5e5ea] px-5.5 dark:border-[#38383a]">
                         <span className="size-5.5 shrink-0 rounded-full bg-muted-foreground" />

@@ -121,6 +121,30 @@ function useActive() {
     return (to: string) => pathname === to || pathname.startsWith(`${to}/`);
 }
 
+const GRAIN = `url("data:image/svg+xml,${encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1.4 -0.2"/></filter><rect width="100%" height="100%" filter="url(#n)"/></svg>'
+)}")`;
+
+function RealmOrb({ name }: { name?: string }) {
+    let hash = 0;
+    for (const char of name || "") hash = (hash * 31 + char.charCodeAt(0)) | 0;
+    const hue = Math.abs(hash) % 360;
+    const shift = (delta: number) => (hue + delta + 360) % 360;
+    return (
+        <span
+            aria-hidden
+            className="size-4.5 shrink-0 rounded-full shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.35),inset_0_-2px_4px_rgba(0,0,0,0.18),0_1px_2px_rgba(0,0,0,0.15)]"
+            style={{
+                background: [
+                    `radial-gradient(circle at 30% 25%, hsl(${shift(50)} 100% 88% / 0.95) 0%, transparent 45%)`,
+                    `radial-gradient(circle at 80% 85%, hsl(${shift(-40)} 90% 45%) 0%, transparent 60%)`,
+                    `conic-gradient(from 210deg at 50% 50%, hsl(${hue} 90% 62%), hsl(${shift(60)} 90% 64%), hsl(${shift(-30)} 85% 58%), hsl(${hue} 90% 62%))`
+                ].join(", ")
+            }}
+        />
+    );
+}
+
 function RealmPicker() {
     const t = useT();
     const { adminClient } = useAdminClient();
@@ -154,28 +178,35 @@ function RealmPicker() {
 
     const current = realms?.find(r => r.realm === realm);
     const label = (r: any) => (r?.displayName && !/^\$\{.*\}$/.test(r.displayName) ? r.displayName : r?.realm);
+
+    useEffect(() => {
+        document.title = `${label(current) || realm} · ${t("sxConsoleTitle")}`;
+    }, [current, realm, t]);
     const filtered = (realms || []).filter(r =>
         `${r.realm} ${r.displayName || ""}`.toLowerCase().includes(query.trim().toLowerCase())
     );
 
     return (
         <DropdownMenu onOpenChange={open => !open && setQuery("")}>
-            <DropdownMenuTrigger asChild>
-                <button
-                    type="button"
-                    aria-label={t("sxRealmSelect")}
-                    className="mb-1 flex h-12 w-full items-center gap-2.5 rounded-xl border border-[#e5e5ea] bg-[#f5f5f7] px-3 text-left outline-none transition-colors hover:bg-[#e5e5ea]/60 focus-visible:ring-2 focus-visible:ring-ring/50 dark:border-[#38383a] dark:bg-[#1c1c1e] dark:hover:bg-[#2c2c2e]"
-                >
-                    <span className="grid size-6 shrink-0 place-items-center rounded-md bg-primary text-[11px] font-semibold text-white uppercase">
-                        {(realm || "?").charAt(0)}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                        <span className="block text-[11px] leading-tight text-muted-foreground">{t("sxRealmCurrent")}</span>
-                        <span className="block truncate text-sm font-medium leading-tight">{label(current) || realm}</span>
-                    </span>
-                    <CaretUpDownIcon className="size-4 shrink-0 text-muted-foreground" />
-                </button>
-            </DropdownMenuTrigger>
+            <div className="relative isolate mb-1 shrink-0 overflow-hidden rounded-xl bg-[#dbba95] bg-[radial-gradient(circle_at_18%_22%,#ff5005_0%,#dbba95_48%,#d0bce1_100%)] bg-no-repeat p-1">
+                <div
+                    aria-hidden
+                    className="pointer-events-none absolute inset-0 -z-10 opacity-45 mix-blend-overlay"
+                    style={{ backgroundImage: GRAIN }}
+                />
+                <div className="px-1.5 pt-0.5 pb-1 text-[10.5px] font-medium leading-tight text-black/60">{t("sxRealmCurrent")}</div>
+                <DropdownMenuTrigger asChild>
+                    <button
+                        type="button"
+                        aria-label={t("sxRealmSelect")}
+                        className="flex h-8 w-full items-center gap-2 rounded-lg border border-black/5 bg-white/85 px-2 text-left shadow-[0_1px_2px_rgba(0,0,0,0.06)] outline-none transition-colors hover:bg-white focus-visible:ring-2 focus-visible:ring-ring/50 dark:border-white/10 dark:bg-[#1c1c1e]/85 dark:hover:bg-[#1c1c1e]"
+                    >
+                        <RealmOrb name={realm} />
+                        <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{label(current) || realm}</span>
+                        <CaretUpDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                    </button>
+                </DropdownMenuTrigger>
+            </div>
             <DropdownMenuContent
                 align="start"
                 sideOffset={6}
@@ -221,6 +252,7 @@ function RealmPicker() {
                                     if (r.realm !== realm) navigate(`/${encodeURIComponent(r.realm)}/dashboard`);
                                 }}
                             >
+                                <RealmOrb name={r.realm} />
                                 <span className="min-w-0 flex-1 truncate">{label(r)}</span>
                                 {r.realm === realm && <CheckIcon className="size-4 text-primary" />}
                             </DropdownMenuItem>
@@ -379,7 +411,7 @@ export function AdminShell({ children }: PropsWithChildren) {
     const t = useT();
     return (
         <WhoAmIProvider>
-            <Shell header={<AdminHeader />} sidebar={<AdminNav />} menuLabel={t("sxMenu")}>
+            <Shell wide header={<AdminHeader />} sidebar={<AdminNav />} menuLabel={t("sxMenu")}>
                 <Banners />
                 {children}
             </Shell>
